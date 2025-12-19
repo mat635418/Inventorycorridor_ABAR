@@ -139,7 +139,7 @@ if sales_file and demand_file and lt_file:
             data[['Product', 'Location', 'Future_Forecast_Month', 'Forecast_Quantity', 'Safety_Stock', 'Min_Corridor', 'Max_Corridor']],
             use_container_width=True,
             hide_index=True,
-            height=1000
+            height=2000
         )
 
 else:
