@@ -88,15 +88,33 @@ if s_file and d_file and lt_file:
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        net = Network(height="1000px", width="100%", directed=True)
-        sku_net = network_ref[network_ref['Product'] == sku]
-        for _, r in sku_net.iterrows():
-            net.add_node(r['From_Location'], label=r['From_Location'], color='#31333F')
-            net.add_node(r['To_Location'], label=r['To_Location'], color='#ff4b4b')
-            net.add_edge(r['From_Location'], r['To_Location'])
+        st.subheader(f"Supply Chain Network for {sku}")
+        net = Network(height="850px", width="100%", directed=True, bgcolor="#eeeeee")
+        
+        # Filter data for selected SKU
+        sku_lt = network_ref[network_ref['Product'] == sku]
+        sku_demand = raw_demand[raw_demand['Product'] == sku]
+        
+        # Add Nodes with Raw Demand info
+        nodes = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
+        for n in nodes:
+            # Find the raw demand for this specific node
+            d_val = sku_demand[sku_demand['Location'] == n]['Raw_Demand_Avg'].values
+            d_str = f"{int(d_val[0]):,}" if len(d_val) > 0 else "0"
+            
+            node_color = "#31333F" if n in sku_lt['From_Location'].values else "#ff4b4b"
+            net.add_node(n, label=f"{n}\n(Dem: {d_str})", title=f"Location: {n}\nAvg Monthly Demand: {d_str}", color=node_color, size=25)
+        
+        # Add Edges with Lead Time Labels
+        for _, r in sku_lt.iterrows():
+            net.add_edge(r['From_Location'], r['To_Location'], label=f"{r['Lead_Time_Days']} days", title=f"LT: {r['Lead_Time_Days']}d | SD: {r['Lead_Time_Std_Dev']}d")
+        
+        net.toggle_physics(True)
         net.save_graph("network.html")
-        components.html(open("network.html", 'r').read(), height=1000)
+        components.html(open("network.html", 'r').read(), height=850)
+        st.caption("⚫ Dark Node: Source/Parent | 🔴 Red Node: Destination | (Dem: X) = Raw Historical Demand")
 
+    
     with tab3:
         st.subheader("Global Inventory Plan - Dynamic Filters")
         
