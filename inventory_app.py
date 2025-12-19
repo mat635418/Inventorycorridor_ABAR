@@ -118,7 +118,7 @@ if sales_file and demand_file and lt_file:
     with tab2:
         st.subheader(f"Supply Chain Topology: {sku}")
         sku_lt = lt_full[lt_full['Product'] == sku]
-        net = Network(height="500px", width="100%", directed=True, bgcolor="#ffffff")
+        net = Network(height="1500px", width="100%", directed=True, bgcolor="#ffffff")
         
         nodes = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
         for n in nodes:
