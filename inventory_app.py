@@ -88,14 +88,14 @@ if s_file and d_file and lt_file:
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        net = Network(height="600px", width="100%", directed=True)
+        net = Network(height="1000px", width="100%", directed=True)
         sku_net = network_ref[network_ref['Product'] == sku]
         for _, r in sku_net.iterrows():
             net.add_node(r['From_Location'], label=r['From_Location'], color='#31333F')
             net.add_node(r['To_Location'], label=r['To_Location'], color='#ff4b4b')
             net.add_edge(r['From_Location'], r['To_Location'])
         net.save_graph("network.html")
-        components.html(open("network.html", 'r').read(), height=650)
+        components.html(open("network.html", 'r').read(), height=1000)
 
     with tab3:
         st.subheader("Global Inventory Plan - Dynamic Filters")
@@ -118,7 +118,7 @@ if s_file and d_file and lt_file:
         if f_month:
             filtered_df = filtered_df[filtered_df['Future_Forecast_Month'].isin(f_month)]
 
-        st.dataframe(filtered_df[['Product', 'Location', 'Future_Forecast_Month', 'Forecast_Quantity', 'Safety_Stock', 'Min_Corridor', 'Max_Corridor']], use_container_width=True)
+        st.dataframe(filtered_df[['Product', 'Location', 'Future_Forecast_Month', 'Forecast_Quantity', 'Safety_Stock', 'Min_Corridor', 'Max_Corridor']], use_container_width=True, height=1500)
         
         csv = filtered_df.to_csv(index=False).encode('utf-8')
         st.download_button("Download Filtered Plan", csv, "filtered_inventory_plan.csv", "text/csv")
