@@ -7,14 +7,13 @@ import streamlit.components.v1 as components
 from scipy.stats import norm
 
 # --- Page Config ---
-st.set_page_config(page_title="Supply Chain Corridor Pro", layout="wide")
+st.set_page_config(page_title="Time-Phased Inventory Corridor", layout="wide")
 
-st.title("🌐 Supply Chain Corridor & Network Pro")
-st.markdown("Advanced Inventory Optimization with Network Visualization.")
+st.title("📈 Time-Phased Inventory Corridor")
+st.markdown("Dynamic Safety Stock calculated per month based on Lead Time variability and Forecasted Demand.")
 
 # --- Helper Functions ---
 def clean_numeric(series):
-    """Cleans strings like ' 1,234 ' or ' - ' into floats."""
     return pd.to_numeric(
         series.astype(str).str.replace(',', '').str.replace('-', '0').str.strip(), 
         errors='coerce'
@@ -22,17 +21,17 @@ def clean_numeric(series):
 
 # --- Sidebar ---
 st.sidebar.header("⚙️ Optimization Parameters")
-# Defaulting to 99.5%
+# Defaulting to 99.5% service level
 service_level = st.sidebar.slider("Service Level (%)", 80.0, 99.9, 99.5, step=0.1)
 z_score = norm.ppf(service_level / 100)
 
 st.sidebar.header("📂 Data Upload")
-sales_file = st.sidebar.file_uploader("1. Sales Data (Historical)", type="csv")
-demand_file = st.sidebar.file_uploader("2. Demand Data (Future)", type="csv")
-lt_file = st.sidebar.file_uploader("3. Lead Time Data", type="csv")
+sales_file = st.sidebar.file_uploader("1. Sales Data (sales.csv)", type="csv")
+demand_file = st.sidebar.file_uploader("2. Demand Data (Demand.csv)", type="csv")
+lt_file = st.sidebar.file_uploader("3. Lead Time Data (Lead time.csv)", type="csv")
 
 def process_data(s_raw, d_raw, lt_raw):
-    # Clean Column Names
+    # Standardize column names (strip spaces)
     s_raw.columns = [c.strip() for c in s_raw.columns]
     d_raw.columns = [c.strip() for c in d_raw.columns]
     lt_raw.columns = [c.strip() for c in lt_raw.columns]
@@ -43,41 +42,40 @@ def process_data(s_raw, d_raw, lt_raw):
     lt_raw['Lead_Time_Days'] = clean_numeric(lt_raw['Lead_Time_Days'])
     lt_raw['Lead_Time_Std_Dev'] = clean_numeric(lt_raw['Lead_Time_Std_Dev'])
 
-    # Aggregate Sales (Historical Volatility)
+    # 1. Calculate Historical Sales Volatility (per Product/Location)
     s_stats = s_raw.groupby(['Product', 'Location'])['Quantity'].agg(['mean', 'std']).reset_index()
-    s_stats.columns = ['Product', 'Location', 'Avg_Sales', 'Std_Sales']
+    s_stats.columns = ['Product', 'Location', 'Avg_Hist_Sales', 'Std_Hist_Sales']
     
-    # Aggregate Future Forecast (Trend)
-    d_stats = d_raw.groupby(['Product', 'Location'])['Forecast_Quantity'].mean().reset_index()
-    d_stats.rename(columns={'Forecast_Quantity': 'Avg_Forecast'}, inplace=True)
+    # 2. Prepare Lead Time Data (per Product/To_Location)
+    lt_stats = lt_raw.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
+    lt_stats.rename(columns={'To_Location': 'Location', 'Lead_Time_Days': 'LT_Avg', 'Lead_Time_Std_Dev': 'LT_SD'}, inplace=True)
 
-    # Aggregate Lead Times (Handle multiple sources for one location)
-    lt_stats = lt_raw.groupby(['Product', 'To_Loc'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
-    lt_stats.rename(columns={'To_Loc': 'Location', 'Lead_Time_Days': 'LT_Avg', 'Lead_Time_Std_Dev': 'LT_SD'}, inplace=True)
-
-    # Merge
-    merged = pd.merge(s_stats, d_stats, on=['Product', 'Location'], how='inner')
+    # 3. Merge Demand with Stats to calculate Time-Phased Safety Stock
+    # This keeps multiple rows per month for each SKU/Loc
+    merged = pd.merge(d_raw, s_stats, on=['Product', 'Location'], how='left')
     merged = pd.merge(merged, lt_stats, on=['Product', 'Location'], how='left')
     
-    # Fill missing LT data
-    merged['LT_Avg'] = merged['LT_Avg'].fillna(merged['LT_Avg'].mean() if not merged['LT_Avg'].isna().all() else 30)
+    # Handle missing values
+    merged['Std_Hist_Sales'] = merged['Std_Hist_Sales'].fillna(0)
+    merged['LT_Avg'] = merged['LT_Avg'].fillna(30)
     merged['LT_SD'] = merged['LT_SD'].fillna(5)
 
-    # SAFETY STOCK CALCULATION (Monthly normalization)
-    # SS = Z * sqrt( (LT/30)*Std_Sales^2 + Avg_Sales^2*(LT_SD/30)^2 )
+    # 4. TIME-PHASED CALCULATION
+    # SS_t = Z * sqrt( (LT/30)*Std_Sales^2 + Forecast_t^2*(LT_SD/30)^2 )
     lt_m = merged['LT_Avg'] / 30
     ltsd_m = merged['LT_SD'] / 30
+    
     merged['Safety_Stock'] = z_score * np.sqrt(
-        (lt_m * (merged['Std_Sales']**2)) + 
-        ((merged['Avg_Sales']**2) * (ltsd_m**2))
+        (lt_m * (merged['Std_Hist_Sales']**2)) + 
+        ((merged['Forecast_Quantity']**2) * (ltsd_m**2))
     )
     
     merged['Min_Corridor'] = merged['Safety_Stock']
-    merged['Max_Corridor'] = merged['Safety_Stock'] + merged['Avg_Forecast']
+    merged['Max_Corridor'] = merged['Safety_Stock'] + merged['Forecast_Quantity']
     
     return merged, s_raw, d_raw, lt_raw
 
-# --- MAIN APP LOGIC ---
+# --- Main App ---
 if sales_file and demand_file and lt_file:
     df_s, df_d, df_lt = pd.read_csv(sales_file), pd.read_csv(demand_file), pd.read_csv(lt_file)
     data, s_full, d_full, lt_full = process_data(df_s, df_d, df_lt)
@@ -85,62 +83,63 @@ if sales_file and demand_file and lt_file:
     tab1, tab2, tab3 = st.tabs(["📉 Corridor Analysis", "🌐 Network Topology", "📋 Global Summary"])
 
     with tab1:
-        col1, col2 = st.columns(2)
-        sku = col1.selectbox("Select SKU", options=sorted(data['Product'].unique()))
-        loc = col2.selectbox("Select Location", options=sorted(data[data['Product']==sku]['Location'].unique()))
+        c1, c2 = st.columns(2)
+        sku = c1.selectbox("Select SKU", options=sorted(data['Product'].unique()))
+        loc = c2.selectbox("Select Location", options=sorted(data[data['Product']==sku]['Location'].unique()))
         
-        row = data[(data['Product'] == sku) & (data['Location'] == loc)].iloc[0]
+        # Filter data for chart
+        sku_loc_data = data[(data['Product'] == sku) & (data['Location'] == loc)].sort_values('Future_Forecast_Month')
         
-        # Metrics
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Safety Stock", f"{row['Safety_Stock']:.0f}")
-        m2.metric("LT Average (Days)", f"{row['LT_Avg']:.1f}")
-        m3.metric("Sales Volatility (SD)", f"{row['Std_Sales']:.1f}")
-        m4.metric("Z-Score", f"{z_score:.2f}")
-
         # Plotly Corridor
-        hist_data = s_full[(s_full['Product']==sku) & (s_full['Location']==loc)]['Quantity'].tolist()
-        future_data = d_full[(d_full['Product']==sku) & (d_full['Location']==loc)]['Forecast_Quantity'].tolist()
-        
-        x_axis = [f"H{i}" for i in range(len(hist_data))] + [f"F{i}" for i in range(len(future_data))]
-        
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=x_axis, y=[row['Max_Corridor']]*len(x_axis), mode='lines', line_color='rgba(0,0,0,0)', showlegend=False))
-        fig.add_trace(go.Scatter(x=x_axis, y=[row['Min_Corridor']]*len(x_axis), fill='tonexty', fillcolor='rgba(0, 123, 255, 0.1)', name='Ideal Corridor', line_color='rgba(0,0,0,0)'))
-        fig.add_trace(go.Scatter(x=x_axis[:len(hist_data)], y=hist_data, name='Historical Sales', line=dict(color='black', width=2)))
-        fig.add_trace(go.Scatter(x=x_axis[len(hist_data)-1:], y=[hist_data[-1]] + future_data, name='Future Forecast', line=dict(color='blue', dash='dot')))
+
+        # Shaded Corridor
+        fig.add_trace(go.Scatter(
+            x=sku_loc_data['Future_Forecast_Month'], y=sku_loc_data['Max_Corridor'],
+            mode='lines', line_color='rgba(0,0,0,0)', showlegend=False
+        ))
+        fig.add_trace(go.Scatter(
+            x=sku_loc_data['Future_Forecast_Month'], y=sku_loc_data['Min_Corridor'],
+            fill='tonexty', fillcolor='rgba(0, 123, 255, 0.15)', name='Target Inventory Corridor',
+            line_color='rgba(0,0,0,0)'
+        ))
+
+        # Lines
+        fig.add_trace(go.Scatter(x=sku_loc_data['Future_Forecast_Month'], y=sku_loc_data['Forecast_Quantity'], 
+                                 name='Forecast', line=dict(color='blue', width=2)))
+        fig.add_trace(go.Scatter(x=sku_loc_data['Future_Forecast_Month'], y=sku_loc_data['Safety_Stock'], 
+                                 name='Safety Stock (Time-Phased)', line=dict(color='red', dash='dash')))
         
-        fig.update_layout(title=f"Inventory Corridor for {sku} at {loc}", hovermode="x unified", height=450)
+        fig.update_layout(title=f"Time-Phased Corridor: {sku} @ {loc}", hovermode="x unified", height=500)
         st.plotly_chart(fig, use_container_width=True)
+        
+        st.info("💡 The Safety Stock (red line) now adjusts every month based on the forecasted volume and lead time uncertainty.")
 
     with tab2:
-        st.subheader(f"Network Map: {sku}")
+        st.subheader(f"Supply Chain Topology: {sku}")
         sku_lt = lt_full[lt_full['Product'] == sku]
-        
         net = Network(height="500px", width="100%", directed=True, bgcolor="#ffffff")
         
-        # Add Nodes
-        all_nodes = set(sku_lt['From_Loc']).union(set(sku_lt['To_Loc']))
-        for n in all_nodes:
-            color = "#ff4b4b" if n in sku_lt['To_Loc'].values else "#31333F"
-            net.add_node(n, label=n, color=color, size=20)
+        nodes = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
+        for n in nodes:
+            # Color destinations differently
+            node_color = "#ff4b4b" if n in sku_lt['To_Location'].values else "#31333F"
+            net.add_node(n, label=n, color=node_color, size=20)
             
-        # Add Edges
         for _, r in sku_lt.iterrows():
-            net.add_edge(r['From_Loc'], r['To_Loc'], title=f"LT: {r['Lead_Time_Days']} days", label=f"{r['Lead_Time_Days']}d")
+            net.add_edge(r['From_Location'], r['To_Location'], label=f"{r['Lead_Time_Days']}d")
             
         net.save_graph("net.html")
         components.html(open("net.html", 'r').read(), height=550)
-        st.caption("🔴 Red = Destination (To_Loc) | ⚫ Black = Source (From_Loc)")
 
     with tab3:
-        st.subheader("Inventory Summary: All Combinations")
-        # Modern formatted dataframe
+        st.subheader("Global Time-Phased Inventory Plan")
+        # Show the full table of all combinations and months
         st.dataframe(
-            data[['Product', 'Location', 'Avg_Sales', 'Std_Sales', 'LT_Avg', 'Safety_Stock', 'Min_Corridor', 'Max_Corridor']],
+            data[['Product', 'Location', 'Future_Forecast_Month', 'Forecast_Quantity', 'Safety_Stock', 'Min_Corridor', 'Max_Corridor']],
             use_container_width=True,
             hide_index=True
         )
 
 else:
-    st.info("🚀 Please upload Sales, Demand, and Lead Time CSVs in the sidebar to begin.")
+    st.info("👋 Please upload your CSV files to see the time-phased corridor.")
