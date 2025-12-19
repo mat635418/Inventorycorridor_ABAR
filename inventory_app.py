@@ -137,7 +137,7 @@ if s_file and d_file and lt_file:
             'Product', 'Location', 'Future_Forecast_Month', 
             'Agg_Demand_Hist', 'Forecast_Quantity', 
             'Safety_Stock', 'Max_Corridor'
-        ]], use_container_width=True, height=1500, width="75%")
+        ]], use_container_width=True, height=1500)
         
         csv = filtered_df.to_csv(index=False).encode('utf-8')
         st.download_button("Download Filtered Results", csv, "filtered_inventory_plan.csv", "text/csv")
