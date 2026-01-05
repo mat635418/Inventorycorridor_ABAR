@@ -120,10 +120,14 @@ if s_file and d_file and lt_file:
     # 4. Final Calculations
     # Safety Stock formula accounting for Lead Time variability and Demand variability
     results['Safety_Stock'] = (z * np.sqrt(
-        (results['LT_Mean']/30) * (results['Agg_Std_Hist']**2) + 
-        (results['LT_Std']**2) * (results['Agg_Future_Demand']/30)**2
+    (results['LT_Mean']/30) * (results['Agg_Std_Hist']**2) + 
+    (results['LT_Std']**2) * (results['Agg_Future_Demand']/30)**2
     )).round(0)
-    
+
+    # --- NEW: Force B616 to zero ---
+    results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0
+    # ------------------------------
+
     results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast_Quantity']
 
     # --- Tabs ---
