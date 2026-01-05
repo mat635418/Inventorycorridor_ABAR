@@ -151,31 +151,48 @@ if s_file and d_file and lt_file:
         st.dataframe(filtered_df[['Product', 'Location', 'Future_Forecast_Month', 'Forecast_Quantity', 'Agg_Future_Demand', 'Safety_Stock', 'Max_Corridor']], use_container_width=True)
 
     with tab4:
-        st.subheader("⚖️ Network Efficiency & Risk Dashboard")
-        st.markdown("This analysis identifies locations where Safety Stock is high relative to Local Forecast, often caused by upstream lead time variability.")
+  
+        st.subheader(f"⚖️ Efficiency Snapshot: {next_month}")
         
-        # Calculate SS as % of Forecast
-        eff_df = results[results['Product'] == sku].copy()
-        eff_df['SS_as_Percent_of_Forecast'] = (eff_df['Safety_Stock'] / eff_df['Forecast_Quantity'].replace(0, np.nan) * 100).fillna(0)
+        # Filter data ONLY for the next month and selected SKU
+        eff_df = results[(results['Product'] == sku) & (results['Future_Forecast_Month'] == next_month)].copy()
         
+        # Calculate Metrics
+        eff_df['SS_to_Fcst_Ratio'] = (eff_df['Safety_Stock'] / eff_df['Forecast_Quantity'].replace(0, np.nan)).fillna(0)
+        total_ss = eff_df['Safety_Stock'].sum()
+        avg_ratio = eff_df['SS_to_Fcst_Ratio'].mean()
+        high_risk_nodes = eff_df[eff_df['SS_to_Fcst_Ratio'] > 1.5].shape[0]
+
+        # Metric Row
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Safety Stock (Units)", f"{int(total_ss):,}")
+        m2.metric("Avg SS-to-Forecast Ratio", f"{avg_ratio:.2f}")
+        m3.metric("High Buffering Locations", high_risk_nodes, help="Locations where Safety Stock is >150% of local forecast.")
+
+        st.divider()
+
         c1, c2 = st.columns([2, 1])
         
         with c1:
-            # Scatter plot: Forecast vs Safety Stock
-            fig_eff = px.scatter(eff_df, x="Forecast_Quantity", y="Safety_Stock", color="Location",
-                                 size="Agg_Future_Demand", hover_data=["Future_Forecast_Month"],
-                                 title=f"Safety Stock vs Local Forecast for {sku}")
+            st.markdown(f"**Inventory Positioning for {sku}**")
+            fig_eff = px.scatter(eff_df, 
+                                 x="Forecast_Quantity", 
+                                 y="Safety_Stock", 
+                                 color="Location",
+                                 size="Agg_Future_Demand", 
+                                 hover_name="Location",
+                                 labels={"Forecast_Quantity": "Local Forecast Demand", "Safety_Stock": "Proposed Safety Stock"},
+                                 title="Safety Stock vs. Demand (Bubble size = Total Network Demand)")
             st.plotly_chart(fig_eff, use_container_width=True)
             
         with c2:
-            # Top "Stock Heavy" Locations
-            avg_ss_pct = eff_df.groupby('Location')['SS_as_Percent_of_Forecast'].mean().sort_values(ascending=False).reset_index()
-            st.write("**Top 5 Nodes by SS-to-Forecast Ratio**")
-            st.table(avg_ss_pct.head(5).rename(columns={'SS_as_Percent_of_Forecast': 'Avg SS %'}))
+            st.markdown("**Top Stock-Heavy Locations**")
+            # Ranking by the ratio calculated for this month
+            heavy_ranking = eff_df.sort_values('SS_to_Fcst_Ratio', ascending=False)[['Location', 'Safety_Stock', 'SS_to_Fcst_Ratio']]
+            st.dataframe(heavy_ranking.head(10).style.format({'SS_to_Fcst_Ratio': '{:.2f}'}), use_container_width=True)
             
-        st.divider()
-        st.markdown("**Insight:** Nodes with high SS but low local forecast are likely serving as 'Network Buffers' for downstream locations.")
+        st.info("💡 **Tip:** Nodes in the top-left of the scatter plot have low local demand but high safety stock. This usually indicates they are critical 'transfer hubs' where lead time uncertainty from suppliers is being absorbed to protect the rest of the network.")
 
-        # Download
-        csv = results.to_csv(index=False).encode('utf-8')
-        st.download_button("Download Full Optimization Data", csv, "inventory_optimization_full.csv", "text/csv")
+        # Download button for just this month's plan
+        csv_month = eff_df.to_csv(index=False).encode('utf-8')
+        st.download_button(f"Export {next_month} Optimization Plan", csv_month, f"plan_{next_month}.csv", "text/csv")
