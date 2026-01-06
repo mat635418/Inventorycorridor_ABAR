@@ -1,7 +1,3 @@
-**Implementing and adjusting metrics**
-
-I need to calculate APE (%) and add it to the `hist` dataframe, along with other key metrics. For `mape`, `wape`, `bias`, and `TS`, I'll compute them using existing columns, and make sure that the calculations hold by ensuring no zeroes in the quantities. I'll need to integrate the new Month/Year field properly while ensuring old code doesn’t break. This also means updating references to this new column across the board. Adjustments are required for tabs too, but no new imports or libraries, just the ones already in place. Let’s finalize this script, ensuring everything works smoothly.
-```python
 import streamlit as st
 import pandas as pd
 import numpy as np
