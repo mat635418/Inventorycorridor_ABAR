@@ -95,12 +95,12 @@ d_file = st.sidebar.file_uploader("2. Demand Data (Future Forecast)", type="csv"
 lt_file = st.sidebar.file_uploader("3. Lead Time Data (Network Routes)", type="csv")
 
 if s_file and d_file and lt_file:
+    # --- Load and clean base data ---
     df_s, df_d, df_lt = pd.read_csv(s_file), pd.read_csv(d_file), pd.read_csv(lt_file)
     for df in [df_s, df_d, df_lt]:
         df.columns = [c.strip() for c in df.columns]
     
-    # --- Use Month/Year from sales and align with forecast ---
-    # Assuming the new column in sales.csv is named exactly "Month/Year"
+    # New field in sales: "Month/Year"
     df_s['Month_Year'] = pd.to_datetime(df_s['Month/Year'])
     df_d['Future_Forecast_Month'] = pd.to_datetime(df_d['Future_Forecast_Month'])
 
@@ -109,24 +109,22 @@ if s_file and d_file and lt_file:
     df_lt['Lead_Time_Days'] = clean_numeric(df_lt['Lead_Time_Days'])
     df_lt['Lead_Time_Std_Dev'] = clean_numeric(df_lt['Lead_Time_Std_Dev'])
 
-    # Calculate historical stats for variability
+    # --- Historical stats for variability ---
     stats = df_s.groupby(['Product', 'Location'])['Quantity'].agg(['mean', 'std']).reset_index()
     stats.columns = ['Product', 'Location', 'Local_Mean', 'Local_Std']
     stats['Local_Std'] = stats['Local_Std'].fillna(stats['Local_Mean'] * 0.2)
 
-    # 1. Calculate Aggregated Network Demand
+    # 1. Aggregated Network Demand
     network_stats = aggregate_network_stats(df_d, stats, df_lt)
 
-    # 2. Process Lead Times per node
+    # 2. Lead Times per node
     node_lt = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
     node_lt.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
 
-    # 3. CORRECTED MERGE LOGIC: 
-    # Use network_stats as the left table to keep nodes with 0 direct forecast.
+    # 3. Merge to build result table
     results = pd.merge(network_stats, df_d, on=['Product', 'Location', 'Future_Forecast_Month'], how='left')
     results = pd.merge(results, node_lt, on=['Product', 'Location'], how='left')
     
-    # Fill values for hubs and external locations
     results = results.fillna({
         'Forecast_Quantity': 0, 
         'Agg_Std_Hist': 0, 
@@ -135,21 +133,18 @@ if s_file and d_file and lt_file:
         'Agg_Future_Demand': 0
     })
     
-    # 4. Final Calculations
-    # Safety Stock formula accounting for Lead Time variability and Demand variability
+    # 4. Final inventory calculations
     results['Safety_Stock'] = (z * np.sqrt(
         (results['LT_Mean'] / 30) * (results['Agg_Std_Hist']**2) + 
         (results['LT_Std']**2) * (results['Agg_Future_Demand'] / 30)**2
     )).round(0)
 
-    # --- NEW: Force B616 to zero ---
+    # Force B616 to zero
     results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0
-    # ------------------------------
 
     results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast_Quantity']
 
     # --- Historical Forecast Accuracy (Actuals vs Forecast) ---
-    # Merge actuals from sales with forecasts on month/product/location
     hist = pd.merge(
         df_s[['Product', 'Location', 'Month_Year', 'Quantity']],
         df_d[['Product', 'Location', 'Future_Forecast_Month', 'Forecast_Quantity']],
@@ -159,12 +154,10 @@ if s_file and d_file and lt_file:
     )
 
     hist['Forecast_Quantity'] = hist['Forecast_Quantity'].fillna(0)
-
-    # Basic error metrics per period
-    hist['Deviation'] = hist['Quantity'] - hist['Forecast_Quantity']  # Actual - Forecast
+    hist['Deviation'] = hist['Quantity'] - hist['Forecast_Quantity']
     hist['Abs_Error'] = hist['Deviation'].abs()
     hist['Accuracy_%'] = (1 - (hist['Abs_Error'] / hist['Quantity'].replace(0, np.nan))).fillna(0) * 100
-    hist['APE_%'] = (hist['Abs_Error'] / hist['Quantity'].replace(0, np.nan)).fillna(0) * 100  # per-period APE (for MAPE)
+    hist['APE_%'] = (hist['Abs_Error'] / hist['Quantity'].replace(0, np.nan)).fillna(0) * 100
 
     # --- Tabs ---
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -175,6 +168,7 @@ if s_file and d_file and lt_file:
         "📉 Forecast Accuracy"
     ])
     
+    # -------- Tab 1: Inventory Corridor --------
     with tab1:
         sku = st.selectbox("Product", sorted(results['Product'].unique()))
         loc = st.selectbox("Location", sorted(results[results['Product'] == sku]['Location'].unique()))
@@ -208,9 +202,14 @@ if s_file and d_file and lt_file:
                 line=dict(color='blue', dash='dash')
             )
         ])
-        fig.update_layout(title=f"Inventory Plan for {sku} at {loc}", xaxis_title="Month", yaxis_title="Units")
+        fig.update_layout(
+            title=f"Inventory Plan for {sku} at {loc}",
+            xaxis_title="Month",
+            yaxis_title="Units"
+        )
         st.plotly_chart(fig, use_container_width=True)
 
+    # -------- Tab 2: Network Topology --------
     with tab2:
         st.info("Nodes with 0 direct forecast (Hubs) are now included and show aggregated network demand.")
         next_month = sorted(results['Future_Forecast_Month'].unique())[0]
@@ -231,7 +230,6 @@ if s_file and d_file and lt_file:
                 f"SS: {int(m['Safety_Stock'])}"
             )
             
-            # Color coding: Gray for suppliers/hubs, Red for customer-facing nodes
             color = '#31333F' if n in sku_lt['From_Location'].values else '#ff4b4b'
             net.add_node(n, label=label_text, title=label_text, color=color, shape='box', font={'color': 'white'})
 
@@ -241,6 +239,7 @@ if s_file and d_file and lt_file:
         net.save_graph("net.html")
         components.html(open("net.html", 'r').read(), height=950)
 
+    # -------- Tab 3: Full Plan --------
     with tab3:
         st.subheader("Global Inventory Plan")
         col1, col2, col3 = st.columns(3)
@@ -275,6 +274,7 @@ if s_file and d_file and lt_file:
             height=1000
         )
 
+    # -------- Tab 4: Efficiency Analysis --------
     with tab4:
         st.subheader(f"⚖️ Efficiency Snapshot: {next_month}")
         eff_df = results[(results['Product'] == sku) & (results['Future_Forecast_Month'] == next_month)].copy()
@@ -308,10 +308,10 @@ if s_file and d_file and lt_file:
             heavy_ranking = eff_df.sort_values('Safety_Stock', ascending=False)[['Location', 'Safety_Stock', 'Forecast_Quantity']]
             st.dataframe(heavy_ranking.head(10), use_container_width=True)
 
+    # -------- Tab 5: Forecast Accuracy --------
     with tab5:
         st.subheader("📉 Historical Forecast vs Actuals")
 
-        # Selectors for product/location
         sku_hist = st.selectbox("Product", sorted(hist['Product'].unique()), key="h1")
         loc_hist = st.selectbox(
             "Location",
@@ -321,26 +321,18 @@ if s_file and d_file and lt_file:
 
         hdf = hist[(hist['Product'] == sku_hist) & (hist['Location'] == loc_hist)].sort_values('Month_Year')
 
-        # --- Aggregate accuracy metrics for this plant/material ---
         total_actual = hdf['Quantity'].replace(0, np.nan).sum()
         total_abs_error = hdf['Abs_Error'].sum()
         total_error = hdf['Deviation'].sum()
 
-        # MAPE: mean of APE_%
         mape = hdf['APE_%'].mean() if not hdf.empty else 0.0
-
-        # WAPE: sum(|error|) / sum(actual)
         wape = (total_abs_error / total_actual * 100) if total_actual and not np.isnan(total_actual) else 0.0
-
-        # Bias: signed error as % of total actuals
         bias = (total_error / total_actual * 100) if total_actual and not np.isnan(total_actual) else 0.0
 
-        # Tracking Signal: cumulative error / MAD
         mad = hdf['Abs_Error'].mean() if not hdf.empty else 0.0
         cumulative_error = hdf['Deviation'].cumsum().iloc[-1] if not hdf.empty else 0.0
         tracking_signal = cumulative_error / mad if mad != 0 else 0.0
 
-        # --- Top level KPIs ---
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("MAPE (%)", f"{mape:.1f}")
         k2.metric("WAPE (%)", f"{wape:.1f}")
@@ -349,7 +341,6 @@ if s_file and d_file and lt_file:
 
         st.divider()
 
-        # --- Time series plot: Actual vs Forecast + Deviation ---
         fig_hist = go.Figure([
             go.Scatter(
                 x=hdf['Month_Year'],
