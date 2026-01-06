@@ -138,7 +138,7 @@ if s_file and d_file and lt_file:
         next_month = sorted(results['Future_Forecast_Month'].unique())[0]
         label_data = results[(results['Future_Forecast_Month'] == next_month) & (results['Product'] == sku)].set_index('Location').to_dict('index')
 
-        net = Network(height="650px", width="100%", directed=True, bgcolor="#ffffff", font_color="black")
+        net = Network(height="950px", width="100%", directed=True, bgcolor="#ffffff", font_color="black")
         sku_lt = df_lt[df_lt['Product'] == sku]
         all_nodes = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
         
@@ -149,7 +149,7 @@ if s_file and d_file and lt_file:
             color = '#31333F' if is_hub else '#ff4b4b'
             
             # FIXED SIZE NODES
-            net.add_node(n, label=label_text, title=label_text, color=color, shape='dot', size=25)
+            net.add_node(n, label=label_text, title=label_text, color=color, shape='dot', size=15)
 
         for _, r in sku_lt.iterrows():
             net.add_edge(r['From_Location'], r['To_Location'], label=f"{r['Lead_Time_Days']}d", color="#888888")
@@ -160,7 +160,7 @@ if s_file and d_file and lt_file:
             with open(tmp.name, 'r', encoding='utf-8') as f:
                 html_content = f.read()
             os.unlink(tmp.name)
-        components.html(html_content, height=700)
+        components.html(html_content, height=900)
 
     with tab3:
         st.subheader(f"Global Inventory Plan: {sku}")
