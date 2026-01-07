@@ -98,7 +98,7 @@ zero_if_no_net_fcst = st.sidebar.checkbox("Force Zero SS if No Network Demand", 
 
 # Rule 2: Capping logic relative to Network Demand
 apply_cap = st.sidebar.checkbox("Enable SS Capping (% of Network Demand)", value=True)
-cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (50, 200), help="Ensures SS stays between these % of total network demand for that node.")
+cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200), help="Ensures SS stays between these % of total network demand for that node.")
 
 st.sidebar.markdown("---")
 s_file = st.sidebar.file_uploader("1. Sales Data (Historical)", type="csv")
