@@ -212,7 +212,7 @@ if s_file and d_file and lt_file:
         next_month = sorted(results['Period'].unique())[0]
         label_data = results[results['Period'] == next_month].set_index(['Product', 'Location']).to_dict('index')
         sku_lt = df_lt[df_lt['Product'] == sku]
-        net = Network(height="700px", width="100%", directed=True, bgcolor="#eeeeee")
+        net = Network(height="900px", width="100%", directed=True, bgcolor="#eeeeee")
         all_nodes = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
         for n in all_nodes:
             m = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
@@ -222,7 +222,7 @@ if s_file and d_file and lt_file:
         for _, r in sku_lt.iterrows():
             net.add_edge(r['From_Location'], r['To_Location'], label=f"{r['Lead_Time_Days']}d")
         net.save_graph("net.html")
-        components.html(open("net.html").read(), height=750)
+        components.html(open("net.html").read(), height=950)
 
     with tab3:
         st.subheader("📋 Global Inventory Plan")
