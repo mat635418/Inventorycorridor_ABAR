@@ -1,4 +1,4 @@
-import streamlit as st
+    import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -208,7 +208,7 @@ if s_file and d_file and lt_file:
         ])
         st.plotly_chart(fig, use_container_width=True)
 
-with tab2:
+    with tab2:
         next_month = sorted(results['Period'].unique())[0]
         label_data = results[results['Period'] == next_month].set_index(['Product', 'Location']).to_dict('index')
         sku_lt = df_lt[df_lt['Product'] == sku]
@@ -246,7 +246,7 @@ with tab2:
         net.save_graph("net.html")
         components.html(open("net.html").read(), height=950)
 
-with tab3:
+    with tab3:
         st.subheader("📋 Global Inventory Plan")
         # --- RE-INTRODUCED FILTERS ---
         col1, col2, col3 = st.columns(3)
