@@ -263,23 +263,55 @@ if s_file and d_file and lt_file:
 
     with tab4:
         st.subheader(f"⚖️ Efficiency & Policy Analysis: {next_month}")
+        
+        # Filter for the selected SKU and current period
         eff = results[(results['Product'] == sku) & (results['Period'] == next_month)].copy()
+        
+        # --- NEW RATIO CALCULATIONS ---
+        # 1. Node Level Ratio (SS / Local Forecast)
+        eff['SS_to_FCST_Ratio'] = (eff['Safety_Stock'] / eff['Forecast'].replace(0, np.nan)).fillna(0)
+        
+        # 2. Material/Network Level (Total for the selected SKU across all nodes)
+        total_ss_sku = eff['Safety_Stock'].sum()
+        total_fcst_sku = eff['Forecast'].sum()
+        sku_ratio = total_ss_sku / total_fcst_sku if total_fcst_sku > 0 else 0
+        
+        # 3. Full Global Network Level (All Products in the system)
+        all_res = results[results['Period'] == next_month]
+        global_ratio = all_res['Safety_Stock'].sum() / all_res['Forecast'].replace(0, np.nan).sum()
+        # ------------------------------
+
+        # Display Top-Level Metrics
+        m1, m2, m3 = st.columns(3)
+        m1.metric(f"Network Ratio ({sku})", f"{sku_ratio:.2f}")
+        m2.metric("Global Network Ratio (All Items)", f"{global_ratio:.2f}")
+        m3.metric("Total SS for Material", f"{int(total_ss_sku)}")
+
+        st.markdown("---")
+
         c1, c2 = st.columns([2, 1])
         with c1:
             fig_eff = px.scatter(
                 eff, x="Agg_Future_Demand", y="Safety_Stock", color="Adjustment_Status",
-                size="Agg_Future_Demand", hover_name="Location",
+                size="SS_to_FCST_Ratio", hover_name="Location", # Bubble size now represents the ratio
                 color_discrete_map={'Optimal (Statistical)': '#00CC96', 'Capped (High)': '#EF553B', 'Capped (Low)': '#636EFA', 'Forced to Zero': '#AB63FA'},
-                title="Policy Impact: Network Demand vs Safety Stock"
+                title=f"Policy Impact & Efficiency Ratio (Bubble Size = SS/FCST Ratio)"
             )
             st.plotly_chart(fig_eff, use_container_width=True)
+            
         with c2:
             st.markdown("**Status Breakdown**")
             st.table(eff['Adjustment_Status'].value_counts())
-            st.markdown("**Top Adjusted Nodes**")
+            
+            st.markdown("**Top Nodes by Efficiency Gap**")
             eff['Gap'] = (eff['Safety_Stock'] - eff['SS_Raw']).abs()
-            st.dataframe(eff.sort_values('Gap', ascending=False)[['Location','Adjustment_Status','SS_Raw','Safety_Stock']].head(10))
-
+            # Added SS_to_FCST_Ratio to the detailed dataframe view
+            st.dataframe(
+                eff.sort_values('Gap', ascending=False)[
+                    ['Location','Adjustment_Status','Safety_Stock','SS_to_FCST_Ratio']
+                ].head(10), 
+                use_container_width=True
+            )
     with tab5:
         st.subheader("📉 Historical Forecast vs Actuals")
         h_sku = st.selectbox("Select Product", sorted(hist['Product'].unique()), key="h1")
