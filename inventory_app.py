@@ -87,7 +87,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 # ---------------------------------------------------------
 # SESSION STATE INITIALIZATION
 # ---------------------------------------------------------
-# This ensures data persists after button clicks
+# This ensures data persists even after interacting with sliders
 if 'df_s' not in st.session_state: st.session_state.df_s = None
 if 'df_d' not in st.session_state: st.session_state.df_d = None
 if 'df_lt' not in st.session_state: st.session_state.df_lt = None
@@ -108,27 +108,26 @@ cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200))
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Input")
 
-# TRIGGER BUTTON
-if st.sidebar.button("🚀 Load Sample Data (from Folder)"):
+# --- LOAD SAMPLE DATA BUTTON ---
+if st.sidebar.button("🚀 Load Sample Data (from SharePoint folder)"):
+    # Note: For this to work, you must have downloaded these 3 files to your app folder
     try:
-        # Update these filenames to match your local copies of the SharePoint files
         if os.path.exists("sales.csv") and os.path.exists("demand.csv") and os.path.exists("leadtime.csv"):
             st.session_state.df_s = pd.read_csv("sales.csv")
             st.session_state.df_d = pd.read_csv("demand.csv")
             st.session_state.df_lt = pd.read_csv("leadtime.csv")
-            st.sidebar.success("✅ Files loaded successfully!")
+            st.sidebar.success("✅ Sample files loaded!")
         else:
-            st.sidebar.error("❌ Files not found in local directory. Please ensure sales.csv, demand.csv, and leadtime.csv are in the same folder.")
+            st.sidebar.error("❌ Sample files not found in the local folder. Please download and rename them to sales.csv, demand.csv, and leadtime.csv.")
     except Exception as e:
-        st.sidebar.error(f"Error: {e}")
+        st.sidebar.error(f"Error loading files: {e}")
 
-st.sidebar.write("---")
-# MANUAL UPLOAD OPTION
+st.sidebar.markdown("**OR Upload Manually:**")
 s_file = st.sidebar.file_uploader("1. Sales Data (Historical)", type="csv")
 d_file = st.sidebar.file_uploader("2. Demand Data (Future Forecast)", type="csv")
 lt_file = st.sidebar.file_uploader("3. Lead Time Data (Network Routes)", type="csv")
 
-# If user uploads a file manually, it overwrites the sample data
+# Manual uploads override sample data
 if s_file: st.session_state.df_s = pd.read_csv(s_file)
 if d_file: st.session_state.df_d = pd.read_csv(d_file)
 if lt_file: st.session_state.df_lt = pd.read_csv(lt_file)
@@ -136,9 +135,10 @@ if lt_file: st.session_state.df_lt = pd.read_csv(lt_file)
 # ---------------------------------------------------------
 # MAIN LOGIC
 # ---------------------------------------------------------
+# Check if we have all three datasets either from samples or uploads
 if st.session_state.df_s is not None and st.session_state.df_d is not None and st.session_state.df_lt is not None:
 
-    # Create local copies to manipulate
+    # Use copies from session state
     df_s = st.session_state.df_s.copy()
     df_d = st.session_state.df_d.copy()
     df_lt = st.session_state.df_lt.copy()
@@ -172,7 +172,9 @@ if st.session_state.df_s is not None and st.session_state.df_d is not None and s
     results = pd.merge(results, node_lt, on=['Product', 'Location'], how='left')
     results = results.fillna({'Forecast': 0, 'Agg_Std_Hist': 0, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
 
-    # SAFETY STOCK CALCULATION
+    # -----------------------------
+    # RULE-BASED SAFETY STOCK LOGIC
+    # -----------------------------
     results['SS_Raw'] = (
         z * np.sqrt(
             (results['LT_Mean'] / 30) * (results['Agg_Std_Hist']**2) +
@@ -221,9 +223,9 @@ if st.session_state.df_s is not None and st.session_state.df_d is not None and s
         loc = st.selectbox("Location", sorted(results[results['Product'] == sku]['Location'].unique()))
         plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
         fig = go.Figure([
-            go.Scatter(x=plot_df['Period'], y=plot_df['Max_Corridor'], name='Max Corridor', line=dict(width=0)),
+            go.Scatter(x=plot_df['Period'], y=plot_df['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=0)),
             go.Scatter(x=plot_df['Period'], y=plot_df['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
-            go.Scatter(x=plot_df['Period'], y=plot_df['Forecast'], name='Local Forecast', line=dict(color='black', dash='dot')),
+            go.Scatter(x=plot_df['Period'], y=plot_df['Forecast'], name='Local Direct Forecast', line=dict(color='black', dash='dot')),
             go.Scatter(x=plot_df['Period'], y=plot_df['Agg_Future_Demand'], name='Total Network Demand', line=dict(color='blue', dash='dash'))
         ])
         st.plotly_chart(fig, use_container_width=True)
@@ -266,12 +268,10 @@ if st.session_state.df_s is not None and st.session_state.df_d is not None and s
         sku_ratio = total_ss_sku / total_fcst_sku if total_fcst_sku > 0 else 0
         all_res = results[results['Period'] == next_month]
         global_ratio = all_res['Safety_Stock'].sum() / all_res['Forecast'].replace(0, np.nan).sum()
-
         m1, m2, m3 = st.columns(3)
         m1.metric(f"Network Ratio ({sku})", f"{sku_ratio:.2f}")
         m2.metric("Global Network Ratio", f"{global_ratio:.2f}")
         m3.metric("Total SS for Material", f"{int(total_ss_sku)}")
-
         c1, c2 = st.columns([2, 1])
         with c1:
             fig_eff = px.scatter(eff, x="Agg_Future_Demand", y="Safety_Stock", color="Adjustment_Status", size="SS_to_FCST_Ratio", hover_name="Location", title="Policy Impact & Efficiency")
@@ -300,4 +300,5 @@ if st.session_state.df_s is not None and st.session_state.df_d is not None and s
             st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']], use_container_width=True)
 
 else:
-    st.info("Please upload all three CSV files OR click the 'Load Sample Data' button in the sidebar.")
+    # This info message now appears because the sidebar elements ARE rendered
+    st.info("Please upload all three CSV files OR click 'Load Sample Data' in the sidebar to begin.")
