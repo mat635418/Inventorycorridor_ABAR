@@ -6,331 +6,216 @@ import plotly.express as px
 from pyvis.network import Network
 import streamlit.components.v1 as components
 from scipy.stats import norm
-import os
 
-# ---------------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------------
+# --- Page Config ---
 st.set_page_config(page_title="Multi-Echelon Inventory Optimizer", layout="wide")
 st.title("📊 Multi-Echelon Network Inventory Optimizer")
 
-# ---------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------
+# --- Helper Functions ---
 def clean_numeric(series):
-    """Cleans strings/objects into numeric values, handling formatting issues."""
     return pd.to_numeric(
-        series.astype(str)
-        .str.replace(',', '')
-        .str.replace('(', '-')
-        .str.replace(')', '')
-        .str.replace('-', '0')
-        .str.strip(),
+        series.astype(str).str.replace(',', '').str.replace('(', '-').str.replace(')', '').str.replace('-', '0').str.strip(), 
         errors='coerce'
     ).fillna(0)
 
 def aggregate_network_stats(df_forecast, df_stats, df_lt):
-    """Propagates demand and variance up the supply chain network."""
     results = []
-    months = df_forecast['Period'].unique()
+    months = df_forecast['Future_Forecast_Month'].unique()
     
     for month in months:
-        df_month = df_forecast[df_forecast['Period'] == month]
+        df_month = df_forecast[df_forecast['Future_Forecast_Month'] == month]
         for prod in df_forecast['Product'].unique():
+            # Filter data for this specific product
             p_stats = df_stats[df_stats['Product'] == prod].set_index('Location').to_dict('index')
             p_fore = df_month[df_month['Product'] == prod].set_index('Location').to_dict('index')
             p_lt = df_lt[df_lt['Product'] == prod]
-
+            
+            # Critical: Include ALL nodes (those with forecast AND those only in lead time routes)
             nodes = set(df_month[df_month['Product'] == prod]['Location']).union(
                 set(p_lt['From_Location'])
             ).union(
                 set(p_lt['To_Location'])
             )
+            
+            if not nodes: continue
 
-            if not nodes:
-                continue
-
-            agg_demand = {n: p_fore.get(n, {'Forecast': 0})['Forecast'] for n in nodes}
+            # Initialize demand and variance
+            agg_demand = {n: p_fore.get(n, {'Forecast_Quantity': 0})['Forecast_Quantity'] for n in nodes}
             agg_var = {n: (p_stats.get(n, {'Local_Std': 0})['Local_Std'])**2 for n in nodes}
-
+            
+            # Map parent-child relationships
             children = {}
             for _, row in p_lt.iterrows():
-                children.setdefault(row['From_Location'], []).append(row['To_Location'])
-
-            for _ in range(15):
+                if row['From_Location'] not in children: children[row['From_Location']] = []
+                children[row['From_Location']].append(row['To_Location'])
+                
+            # Propagate demand up the network (Iterative approach)
+            for _ in range(15): # Increased iterations for deeper networks
                 changed = False
                 for parent in nodes:
                     if parent in children:
-                        new_d = p_fore.get(parent, {'Forecast': 0})['Forecast'] + \
-                                sum(agg_demand.get(c, 0) for c in children[parent])
-                        new_v = (p_stats.get(parent, {'Local_Std': 0})['Local_Std'])**2 + \
-                                sum(agg_var.get(c, 0) for c in children[parent])
-
+                        # Parent demand = Local Forecast + Sum of children's aggregated demand
+                        new_d = p_fore.get(parent, {'Forecast_Quantity': 0})['Forecast_Quantity'] + sum(agg_demand.get(c, 0) for c in children[parent])
+                        new_v = (p_stats.get(parent, {'Local_Std': 0})['Local_Std'])**2 + sum(agg_var.get(c, 0) for c in children[parent])
+                        
                         if abs(new_d - agg_demand[parent]) > 0.01:
-                            agg_demand[parent] = new_d
-                            agg_var[parent] = new_v
+                            agg_demand[parent], agg_var[parent] = new_d, new_v
                             changed = True
-                if not changed:
-                    break
-
+                if not changed: break
+                
             for n in nodes:
                 results.append({
-                    'Product': prod,
-                    'Location': n,
-                    'Period': month,
-                    'Agg_Future_Demand': agg_demand[n],
+                    'Product': prod, 
+                    'Location': n, 
+                    'Future_Forecast_Month': month,
+                    'Agg_Future_Demand': agg_demand[n], 
                     'Agg_Std_Hist': np.sqrt(agg_var[n])
                 })
-
     return pd.DataFrame(results)
 
-# ---------------------------------------------------------
-# SESSION STATE INITIALIZATION
-# ---------------------------------------------------------
-if 'df_s' not in st.session_state: 
-    st.session_state.df_s = None
-if 'df_d' not in st.session_state: 
-    st.session_state.df_d = None
-if 'df_lt' not in st.session_state: 
-    st.session_state.df_lt = None
-
-# ---------------------------------------------------------
-# SIDEBAR
-# ---------------------------------------------------------
+# --- Sidebar Parameter & File Upload ---
 st.sidebar.header("⚙️ Parameters")
-service_level = st.sidebar.slider("Service Level (%)", 90.0, 99.9, 99.0) / 100
+service_level = st.sidebar.slider("Service Level (%)", 90.0, 99.9, 99.0)/100
 z = norm.ppf(service_level)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🛡️ Safety Stock Rules")
-zero_if_no_net_fcst = st.sidebar.checkbox("Force Zero SS if No Network Demand", value=True)
-apply_cap = st.sidebar.checkbox("Enable SS Capping (% of Network Demand)", value=True)
-cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200))
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("📂 Data Input")
-
-
-
-
-
-
-
-
-
-
-# --- LOAD SAMPLE DATA BUTTON (NO EMOJI VERSION) ---
-
-st.sidebar.write("TEXT BEFORE BUTTON")
-test_button = st.sidebar.button("TEST BUTTON 123")
-st.sidebar.write(f"Button returned: {test_button}")
-st.sidebar.write("TEXT AFTER BUTTON")
-
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("Data Input")
-
-# Add some space
-st.sidebar.write("")
-
-# Try with a unique key
-if st.sidebar.button("Load Sample Data", key="load_btn_unique"):
-    try:
-        files_to_check = ["sales.csv", "demand.csv", "leadtime.csv"]
-        missing_files = [f for f in files_to_check if not os.path.exists(f)]
-        
-        if missing_files:
-            st.sidebar.error(f"Missing files: {', '.join(missing_files)}")
-        else:
-            st.session_state.df_s = pd.read_csv("sales.csv")
-            st.session_state.df_d = pd.read_csv("demand.csv")
-            st.session_state.df_lt = pd.read_csv("leadtime.csv")
-            st.sidebar.success("Sample files loaded!")
-            st.rerun()
-    except Exception as e:
-        st.sidebar.error(f"Error: {str(e)}")
-
-st.sidebar.write("")  # Add space after button
-st.sidebar.markdown("**OR Upload Manually:**")
-
 
 s_file = st.sidebar.file_uploader("1. Sales Data (Historical)", type="csv")
 d_file = st.sidebar.file_uploader("2. Demand Data (Future Forecast)", type="csv")
 lt_file = st.sidebar.file_uploader("3. Lead Time Data (Network Routes)", type="csv")
 
-# Manual uploads override sample data
-if s_file: 
-    st.session_state.df_s = pd.read_csv(s_file)
-if d_file: 
-    st.session_state.df_d = pd.read_csv(d_file)
-if lt_file: 
-    st.session_state.df_lt = pd.read_csv(lt_file)
-
-# ---------------------------------------------------------
-# MAIN LOGIC
-# ---------------------------------------------------------
-if st.session_state.df_s is not None and st.session_state.df_d is not None and st.session_state.df_lt is not None:
-
-    # Use copies from session state
-    df_s = st.session_state.df_s.copy()
-    df_d = st.session_state.df_d.copy()
-    df_lt = st.session_state.df_lt.copy()
-
-    for df in [df_s, df_d, df_lt]:
-        df.columns = [c.strip() for c in df.columns]
-
-    df_s['Period'] = pd.to_datetime(df_s['Period']).dt.to_period('M').dt.to_timestamp()
-    df_d['Period'] = pd.to_datetime(df_d['Period']).dt.to_period('M').dt.to_timestamp()
-
-    df_s['Consumption'] = clean_numeric(df_s['Consumption'])
-    df_s['Forecast'] = clean_numeric(df_s['Forecast'])
-    df_d['Forecast'] = clean_numeric(df_d['Forecast'])
+if s_file and d_file and lt_file:
+    df_s, df_d, df_lt = pd.read_csv(s_file), pd.read_csv(d_file), pd.read_csv(lt_file)
+    for df in [df_s, df_d, df_lt]: df.columns = [c.strip() for c in df.columns]
+    
+    df_s['Quantity'] = clean_numeric(df_s['Quantity'])
+    df_d['Forecast_Quantity'] = clean_numeric(df_d['Forecast_Quantity'])
     df_lt['Lead_Time_Days'] = clean_numeric(df_lt['Lead_Time_Days'])
     df_lt['Lead_Time_Std_Dev'] = clean_numeric(df_lt['Lead_Time_Std_Dev'])
 
-    # HISTORICAL VARIABILITY
-    stats = df_s.groupby(['Product', 'Location'])['Consumption'].agg(['mean', 'std']).reset_index()
+    # Calculate historical stats for variability
+    stats = df_s.groupby(['Product', 'Location'])['Quantity'].agg(['mean', 'std']).reset_index()
     stats.columns = ['Product', 'Location', 'Local_Mean', 'Local_Std']
     stats['Local_Std'] = stats['Local_Std'].fillna(stats['Local_Mean'] * 0.2)
 
-    # NETWORK AGGREGATION
-    network_stats = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt)
+    # 1. Calculate Aggregated Network Demand
+    network_stats = aggregate_network_stats(df_d, stats, df_lt)
 
-    # LEAD TIME RECEIVING NODES
+    # 2. Process Lead Times per node
     node_lt = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
     node_lt.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
 
-    # MERGE
-    results = pd.merge(network_stats, df_d[['Product', 'Location', 'Period', 'Forecast']], on=['Product', 'Location', 'Period'], how='left')
+    # 3. CORRECTED MERGE LOGIC: 
+    # Use network_stats as the left table to keep nodes with 0 direct forecast.
+    results = pd.merge(network_stats, df_d, on=['Product', 'Location', 'Future_Forecast_Month'], how='left')
     results = pd.merge(results, node_lt, on=['Product', 'Location'], how='left')
-    results = results.fillna({'Forecast': 0, 'Agg_Std_Hist': 0, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
-
-    # -----------------------------
-    # RULE-BASED SAFETY STOCK LOGIC
-    # -----------------------------
-    results['SS_Raw'] = (
-        z * np.sqrt(
-            (results['LT_Mean'] / 30) * (results['Agg_Std_Hist']**2) +
-            (results['LT_Std']**2) * (results['Agg_Future_Demand'] / 30)**2
-        )
-    )
     
-    results['Adjustment_Status'] = 'Optimal (Statistical)'
-    results['Safety_Stock'] = results['SS_Raw']
+    # Fill values for hubs and external locations
+    results = results.fillna({
+        'Forecast_Quantity': 0, 
+        'Agg_Std_Hist': 0, 
+        'LT_Mean': 7, 
+        'LT_Std': 2, 
+        'Agg_Future_Demand': 0
+    })
+    
+    # 4. Final Calculations
+    # Safety Stock formula accounting for Lead Time variability and Demand variability
+    results['Safety_Stock'] = (z * np.sqrt(
+    (results['LT_Mean']/30) * (results['Agg_Std_Hist']**2) + 
+    (results['LT_Std']**2) * (results['Agg_Future_Demand']/30)**2
+    )).round(0)
 
-    if zero_if_no_net_fcst:
-        zero_mask = (results['Agg_Future_Demand'] <= 0)
-        results.loc[zero_mask, 'Adjustment_Status'] = 'Forced to Zero'
-        results.loc[zero_mask, 'Safety_Stock'] = 0
+    # --- NEW: Force B616 to zero ---
+    results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0
+    # ------------------------------
 
-    if apply_cap:
-        l_cap, u_cap = cap_range[0] / 100, cap_range[1] / 100
-        l_lim, u_lim = results['Agg_Future_Demand'] * l_cap, results['Agg_Future_Demand'] * u_cap
-        high_mask = (results['Safety_Stock'] > u_lim) & (results['Adjustment_Status'] == 'Optimal (Statistical)')
-        results.loc[high_mask, 'Adjustment_Status'] = 'Capped (High)'
-        low_mask = (results['Safety_Stock'] < l_lim) & (results['Adjustment_Status'] == 'Optimal (Statistical)') & (results['Agg_Future_Demand'] > 0)
-        results.loc[low_mask, 'Adjustment_Status'] = 'Capped (Low)'
-        results['Safety_Stock'] = results['Safety_Stock'].clip(lower=l_lim, upper=u_lim)
+    results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast_Quantity']
 
-    results['Safety_Stock'] = results['Safety_Stock'].round(0)
-    results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0 
-    results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast']
-
-    # ACCURACY DATA
-    hist = df_s[['Product', 'Location', 'Period', 'Consumption', 'Forecast']].copy()
-    hist.rename(columns={'Forecast': 'Forecast_Hist'}, inplace=True)
-    hist['Deviation'] = hist['Consumption'] - hist['Forecast_Hist']
-    hist['Abs_Error'] = hist['Deviation'].abs()
-    hist['APE_%'] = (hist['Abs_Error'] / hist['Consumption'].replace(0, np.nan)).fillna(0) * 100
-    hist['Accuracy_%'] = (1 - hist['APE_%'] / 100) * 100
-
-    # ---------------------------------------------------------
-    # TABS
-    # ---------------------------------------------------------
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Inventory Corridor", "🕸️ Network Topology", "📋 Full Plan", "⚖️ Efficiency Analysis", "📉 Forecast Accuracy"
-    ])
-
+    # --- Tabs ---
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Inventory Corridor", "🕸️ Network Topology", "📋 Full Plan", "⚖️ Efficiency Analysis"])
+    
     with tab1:
         sku = st.selectbox("Product", sorted(results['Product'].unique()))
-        loc = st.selectbox("Location", sorted(results[results['Product'] == sku]['Location'].unique()))
-        plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
+        loc = st.selectbox("Location", sorted(results[results['Product']==sku]['Location'].unique()))
+        
+        plot_df = results[(results['Product']==sku) & (results['Location']==loc)].sort_values('Future_Forecast_Month')
+        
         fig = go.Figure([
-            go.Scatter(x=plot_df['Period'], y=plot_df['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=0)),
-            go.Scatter(x=plot_df['Period'], y=plot_df['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
-            go.Scatter(x=plot_df['Period'], y=plot_df['Forecast'], name='Local Direct Forecast', line=dict(color='black', dash='dot')),
-            go.Scatter(x=plot_df['Period'], y=plot_df['Agg_Future_Demand'], name='Total Network Demand', line=dict(color='blue', dash='dash'))
+            go.Scatter(x=plot_df['Future_Forecast_Month'], y=plot_df['Max_Corridor'], name='Max Corridor (SS + Local Forecast)', line=dict(width=0)),
+            go.Scatter(x=plot_df['Future_Forecast_Month'], y=plot_df['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
+            go.Scatter(x=plot_df['Future_Forecast_Month'], y=plot_df['Forecast_Quantity'], name='Local Direct Forecast', line=dict(color='black', dash='dot')),
+            go.Scatter(x=plot_df['Future_Forecast_Month'], y=plot_df['Agg_Future_Demand'], name='Total Network Demand (Aggregated)', line=dict(color='blue', dash='dash'))
         ])
+        fig.update_layout(title=f"Inventory Plan for {sku} at {loc}", xaxis_title="Month", yaxis_title="Units")
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        next_month = sorted(results['Period'].unique())[0]
-        label_data = results[results['Period'] == next_month].set_index(['Product', 'Location']).to_dict('index')
-        sku_lt = df_lt[df_lt['Product'] == sku]
+        st.info("Nodes with 0 direct forecast (Hubs) are now included and show aggregated network demand.")
+        next_month = sorted(results['Future_Forecast_Month'].unique())[0]
+        label_data = results[results['Future_Forecast_Month'] == next_month].set_index(['Product', 'Location']).to_dict('index')
+
         net = Network(height="900px", width="100%", directed=True, bgcolor="#eeeeee")
+        sku_lt = df_lt[df_lt['Product'] == sku]
+        
+        # Include all nodes mentioned in routes for this SKU
         all_nodes = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
+        
         for n in all_nodes:
-            m = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
-            node_color = '#DDDDDD' if m['Agg_Future_Demand'] == 0 else ('#31333F' if n in sku_lt['From_Location'].values else '#ff4b4b')
-            font_color = '#888888' if m['Agg_Future_Demand'] == 0 else 'white'
-            label = f"{n}\nFcst: {int(m['Forecast'])}\nNet: {int(m['Agg_Future_Demand'])}\nSS: {int(m['Safety_Stock'])}"
-            net.add_node(n, label=label, title=label, color=node_color, shape='box', font={'color': font_color})
+            m = label_data.get((sku, n), {'Forecast_Quantity': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
+            label_text = (f"{n}\n"
+                          f"Local: {int(m['Forecast_Quantity'])}\n"
+                          f"Net: {int(m['Agg_Future_Demand'])}\n"
+                          f"SS: {int(m['Safety_Stock'])}")
+            
+            # Color coding: Gray for suppliers/hubs, Red for customer-facing nodes
+            color = '#31333F' if n in sku_lt['From_Location'].values else '#ff4b4b'
+            net.add_node(n, label=label_text, title=label_text, color=color, shape='box', font={'color': 'white'})
+
         for _, r in sku_lt.iterrows():
             net.add_edge(r['From_Location'], r['To_Location'], label=f"{r['Lead_Time_Days']}d")
+            
         net.save_graph("net.html")
-        components.html(open("net.html").read(), height=950)
+        components.html(open("net.html", 'r').read(), height=950)
 
     with tab3:
-        st.subheader("📋 Global Inventory Plan")
+        st.subheader("Global Inventory Plan")
         col1, col2, col3 = st.columns(3)
-        f_prod = col1.multiselect("Filter Product", sorted(results['Product'].unique()))
-        f_loc = col2.multiselect("Filter Location", sorted(results['Location'].unique()))
-        f_period = col3.multiselect("Filter Period", sorted(results['Period'].unique()))
-        filtered = results.copy()
-        if f_prod: filtered = filtered[filtered['Product'].isin(f_prod)]
-        if f_loc: filtered = filtered[filtered['Location'].isin(f_loc)]
-        if f_period: filtered = filtered[filtered['Period'].isin(f_period)]
-        st.dataframe(filtered[['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']], use_container_width=True, height=700)
+        with col1: f_prod = st.multiselect("Filter Product", sorted(results['Product'].unique()), key="f1")
+        with col2: f_loc = st.multiselect("Filter Location", sorted(results['Location'].unique()), key="f2")
+        with col3: f_month = st.multiselect("Filter Month", sorted(results['Future_Forecast_Month'].unique()), key="f3")
+
+        filtered_df = results.copy()
+        if f_prod: filtered_df = filtered_df[filtered_df['Product'].isin(f_prod)]
+        if f_loc: filtered_df = filtered_df[filtered_df['Location'].isin(f_loc)]
+        if f_month: filtered_df = filtered_df[filtered_df['Future_Forecast_Month'].isin(f_month)]
+
+        st.dataframe(filtered_df[['Product', 'Location', 'Future_Forecast_Month', 'Forecast_Quantity', 'Agg_Future_Demand', 'Safety_Stock', 'Max_Corridor']], use_container_width=True, height=1000)
 
     with tab4:
-        st.subheader(f"⚖️ Efficiency & Policy Analysis: {next_month}")
-        eff = results[(results['Product'] == sku) & (results['Period'] == next_month)].copy()
-        eff['SS_to_FCST_Ratio'] = (eff['Safety_Stock'] / eff['Forecast'].replace(0, np.nan)).fillna(0)
-        total_ss_sku = eff['Safety_Stock'].sum()
-        total_fcst_sku = eff['Forecast'].sum()
-        sku_ratio = total_ss_sku / total_fcst_sku if total_fcst_sku > 0 else 0
-        all_res = results[results['Period'] == next_month]
-        global_ratio = all_res['Safety_Stock'].sum() / all_res['Forecast'].replace(0, np.nan).sum()
+        st.subheader(f"⚖️ Efficiency Snapshot: {next_month}")
+        eff_df = results[(results['Product'] == sku) & (results['Future_Forecast_Month'] == next_month)].copy()
+        
+        eff_df['SS_to_Fcst_Ratio'] = (eff_df['Safety_Stock'] / eff_df['Forecast_Quantity'].replace(0, np.nan)).fillna(0)
+        total_ss = eff_df['Safety_Stock'].sum()
+        avg_ratio = eff_df[eff_df['Forecast_Quantity'] > 0]['SS_to_Fcst_Ratio'].mean()
+        high_risk_nodes = eff_df[eff_df['SS_to_Fcst_Ratio'] > 1.5].shape[0]
+
         m1, m2, m3 = st.columns(3)
-        m1.metric(f"Network Ratio ({sku})", f"{sku_ratio:.2f}")
-        m2.metric("Global Network Ratio", f"{global_ratio:.2f}")
-        m3.metric("Total SS for Material", f"{int(total_ss_sku)}")
+        m1.metric("Total Safety Stock (Units)", f"{int(total_ss):,}")
+        m2.metric("Avg SS-to-Forecast Ratio", f"{avg_ratio:.2f}")
+        m3.metric("High Buffering Locations", high_risk_nodes)
+
+        st.divider()
         c1, c2 = st.columns([2, 1])
         with c1:
-            fig_eff = px.scatter(eff, x="Agg_Future_Demand", y="Safety_Stock", color="Adjustment_Status", size="SS_to_FCST_Ratio", hover_name="Location", title="Policy Impact & Efficiency")
+            fig_eff = px.scatter(eff_df, x="Forecast_Quantity", y="Safety_Stock", color="Location",
+                                 size="Agg_Future_Demand", hover_name="Location",
+                                 labels={"Forecast_Quantity": "Local Direct Demand", "Safety_Stock": "Proposed Safety Stock"},
+                                 title="Inventory Positioning: Local Demand vs Safety Stock")
             st.plotly_chart(fig_eff, use_container_width=True)
         with c2:
-            st.table(eff['Adjustment_Status'].value_counts())
-            eff['Gap'] = (eff['Safety_Stock'] - eff['SS_Raw']).abs()
-            st.dataframe(eff.sort_values('Gap', ascending=False)[['Location','Adjustment_Status','Safety_Stock','SS_to_FCST_Ratio']].head(10), use_container_width=True)
-
-    with tab5:
-        st.subheader("📉 Historical Forecast vs Actuals")
-        h_sku = st.selectbox("Select Product", sorted(hist['Product'].unique()), key="h1")
-        h_loc = st.selectbox("Select Location", sorted(hist[hist['Product'] == h_sku]['Location'].unique()), key="h2")
-        hdf = hist[(hist['Product'] == h_sku) & (hist['Location'] == h_loc)].sort_values('Period')
-        if not hdf.empty:
-            k1, k2, k3 = st.columns(3)
-            k1.metric("WAPE (%)", f"{(hdf['Abs_Error'].sum() / hdf['Consumption'].replace(0, np.nan).sum() * 100):.1f}")
-            k2.metric("Bias (%)", f"{(hdf['Deviation'].sum() / hdf['Consumption'].replace(0, np.nan).sum() * 100):.1f}")
-            k3.metric("Avg Accuracy (%)", f"{hdf['Accuracy_%'].mean():.1f}")
-            fig_hist = go.Figure([
-                go.Scatter(x=hdf['Period'], y=hdf['Consumption'], name='Actuals', line=dict(color='black')),
-                go.Scatter(x=hdf['Period'], y=hdf['Forecast_Hist'], name='Forecast', line=dict(color='blue', dash='dot')),
-                go.Bar(x=hdf['Period'], y=hdf['Deviation'], name='Error', marker_color='red', opacity=0.3)
-            ])
-            st.plotly_chart(fig_hist, use_container_width=True)
-            st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']], use_container_width=True)
+            st.markdown("**Top Stock-Heavy Locations**")
+            heavy_ranking = eff_df.sort_values('Safety_Stock', ascending=False)[['Location', 'Safety_Stock', 'Forecast_Quantity']]
+            st.dataframe(heavy_ranking.head(10), use_container_width=True)
 
 else:
-    st.info("📥 Please upload all three CSV files OR click 'Load Sample Data' in the sidebar to begin.")
+    st.info("Please upload all three CSV files in the sidebar to begin.")
