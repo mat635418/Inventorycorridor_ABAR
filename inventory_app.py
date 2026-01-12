@@ -111,25 +111,45 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Input")
 
 
+
+
+
+
+
+
+
+
 # --- LOAD SAMPLE DATA BUTTON (NO EMOJI VERSION) ---
-if st.sidebar.button("Load Sample Data"):
+
+
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Data Input")
+
+# Add some space
+st.sidebar.write("")
+
+# Try with a unique key
+if st.sidebar.button("Load Sample Data", key="load_btn_unique"):
     try:
         files_to_check = ["sales.csv", "demand.csv", "leadtime.csv"]
         missing_files = [f for f in files_to_check if not os.path.exists(f)]
         
         if missing_files:
             st.sidebar.error(f"Missing files: {', '.join(missing_files)}")
-            st.sidebar.info("Make sure these files are in the same folder as your app.")
         else:
             st.session_state.df_s = pd.read_csv("sales.csv")
             st.session_state.df_d = pd.read_csv("demand.csv")
             st.session_state.df_lt = pd.read_csv("leadtime.csv")
-            st.sidebar.success("Sample files loaded successfully!")
+            st.sidebar.success("Sample files loaded!")
             st.rerun()
     except Exception as e:
-        st.sidebar.error(f"Error loading files: {str(e)}")
+        st.sidebar.error(f"Error: {str(e)}")
 
+st.sidebar.write("")  # Add space after button
 st.sidebar.markdown("**OR Upload Manually:**")
+
+
 s_file = st.sidebar.file_uploader("1. Sales Data (Historical)", type="csv")
 d_file = st.sidebar.file_uploader("2. Demand Data (Future Forecast)", type="csv")
 lt_file = st.sidebar.file_uploader("3. Lead Time Data (Network Routes)", type="csv")
