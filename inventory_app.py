@@ -87,10 +87,12 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 # ---------------------------------------------------------
 # SESSION STATE INITIALIZATION
 # ---------------------------------------------------------
-# This ensures data persists even after interacting with sliders
-if 'df_s' not in st.session_state: st.session_state.df_s = None
-if 'df_d' not in st.session_state: st.session_state.df_d = None
-if 'df_lt' not in st.session_state: st.session_state.df_lt = None
+if 'df_s' not in st.session_state: 
+    st.session_state.df_s = None
+if 'df_d' not in st.session_state: 
+    st.session_state.df_d = None
+if 'df_lt' not in st.session_state: 
+    st.session_state.df_lt = None
 
 # ---------------------------------------------------------
 # SIDEBAR
@@ -108,19 +110,24 @@ cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200))
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Input")
 
-# --- LOAD SAMPLE DATA BUTTON ---
-if st.sidebar.button("🚀 Load Sample Data (from SharePoint folder)"):
-    # Note: For this to work, you must have downloaded these 3 files to your app folder
+# --- LOAD SAMPLE DATA BUTTON (FIXED) ---
+if st.sidebar.button("🚀 Load Sample Data"):
     try:
-        if os.path.exists("sales.csv") and os.path.exists("demand.csv") and os.path.exists("leadtime.csv"):
+        # Check if files exist first
+        files_to_check = ["sales.csv", "demand.csv", "leadtime.csv"]
+        missing_files = [f for f in files_to_check if not os.path.exists(f)]
+        
+        if missing_files:
+            st.sidebar.error(f"❌ Missing files: {', '.join(missing_files)}")
+            st.sidebar.info("💡 Make sure these files are in the same folder as your app.")
+        else:
             st.session_state.df_s = pd.read_csv("sales.csv")
             st.session_state.df_d = pd.read_csv("demand.csv")
             st.session_state.df_lt = pd.read_csv("leadtime.csv")
-            st.sidebar.success("✅ Sample files loaded!")
-        else:
-            st.sidebar.error("❌ Sample files not found in the local folder. Please download and rename them to sales.csv, demand.csv, and leadtime.csv.")
+            st.sidebar.success("✅ Sample files loaded successfully!")
+            st.rerun()  # Force immediate refresh
     except Exception as e:
-        st.sidebar.error(f"Error loading files: {e}")
+        st.sidebar.error(f"❌ Error loading files: {str(e)}")
 
 st.sidebar.markdown("**OR Upload Manually:**")
 s_file = st.sidebar.file_uploader("1. Sales Data (Historical)", type="csv")
@@ -128,14 +135,16 @@ d_file = st.sidebar.file_uploader("2. Demand Data (Future Forecast)", type="csv"
 lt_file = st.sidebar.file_uploader("3. Lead Time Data (Network Routes)", type="csv")
 
 # Manual uploads override sample data
-if s_file: st.session_state.df_s = pd.read_csv(s_file)
-if d_file: st.session_state.df_d = pd.read_csv(d_file)
-if lt_file: st.session_state.df_lt = pd.read_csv(lt_file)
+if s_file: 
+    st.session_state.df_s = pd.read_csv(s_file)
+if d_file: 
+    st.session_state.df_d = pd.read_csv(d_file)
+if lt_file: 
+    st.session_state.df_lt = pd.read_csv(lt_file)
 
 # ---------------------------------------------------------
 # MAIN LOGIC
 # ---------------------------------------------------------
-# Check if we have all three datasets either from samples or uploads
 if st.session_state.df_s is not None and st.session_state.df_d is not None and st.session_state.df_lt is not None:
 
     # Use copies from session state
@@ -300,5 +309,4 @@ if st.session_state.df_s is not None and st.session_state.df_d is not None and s
             st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']], use_container_width=True)
 
 else:
-    # This info message now appears because the sidebar elements ARE rendered
-    st.info("Please upload all three CSV files OR click 'Load Sample Data' in the sidebar to begin.")
+    st.info("📥 Please upload all three CSV files OR click 'Load Sample Data' in the sidebar to begin.")
