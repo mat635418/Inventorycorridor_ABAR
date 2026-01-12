@@ -110,24 +110,24 @@ cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200))
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Input")
 
-# --- LOAD SAMPLE DATA BUTTON (FIXED) ---
-if st.sidebar.button("🚀 Load Sample Data"):
+
+# --- LOAD SAMPLE DATA BUTTON (NO EMOJI VERSION) ---
+if st.sidebar.button("Load Sample Data"):
     try:
-        # Check if files exist first
         files_to_check = ["sales.csv", "demand.csv", "leadtime.csv"]
         missing_files = [f for f in files_to_check if not os.path.exists(f)]
         
         if missing_files:
-            st.sidebar.error(f"❌ Missing files: {', '.join(missing_files)}")
-            st.sidebar.info("💡 Make sure these files are in the same folder as your app.")
+            st.sidebar.error(f"Missing files: {', '.join(missing_files)}")
+            st.sidebar.info("Make sure these files are in the same folder as your app.")
         else:
             st.session_state.df_s = pd.read_csv("sales.csv")
             st.session_state.df_d = pd.read_csv("demand.csv")
             st.session_state.df_lt = pd.read_csv("leadtime.csv")
-            st.sidebar.success("✅ Sample files loaded successfully!")
-            st.rerun()  # Force immediate refresh
+            st.sidebar.success("Sample files loaded successfully!")
+            st.rerun()
     except Exception as e:
-        st.sidebar.error(f"❌ Error loading files: {str(e)}")
+        st.sidebar.error(f"Error loading files: {str(e)}")
 
 st.sidebar.markdown("**OR Upload Manually:**")
 s_file = st.sidebar.file_uploader("1. Sales Data (Historical)", type="csv")
