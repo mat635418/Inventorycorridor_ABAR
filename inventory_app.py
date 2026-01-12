@@ -121,6 +121,10 @@ st.sidebar.subheader("📂 Data Input")
 
 # --- LOAD SAMPLE DATA BUTTON (NO EMOJI VERSION) ---
 
+st.sidebar.write("TEXT BEFORE BUTTON")
+test_button = st.sidebar.button("TEST BUTTON 123")
+st.sidebar.write(f"Button returned: {test_button}")
+st.sidebar.write("TEXT AFTER BUTTON")
 
 
 st.sidebar.markdown("---")
