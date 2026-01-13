@@ -341,4 +341,4 @@ if s_file and d_file and lt_file:
             st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']], use_container_width=True)
 
 else:
-    st.info("No data found. Please place 'sales_data.csv', 'demand_data.csv', and 'lead_time_data.csv' in the script folder OR upload them via the sidebar.")
+    st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
