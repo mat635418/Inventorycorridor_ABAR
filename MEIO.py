@@ -6,6 +6,7 @@ import plotly.express as px
 from pyvis.network import Network
 import streamlit.components.v1 as components
 from scipy.stats import norm
+import os  # New import to check local file existence
 
 # ---------------------------------------------------------
 # PAGE CONFIG
@@ -84,7 +85,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
     return pd.DataFrame(results)
 
 # ---------------------------------------------------------
-# SIDEBAR
+# SIDEBAR & FILE LOADING LOGIC
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ Parameters")
 service_level = st.sidebar.slider("Service Level (%)", 90.0, 99.9, 99.0) / 100
@@ -93,17 +94,37 @@ z = norm.ppf(service_level)
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛡️ Safety Stock Rules")
 
-# Rule 1: Zero if no aggregated network demand
 zero_if_no_net_fcst = st.sidebar.checkbox("Force Zero SS if No Network Demand", value=True)
-
-# Rule 2: Capping logic relative to Network Demand
 apply_cap = st.sidebar.checkbox("Enable SS Capping (% of Network Demand)", value=True)
 cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200), help="Ensures SS stays between these % of total network demand for that node.")
 
 st.sidebar.markdown("---")
-s_file = st.sidebar.file_uploader("1. Sales Data (Historical)", type="csv")
-d_file = st.sidebar.file_uploader("2. Demand Data (Future Forecast)", type="csv")
-lt_file = st.sidebar.file_uploader("3. Lead Time Data (Network Routes)", type="csv")
+st.sidebar.subheader("📂 Data Sources")
+
+# Define default local filenames
+DEFAULT_FILES = {
+    "sales": "sales_data.csv",
+    "demand": "demand_data.csv",
+    "lt": "lead_time_data.csv"
+}
+
+# File Uploaders
+s_upload = st.sidebar.file_uploader("1. Sales Data (Historical)", type="csv")
+d_upload = st.sidebar.file_uploader("2. Demand Data (Future Forecast)", type="csv")
+lt_upload = st.sidebar.file_uploader("3. Lead Time Data (Network Routes)", type="csv")
+
+# Logic: Priority to Uploaded File -> then Local File -> then None
+s_file = s_upload if s_upload is not None else (DEFAULT_FILES["sales"] if os.path.exists(DEFAULT_FILES["sales"]) else None)
+d_file = d_upload if d_upload is not None else (DEFAULT_FILES["demand"] if os.path.exists(DEFAULT_FILES["demand"]) else None)
+lt_file = lt_upload if lt_upload is not None else (DEFAULT_FILES["lt"] if os.path.exists(DEFAULT_FILES["lt"]) else None)
+
+# Visual indicators for the user
+if s_file:
+    st.sidebar.success(f"✅ Sales Loaded: {s_file.name if hasattr(s_file, 'name') else s_file}")
+if d_file:
+    st.sidebar.success(f"✅ Demand Loaded: {d_file.name if hasattr(d_file, 'name') else d_file}")
+if lt_file:
+    st.sidebar.success(f"✅ Lead Time Loaded: {lt_file.name if hasattr(lt_file, 'name') else lt_file}")
 
 # ---------------------------------------------------------
 # MAIN LOGIC
@@ -218,13 +239,10 @@ if s_file and d_file and lt_file:
         for n in all_nodes:
             m = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
             
-            # --- UPDATED STYLING LOGIC ---
             if m['Agg_Future_Demand'] == 0:
-                # Inactive styling: Light grey box with darker grey text
                 node_color = '#DDDDDD' 
                 font_color = '#888888'
             else:
-                # Active styling: Original colors (Dark for sources, Red for destinations)
                 node_color = '#31333F' if n in sku_lt['From_Location'].values else '#ff4b4b'
                 font_color = 'white'
             
@@ -238,7 +256,6 @@ if s_file and d_file and lt_file:
                 shape='box', 
                 font={'color': font_color}
             )
-            # --- END OF UPDATED LOGIC ---
 
         for _, r in sku_lt.iterrows():
             net.add_edge(r['From_Location'], r['To_Location'], label=f"{r['Lead_Time_Days']}d")
@@ -248,7 +265,6 @@ if s_file and d_file and lt_file:
 
     with tab3:
         st.subheader("📋 Global Inventory Plan")
-        # --- RE-INTRODUCED FILTERS ---
         col1, col2, col3 = st.columns(3)
         f_prod = col1.multiselect("Filter Product", sorted(results['Product'].unique()))
         f_loc = col2.multiselect("Filter Location", sorted(results['Location'].unique()))
@@ -263,25 +279,16 @@ if s_file and d_file and lt_file:
 
     with tab4:
         st.subheader(f"⚖️ Efficiency & Policy Analysis: {next_month}")
-        
-        # Filter for the selected SKU and current period
         eff = results[(results['Product'] == sku) & (results['Period'] == next_month)].copy()
         
-        # --- NEW RATIO CALCULATIONS ---
-        # 1. Node Level Ratio (SS / Local Forecast)
         eff['SS_to_FCST_Ratio'] = (eff['Safety_Stock'] / eff['Forecast'].replace(0, np.nan)).fillna(0)
-        
-        # 2. Material/Network Level (Total for the selected SKU across all nodes)
         total_ss_sku = eff['Safety_Stock'].sum()
         total_fcst_sku = eff['Forecast'].sum()
         sku_ratio = total_ss_sku / total_fcst_sku if total_fcst_sku > 0 else 0
         
-        # 3. Full Global Network Level (All Products in the system)
         all_res = results[results['Period'] == next_month]
         global_ratio = all_res['Safety_Stock'].sum() / all_res['Forecast'].replace(0, np.nan).sum()
-        # ------------------------------
 
-        # Display Top-Level Metrics
         m1, m2, m3 = st.columns(3)
         m1.metric(f"Network Ratio ({sku})", f"{sku_ratio:.2f}")
         m2.metric("Global Network Ratio (All Items)", f"{global_ratio:.2f}")
@@ -293,7 +300,7 @@ if s_file and d_file and lt_file:
         with c1:
             fig_eff = px.scatter(
                 eff, x="Agg_Future_Demand", y="Safety_Stock", color="Adjustment_Status",
-                size="SS_to_FCST_Ratio", hover_name="Location", # Bubble size now represents the ratio
+                size="SS_to_FCST_Ratio", hover_name="Location",
                 color_discrete_map={'Optimal (Statistical)': '#00CC96', 'Capped (High)': '#EF553B', 'Capped (Low)': '#636EFA', 'Forced to Zero': '#AB63FA'},
                 title=f"Policy Impact & Efficiency Ratio (Bubble Size = SS/FCST Ratio)"
             )
@@ -305,7 +312,6 @@ if s_file and d_file and lt_file:
             
             st.markdown("**Top Nodes by Efficiency Gap**")
             eff['Gap'] = (eff['Safety_Stock'] - eff['SS_Raw']).abs()
-            # Added SS_to_FCST_Ratio to the detailed dataframe view
             st.dataframe(
                 eff.sort_values('Gap', ascending=False)[
                     ['Location','Adjustment_Status','Safety_Stock','SS_to_FCST_Ratio']
@@ -331,9 +337,8 @@ if s_file and d_file and lt_file:
             ])
             st.plotly_chart(fig_hist, use_container_width=True)
 
-            # --- RE-INTRODUCED DATA TABLE ---
             st.subheader("📊 Detailed Accuracy by Month")
             st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']], use_container_width=True)
 
 else:
-    st.info("Please upload all three CSV files in the sidebar to begin.")
+    st.info("No data found. Please place 'sales_data.csv', 'demand_data.csv', and 'lead_time_data.csv' in the script folder OR upload them via the sidebar.")
