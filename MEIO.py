@@ -94,7 +94,7 @@ st.sidebar.header("⚙️ Parameters")
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # 2. DEBUG LINE (Now script_dir exists, so no NameError)
-# st.sidebar.write("Files found in repo:", os.listdir(script_dir))
+st.sidebar.write("Files found in repo:", os.listdir(script_dir))
 
 
 service_level = st.sidebar.slider("Service Level (%)", 90.0, 99.9, 99.0) / 100
