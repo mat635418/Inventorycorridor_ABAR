@@ -101,6 +101,9 @@ cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200), help="Ensures S
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Sources")
 
+# Get the directory where the script is located
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
 # Define default local filenames
 DEFAULT_FILES = {
     "sales": "sales.csv",
