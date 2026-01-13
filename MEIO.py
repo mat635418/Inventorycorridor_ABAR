@@ -350,7 +350,7 @@ if s_file and d_file and lt_file:
             st.plotly_chart(fig_hist, use_container_width=True)
 
             st.subheader("📊 Detailed Accuracy by Month")
-            st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']], use_container_width=True)
+            st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']], use_container_width=True, height=800)
 
 else:
     st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
