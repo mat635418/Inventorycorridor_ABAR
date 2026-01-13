@@ -91,6 +91,9 @@ st.sidebar.header("⚙️ Parameters")
 service_level = st.sidebar.slider("Service Level (%)", 90.0, 99.9, 99.0) / 100
 z = norm.ppf(service_level)
 
+# Add this temporarily to your sidebar to debug
+st.sidebar.write("Files in directory:", os.listdir(script_dir))
+
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛡️ Safety Stock Rules")
 
