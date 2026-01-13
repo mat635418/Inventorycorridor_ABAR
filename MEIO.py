@@ -88,11 +88,17 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 # SIDEBAR & FILE LOADING LOGIC
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ Parameters")
+
+# 1. DEFINE PATHS FIRST
+# This tells the app exactly where it is running on the Streamlit Cloud server
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# 2. DEBUG LINE (Now script_dir exists, so no NameError)
+# st.sidebar.write("Files found in repo:", os.listdir(script_dir))
+
+
 service_level = st.sidebar.slider("Service Level (%)", 90.0, 99.9, 99.0) / 100
 z = norm.ppf(service_level)
-
-# Add this temporarily to your sidebar to debug
-st.sidebar.write("Files in directory:", os.listdir(script_dir))
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛡️ Safety Stock Rules")
