@@ -103,9 +103,9 @@ st.sidebar.subheader("📂 Data Sources")
 
 # Define default local filenames
 DEFAULT_FILES = {
-    "sales": "sales_data.csv",
-    "demand": "demand_data.csv",
-    "lt": "lead_time_data.csv"
+    "sales": "sales.csv",
+    "demand": "Demand.csv",
+    "lt": "lead time.csv"
 }
 
 # File Uploaders
