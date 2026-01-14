@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -91,10 +92,12 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🛡️ Safety Stock Rules")
 zero_if_no_net_fcst = st.sidebar.checkbox("Force Zero SS if No Network Demand", value=True)
 apply_cap = st.sidebar.checkbox("Enable SS Capping (% of Network Demand)", value=True)
-cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200),
-                              help="Ensures SS stays between these % of total network demand for that node.")
+cap_range = st.sidebar.slider(
+    "Cap Range (%)", 0, 500, (0, 200),
+    help="Ensures SS stays between these % of total network demand for that node."
+)
 
-# --- NEW RULE 3: Demand Variability Exposure Cap (Node-level, default from sidebar) ---
+# Node-level DV cap (default from sidebar)
 dv_cap_days = st.sidebar.slider(
     "Demand Variability Exposure Cap (Days)",
     min_value=0, max_value=120, value=45,
@@ -150,60 +153,72 @@ if s_file and d_file and lt_file:
     df_lt['Lead_Time_Days'] = clean_numeric(df_lt['Lead_Time_Days'])
     df_lt['Lead_Time_Std_Dev'] = clean_numeric(df_lt['Lead_Time_Std_Dev'])
 
-    # HISTORICAL VARIABILITY
+    # HISTORICAL VARIABILITY (local)
     stats = df_s.groupby(['Product', 'Location'])['Consumption'].agg(['mean', 'std']).reset_index()
     stats.columns = ['Product', 'Location', 'Local_Mean', 'Local_Std']
     stats['Local_Std'] = stats['Local_Std'].fillna(stats['Local_Mean'] * 0.2)
 
-    # NETWORK AGGREGATION
+    # NETWORK AGGREGATION (forward)
     network_stats = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt)
 
-    # LEAD TIME RECEIVING NODES (add node-level DV cap as default from sidebar)
+    # LEAD TIME RECEIVING NODES (+ node-level DV cap default)
     node_lt = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
     node_lt.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
-    node_lt['DV_Cap_Days'] = dv_cap_days  # node-level field set to the sidebar default
+    node_lt['DV_Cap_Days'] = dv_cap_days  # same default for all nodes
 
-    # MERGE
-    results = pd.merge(network_stats, df_d[['Product', 'Location', 'Period', 'Forecast']],
-                       on=['Product', 'Location', 'Period'], how='left')
+    # MERGE base
+    results = pd.merge(
+        network_stats,
+        df_d[['Product', 'Location', 'Period', 'Forecast']],
+        on=['Product', 'Location', 'Period'], how='left'
+    )
     results = pd.merge(results, node_lt, on=['Product', 'Location'], how='left')
+
+    # Bring local historical variability into results for node-level calculations
+    results = results.merge(
+        stats[['Product', 'Location', 'Local_Std']],
+        on=['Product', 'Location'],
+        how='left'
+    )
+
     results = results.fillna({
         'Forecast': 0,
         'Agg_Std_Hist': 0,
         'LT_Mean': 7,
         'LT_Std': 2,
         'Agg_Future_Demand': 0,
-        'DV_Cap_Days': dv_cap_days
+        'DV_Cap_Days': dv_cap_days,
+        'Local_Std': 0
     })
 
     # Precompute next month for cross-tab use
     next_month = sorted(results['Period'].unique())[0]
 
     # --------------------------------
-    # SAFETY STOCK ENGINE (Base + Node DV Cap)
+    # SAFETY STOCK ENGINE (Network basis + Node DV Cap)
     # --------------------------------
-    # Base components (uncapped)
+    # Base components (network basis, uncapped)
     demand_component_uncapped = (results['LT_Mean'] / 30) * (results['Agg_Std_Hist']**2)
     supply_component = (results['LT_Std']**2) * (results['Agg_Future_Demand'] / 30)**2
 
-    results['SS_Raw'] = z * np.sqrt(demand_component_uncapped + supply_component)
+    results['SS_Raw_Net'] = z * np.sqrt(demand_component_uncapped + supply_component)
 
-    # Node-level capped demand variability term
+    # Node-level DV cap applied to network-basis demand variability term
     effective_dv_days_series = np.minimum(results['LT_Mean'], results['DV_Cap_Days'])
     demand_component_capped = (effective_dv_days_series / 30) * (results['Agg_Std_Hist']**2)
-    results['SS_Raw_DV_Capped'] = z * np.sqrt(demand_component_capped + supply_component)
+    results['SS_Raw_Net_DV_Capped'] = z * np.sqrt(demand_component_capped + supply_component)
 
-    # Initialize rule status and Safety Stock with DV-capped value
+    # Initialize rule status and Safety Stock with DV-capped network-basis value
     results['Adjustment_Status'] = 'Optimal (Statistical)'
-    results['Safety_Stock'] = results['SS_Raw_DV_Capped']
+    results['Safety_Stock'] = results['SS_Raw_Net_DV_Capped']
 
-    # Rule: Zero if no NETWORK demand
+    # Rule 1: Zero if no NETWORK demand
     if zero_if_no_net_fcst:
         zero_mask = (results['Agg_Future_Demand'] <= 0)
         results.loc[zero_mask, 'Adjustment_Status'] = 'Forced to Zero'
         results.loc[zero_mask, 'Safety_Stock'] = 0
 
-    # Rule: Capping based on NETWORK demand
+    # Rule 2: SS Capping based on NETWORK demand
     if apply_cap:
         l_cap, u_cap = cap_range[0] / 100, cap_range[1] / 100
         l_lim, u_lim = results['Agg_Future_Demand'] * l_cap, results['Agg_Future_Demand'] * u_cap
@@ -216,11 +231,14 @@ if s_file and d_file and lt_file:
 
         results['Safety_Stock'] = results['Safety_Stock'].clip(lower=l_lim, upper=u_lim)
 
+    # Final touches
     results['Safety_Stock'] = results['Safety_Stock'].round(0)
-    results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0
+    results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0  # custom
     results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast']
 
-    # ACCURACY DATA (LOCAL)
+    # --------------------------------
+    # ACCURACY DATA (local) + Network history table
+    # --------------------------------
     hist = df_s[['Product', 'Location', 'Period', 'Consumption', 'Forecast']].copy()
     hist.rename(columns={'Forecast': 'Forecast_Hist'}, inplace=True)
     hist['Deviation'] = hist['Consumption'] - hist['Forecast_Hist']
@@ -228,7 +246,6 @@ if s_file and d_file and lt_file:
     hist['APE_%'] = (hist['Abs_Error'] / hist['Consumption'].replace(0, np.nan)).fillna(0) * 100
     hist['Accuracy_%'] = (1 - hist['APE_%'] / 100) * 100
 
-    # Aggregated historical network view (per Product, Period)
     hist_net = (
         df_s.groupby(['Product', 'Period'], as_index=False)
             .agg(Network_Consumption=('Consumption', 'sum'),
@@ -247,6 +264,7 @@ if s_file and d_file and lt_file:
         "🧮 Calculation Trace & Sim"
     ])
 
+    # ---------------- TAB 1 ----------------
     with tab1:
         sku = st.selectbox("Product", sorted(results['Product'].unique()))
         loc = st.selectbox("Location", sorted(results[results['Product'] == sku]['Location'].unique()))
@@ -260,6 +278,7 @@ if s_file and d_file and lt_file:
         ])
         st.plotly_chart(fig, use_container_width=True)
 
+    # ---------------- TAB 2 ----------------
     with tab2:
         label_data = results[results['Period'] == next_month].set_index(['Product', 'Location']).to_dict('index')
         sku_lt = df_lt[df_lt['Product'] == sku]
@@ -276,14 +295,7 @@ if s_file and d_file and lt_file:
                 node_color = '#31333F' if n in sku_lt['From_Location'].values else '#ff4b4b'
                 font_color = 'white'
             label = f"{n}\nFcst: {int(m['Forecast'])}\nNet: {int(m['Agg_Future_Demand'])}\nSS: {int(m['Safety_Stock'])}"
-            net.add_node(
-                n,
-                label=label,
-                title=label,
-                color=node_color,
-                shape='box',
-                font={'color': font_color}
-            )
+            net.add_node(n, label=label, title=label, color=node_color, shape='box', font={'color': font_color})
 
         for _, r in sku_lt.iterrows():
             net.add_edge(r['From_Location'], r['To_Location'], label=f"{r['Lead_Time_Days']}d")
@@ -291,6 +303,7 @@ if s_file and d_file and lt_file:
         net.save_graph("net.html")
         components.html(open("net.html").read(), height=1250)
 
+    # ---------------- TAB 3 ----------------
     with tab3:
         st.subheader("📋 Global Inventory Plan")
         col1, col2, col3 = st.columns(3)
@@ -303,9 +316,12 @@ if s_file and d_file and lt_file:
         if f_loc: filtered = filtered[filtered['Location'].isin(f_loc)]
         if f_period: filtered = filtered[filtered['Period'].isin(f_period)]
 
-        st.dataframe(filtered[['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']],
-                     use_container_width=True, height=700)
+        st.dataframe(
+            filtered[['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']],
+            use_container_width=True, height=700
+        )
 
+    # ---------------- TAB 4 ----------------
     with tab4:
         st.subheader(f"⚖️ Efficiency & Policy Analysis: {next_month}")
         eff = results[(results['Product'] == sku) & (results['Period'] == next_month)].copy()
@@ -341,8 +357,8 @@ if s_file and d_file and lt_file:
             st.table(eff['Adjustment_Status'].value_counts())
 
             st.markdown("**Top Nodes by Efficiency Gap**")
-            # Gap vs. fully uncapped statistical SS
-            eff['Gap'] = (eff['Safety_Stock'] - eff['SS_Raw']).abs()
+            # Gap vs. fully uncapped statistical SS (network basis)
+            eff['Gap'] = (eff['Safety_Stock'] - eff['SS_Raw_Net']).abs()
             st.dataframe(
                 eff.sort_values('Gap', ascending=False)[
                     ['Location','Adjustment_Status','Safety_Stock','SS_to_FCST_Ratio']
@@ -350,10 +366,10 @@ if s_file and d_file and lt_file:
                 use_container_width=True
             )
 
+    # ---------------- TAB 5 ----------------
     with tab5:
         st.subheader("📉 Historical Forecast vs Actuals")
 
-        # Selectboxes pull from 'results' to show ALL materials/locations
         h_sku = st.selectbox("Select Product", sorted(results['Product'].unique()), key="h1")
         h_loc = st.selectbox("Select Location", sorted(results[results['Product'] == h_sku]['Location'].unique()), key="h2")
 
@@ -371,7 +387,6 @@ if s_file and d_file and lt_file:
             ])
             st.plotly_chart(fig_hist, use_container_width=True)
 
-            # Aggregated historical network totals table for the selected product
             st.subheader("🌐 Aggregated Network History (Selected Product)")
             net_table = (
                 hist_net[hist_net['Product'] == h_sku]
@@ -392,7 +407,7 @@ if s_file and d_file and lt_file:
             with c_net1:
                 st.dataframe(
                     net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']],
-                    use_container_width=True, height=500
+                    use_container_width=True, height=260
                 )
             with c_net2:
                 st.metric("Network WAPE (%)", f"{net_wape:.1f}")
@@ -406,78 +421,99 @@ if s_file and d_file and lt_file:
         else:
             st.warning("⚠️ No historical sales data (sales.csv) found for this selection. Accuracy metrics cannot be calculated.")
 
-    # --------------------------------
-    # TAB 6: CALCULATION TRACE & SIMULATION
-    # --------------------------------
+    # ---------------- TAB 6 ----------------
     with tab6:
         st.header("🧮 Transparent Calculation Engine")
         st.write("Select a specific node and period to see exactly how the Safety Stock number was derived.")
 
-        # 1. Selection Controls
+        # 1) Selection Controls
         c1, c2, c3 = st.columns(3)
         calc_sku = c1.selectbox("Select Product", sorted(results['Product'].unique()), key="c_sku")
-
-        # Filter locations based on SKU
         avail_locs = sorted(results[results['Product'] == calc_sku]['Location'].unique())
         calc_loc = c2.selectbox("Select Location", avail_locs, key="c_loc")
-
-        # Filter periods
         avail_periods = sorted(results['Period'].unique())
         calc_period = c3.selectbox("Select Period", avail_periods, key="c_period")
 
-        # Get specific row data
-        row = results[
+        sel = results[
             (results['Product'] == calc_sku) &
             (results['Location'] == calc_loc) &
             (results['Period'] == calc_period)
-        ].iloc[0]
+        ]
+        if sel.empty:
+            st.warning("No data for the selected node/period.")
+            st.stop()
+        row = sel.iloc[0]
 
         st.markdown("---")
 
-        # 2. Input Variables Display
+        # NEW: Basis selector
+        basis = st.radio(
+            "Calculation basis",
+            ["Local node (Forecast & Local Std)", "Network-aggregated (Agg Demand & Agg Std)"],
+            index=0,
+            help="Choose whether to compute Safety Stock from the node's own demand/variability or from network-propagated values."
+        )
+
+        # 2) Inputs Panel
         st.subheader("1. Actual Inputs (Frozen)")
+        if basis.startswith("Local"):
+            D_label = "Local Demand (Forecast)"
+            D_value = row['Forecast']
+            sigma_label = "Local Std Dev (σ_local)"
+            sigma_value = row['Local_Std']
+        else:
+            D_label = "Network Demand (Agg_Future_Demand)"
+            D_value = row['Agg_Future_Demand']
+            sigma_label = "Network Std Dev (σ_net)"
+            sigma_value = row['Agg_Std_Hist']
+
         i1, i2, i3, i4, i5, i6 = st.columns(6)
         i1.metric("Service Level", f"{service_level*100}%", help=f"Z-Score: {z:.2f}")
-        i2.metric("Network Demand (D)", f"{row['Agg_Future_Demand']:,.1f}", help="Aggregated Future Demand")
-        i3.metric("Network Std Dev (σ_D)", f"{row['Agg_Std_Hist']:,.1f}", help="Aggregated Historical Variability")
+        i2.metric(D_label, f"{D_value:,.1f}")
+        i3.metric(sigma_label, f"{sigma_value:,.2f}")
         i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days")
         i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
         i6.metric("DV Exposure Cap (Node)", f"{int(row['DV_Cap_Days'])} days", help="Node-level cap set from sidebar default")
 
-        # 3. Statistical Calculation (Show raw + node DV-capped)
+        # 3) Statistical Calculation (Actual)
         st.subheader("2. Statistical Calculation (Actual)")
-        # Uncapped terms
-        term1_demand_var_uncapped = (row['LT_Mean'] / 30) * (row['Agg_Std_Hist']**2)
-        term2_supply_var = (row['LT_Std']**2) * ((row['Agg_Future_Demand'] / 30)**2)
+        # Uncapped terms (based on selected basis)
+        term1_demand_var_uncapped = (row['LT_Mean'] / 30) * (sigma_value**2)
+        term2_supply_var = (row['LT_Std']**2) * ((D_value / 30)**2)
         raw_ss_uncapped = z * np.sqrt(term1_demand_var_uncapped + term2_supply_var)
 
         st.markdown("The standard formula for Safety Stock with variable Demand and variable Lead Time is:")
         st.latex(r"SS_{\text{raw}} = Z \times \sqrt{ \underbrace{\left( \frac{L}{30} \times \sigma_D^2 \right)}_{\text{Demand Var}} + \underbrace{\left( \sigma_L^2 \times \left( \frac{D}{30} \right)^2 \right)}_{\text{Supply Var}} }")
 
-        # Node-level DV cap
+        # DV cap applied to selected basis
         effective_dv_days = min(row['LT_Mean'], row['DV_Cap_Days'])
-        term1_demand_var_capped = (effective_dv_days / 30) * (row['Agg_Std_Hist']**2)
+        term1_demand_var_capped = (effective_dv_days / 30) * (sigma_value**2)
         raw_ss_capped = z * np.sqrt(term1_demand_var_capped + term2_supply_var)
 
-        st.markdown("**Step-by-Step Substitution (Uncapped vs Node DV-Capped):**")
+        st.markdown("**Step-by-Step Substitution (Uncapped vs DV-Capped):**")
         st.code(f"""
-Uncapped Demand Component = ({row['LT_Mean']} / 30) * ({row['Agg_Std_Hist']:.2f})²
+Uncapped Demand Component = ({row['LT_Mean']} / 30) * ({sigma_value:.2f})²
   = {term1_demand_var_uncapped:,.2f}
-Supply Component          = ({row['LT_Std']}²) * ({row['Agg_Future_Demand']:.2f} / 30)²
+Supply Component          = ({row['LT_Std']}²) * ({D_value:.2f} / 30)²
   = {term2_supply_var:,.2f}
 Raw SS (Uncapped)         = {z:.2f} * sqrt({term1_demand_var_uncapped:,.2f} + {term2_supply_var:,.2f})
   = {raw_ss_uncapped:,.2f}
 
-Node DV Cap Days          = {int(row['DV_Cap_Days'])}
+DV Cap Days               = {int(row['DV_Cap_Days'])}
 Effective DV Exposure     = min(L, Cap) = min({row['LT_Mean']}, {int(row['DV_Cap_Days'])}) = {effective_dv_days}
-Capped Demand Component   = ({effective_dv_days} / 30) * ({row['Agg_Std_Hist']:.2f})²
+Capped Demand Component   = ({effective_dv_days} / 30) * ({sigma_value:.2f})²
   = {term1_demand_var_capped:,.2f}
-Raw SS (Node DV-Capped)   = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {term2_supply_var:,.2f})
+Raw SS (DV-Capped)        = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {term2_supply_var:,.2f})
   = {raw_ss_capped:,.2f}
 """)
-        st.info(f"🧮 **Resulting Statistical SS (Applied in plan):** {raw_ss_capped:,.2f} units")
 
-        # 4. Business Rules Application (updated with Check 3: node DV cap)
+        # Always show what the plan uses (network basis) next to what you're viewing
+        plan_ss = row['Safety_Stock']
+        c_show1, c_show2 = st.columns(2)
+        c_show1.metric("SS (Plan, Network basis)", f"{int(plan_ss)}")
+        c_show2.metric(f"SS ({'Local' if basis.startswith('Local') else 'Network'} basis, DV-Capped)", f"{int(raw_ss_capped)}")
+
+        # 4) Business Rules Application
         st.subheader("3. Business Rules Application")
         col_rule_1, col_rule_2, col_rule_3 = st.columns(3)
 
@@ -496,11 +532,11 @@ Raw SS (Node DV-Capped)   = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {ter
                 st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
                 st.write(f"Range: [{lower_limit:,.1f}, {upper_limit:,.1f}]")
                 if raw_ss_capped > upper_limit:
-                    st.warning(f"⚠️ DV-Capped SS ({raw_ss_capped:,.1f}) > Max Cap ({upper_limit:,.1f}). Capping downwards.")
+                    st.warning(f"⚠️ Selected-basis SS ({raw_ss_capped:,.1f}) > Max Cap ({upper_limit:,.1f}). Capping downwards.")
                 elif raw_ss_capped < lower_limit and row['Agg_Future_Demand'] > 0:
-                    st.warning(f"⚠️ DV-Capped SS ({raw_ss_capped:,.1f}) < Min Cap ({lower_limit:,.1f}). Buffering upwards.")
+                    st.warning(f"⚠️ Selected-basis SS ({raw_ss_capped:,.1f}) < Min Cap ({lower_limit:,.1f}). Buffering upwards.")
                 else:
-                    st.success("✅ DV-Capped SS is within efficient boundaries.")
+                    st.success("✅ Selected-basis SS is within efficient boundaries.")
             else:
                 st.write("Capping logic disabled.")
 
@@ -514,11 +550,10 @@ Raw SS (Node DV-Capped)   = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {ter
 
         st.markdown("---")
 
-        # 5. What-If Simulation (includes node DV cap slider defaulting to node value)
+        # 5) What-If Simulation (aligned to selected basis)
         st.subheader("4. What-If Simulation")
         st.write("Tweak parameters below to see how Safety Stock reacts *without* changing the global settings.")
 
-        # Simulation Sliders (dynamic keys to ensure sliders reset when you change SKU/Loc)
         sim_cols = st.columns(4)
         sim_sl = sim_cols[0].slider(
             "Simulated Service Level (%)",
@@ -544,24 +579,31 @@ Raw SS (Node DV-Capped)   = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {ter
             key=f"sim_dv_cap_{calc_sku}_{calc_loc}"
         )
 
-        # Dynamic Recalculation (uses simulated node DV cap)
+        # Choose D and sigma for the selected basis
+        if basis.startswith("Local"):
+            D_sim = row['Forecast']
+            sigma_sim = row['Local_Std']
+        else:
+            D_sim = row['Agg_Future_Demand']
+            sigma_sim = row['Agg_Std_Hist']
+
         sim_z = norm.ppf(sim_sl / 100)
-        sim_demand_component = (min(sim_lt, sim_dv_cap) / 30) * (row['Agg_Std_Hist']**2)
-        sim_supply_component = (sim_lt_std**2) * (row['Agg_Future_Demand'] / 30)**2
+        sim_demand_component = (min(sim_lt, sim_dv_cap) / 30) * (sigma_sim**2)
+        sim_supply_component = (sim_lt_std**2) * (D_sim / 30)**2
         sim_ss = sim_z * np.sqrt(sim_demand_component + sim_supply_component)
 
-        # Display Results
         res_col1, res_col2 = st.columns(2)
-        res_col1.metric("Actual SS (Node DV-Capped)", f"{int(raw_ss_capped)}")
+        res_col1.metric("Actual SS (Plan, Network basis)", f"{int(plan_ss)}")
         res_col2.metric(
-            "Simulated SS (New, DV-Capped)",
+            f"Simulated SS ({'Local' if basis.startswith('Local') else 'Network'} basis, DV-Capped)",
             f"{int(sim_ss)}",
-            delta=f"{int(sim_ss - raw_ss_capped)} Units",
+            delta=f"{int(sim_ss - plan_ss)} Units",
             delta_color="inverse"
         )
-        if sim_ss < raw_ss_capped:
-            st.success(f"📉 Reducing uncertainty/exposure could lower inventory by **{int(raw_ss_capped - sim_ss)}** units.")
-        elif sim_ss > raw_ss_capped:
-            st.warning(f"📈 Increasing service level, lead time, LT variability, or DV exposure requires **{int(sim_ss - raw_ss_capped)}** more units.")
+        if sim_ss < plan_ss:
+            st.success(f"📉 Under the simulated settings, inventory could be reduced by **{int(plan_ss - sim_ss)}** units.")
+        elif sim_ss > plan_ss:
+            st.warning(f"📈 Under the simulated settings, you'd need **{int(sim_ss - plan_ss)}** more units.")
+
 else:
     st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
