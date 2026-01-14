@@ -285,17 +285,20 @@ if s_file and d_file and lt_file:
         st.dataframe(filtered[['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']],
                      use_container_width=True, height=700)
 
+  
     with tab4:
         st.subheader(f"⚖️ Efficiency & Policy Analysis: {next_month}")
         eff = results[(results['Product'] == sku) & (results['Period'] == next_month)].copy()
-        eff['SS_to_FCST_Ratio'] = (eff['Safety_Stock'] / eff['Forecast'].replace(0, np.nan)).fillna(0)
+
+        # Ratio based on network demand
+        eff['SS_to_FCST_Ratio'] = (eff['Safety_Stock'] / eff['Agg_Future_Demand'].replace(0, np.nan)).fillna(0)
 
         total_ss_sku = eff['Safety_Stock'].sum()
-        total_fcst_sku = eff['Forecast'].sum()
-        sku_ratio = total_ss_sku / total_fcst_sku if total_fcst_sku > 0 else 0
+        total_net_demand_sku = eff['Agg_Future_Demand'].sum()
+        sku_ratio = total_ss_sku / total_net_demand_sku if total_net_demand_sku > 0 else 0
 
         all_res = results[results['Period'] == next_month]
-        global_ratio = all_res['Safety_Stock'].sum() / all_res['Forecast'].replace(0, np.nan).sum()
+        global_ratio = all_res['Safety_Stock'].sum() / all_res['Agg_Future_Demand'].replace(0, np.nan).sum()
 
         m1, m2, m3 = st.columns(3)
         m1.metric(f"Network Ratio ({sku})", f"{sku_ratio:.2f}")
@@ -304,14 +307,11 @@ if s_file and d_file and lt_file:
 
         st.markdown("---")
         c1, c2 = st.columns([2, 1])
-
         with c1:
             fig_eff = px.scatter(
                 eff, x="Agg_Future_Demand", y="Safety_Stock", color="Adjustment_Status",
                 size="SS_to_FCST_Ratio", hover_name="Location",
-                color_discrete_map={'Optimal (Statistical)': '#00CC96', 'Capped (High)': '#EF553B',
-                                    'Capped (Low)': '#636EFA', 'Forced to Zero': '#AB63FA'},
-                title=f"Policy Impact & Efficiency Ratio (Bubble Size = SS/FCST Ratio)"
+                color_discrete_map={'Optimal (Statistical)': '#00CC96', 'Capped (High)': '#EF553B','Capped (Low)': '#636EFA', 'Forced to Zero': '#AB63FA'}, title="Policy Impact & Efficiency Ratio (Bubble Size = SS/Network Demand Ratio)"
             )
             st.plotly_chart(fig_eff, use_container_width=True)
 
@@ -323,7 +323,7 @@ if s_file and d_file and lt_file:
             eff['Gap'] = (eff['Safety_Stock'] - eff['SS_Raw']).abs()
             st.dataframe(
                 eff.sort_values('Gap', ascending=False)[
-                    ['Location','Adjustment_Status','Safety_Stock','SS_to_FCST_Ratio']
+                    ['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']
                 ].head(10),
                 use_container_width=True
             )
