@@ -6,7 +6,7 @@ import plotly.express as px
 from pyvis.network import Network
 import streamlit.components.v1 as components
 from scipy.stats import norm
-import os  # New import to check local file existence
+import os
 
 # ---------------------------------------------------------
 # PAGE CONFIG
@@ -89,14 +89,6 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ Parameters")
 
-# 1. DEFINE PATHS FIRST
-# This tells the app exactly where it is running on the Streamlit Cloud server
-script_dir = os.path.dirname(os.path.abspath(__file__))
-
-# 2. DEBUG LINE (Now script_dir exists, so no NameError)
-# st.sidebar.write("Files found in repo:", os.listdir(script_dir))
-
-
 service_level = st.sidebar.slider("Service Level (%)", 90.0, 99.9, 99.0) / 100
 z = norm.ppf(service_level)
 
@@ -109,9 +101,6 @@ cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200), help="Ensures S
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Sources")
-
-# Get the directory where the script is located
-script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Define default local filenames
 DEFAULT_FILES = {
@@ -224,8 +213,13 @@ if s_file and d_file and lt_file:
     # ---------------------------------------------------------
     # TABS
     # ---------------------------------------------------------
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Inventory Corridor", "🕸️ Network Topology", "📋 Full Plan", "⚖️ Efficiency Analysis", "📉 Forecast Accuracy"
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📈 Inventory Corridor", 
+        "🕸️ Network Topology", 
+        "📋 Full Plan", 
+        "⚖️ Efficiency Analysis", 
+        "📉 Forecast Accuracy",
+        "🧮 Calculation Trace & Sim"
     ])
 
     with tab1:
@@ -330,6 +324,7 @@ if s_file and d_file and lt_file:
                 ].head(10), 
                 use_container_width=True
             )
+
     with tab5:
         st.subheader("📉 Historical Forecast vs Actuals")
         h_sku = st.selectbox("Select Product", sorted(hist['Product'].unique()), key="h1")
@@ -351,6 +346,161 @@ if s_file and d_file and lt_file:
 
             st.subheader("📊 Detailed Accuracy by Month")
             st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']], use_container_width=True, height=800)
+
+    # ---------------------------------------------------------
+    # TAB 6: CALCULATION TRACE & SIMULATION
+    # ---------------------------------------------------------
+    with tab6:
+        st.header("🧮 Transparent Calculation Engine")
+        st.write("Select a specific node and period to see exactly how the Safety Stock number was derived.")
+
+        # 1. Selection Controls
+        c1, c2, c3 = st.columns(3)
+        calc_sku = c1.selectbox("Select Product", sorted(results['Product'].unique()), key="c_sku")
+        
+        # Filter locations based on SKU
+        avail_locs = sorted(results[results['Product'] == calc_sku]['Location'].unique())
+        calc_loc = c2.selectbox("Select Location", avail_locs, key="c_loc")
+        
+        # Filter periods
+        avail_periods = sorted(results['Period'].unique())
+        calc_period = c3.selectbox("Select Period", avail_periods, key="c_period")
+
+        # Get specific row data
+        row = results[
+            (results['Product'] == calc_sku) & 
+            (results['Location'] == calc_loc) & 
+            (results['Period'] == calc_period)
+        ].iloc[0]
+
+        st.markdown("---")
+
+        # 2. Input Variables Display
+        st.subheader("1. Actual Inputs (Frozen)")
+        i1, i2, i3, i4, i5 = st.columns(5)
+        i1.metric("Service Level", f"{service_level*100}%", help=f"Z-Score: {z:.2f}")
+        i2.metric("Network Demand (D)", f"{row['Agg_Future_Demand']:,.1f}", help="Aggregated Future Demand")
+        i3.metric("Network Std Dev (σ_D)", f"{row['Agg_Std_Hist']:,.1f}", help="Aggregated Historical Variability")
+        i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days")
+        i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
+
+        # 3. Mathematical Trace
+        st.subheader("2. Statistical Calculation (Actual)")
+        
+        # Terms calculation for display
+        term1_demand_var = (row['LT_Mean'] / 30) * (row['Agg_Std_Hist']**2)
+        term2_supply_var = (row['LT_Std']**2) * ((row['Agg_Future_Demand'] / 30)**2)
+        combined_sd = np.sqrt(term1_demand_var + term2_supply_var)
+        raw_ss_calc = z * combined_sd
+
+        st.markdown("The standard formula for Safety Stock with variable Demand and variable Lead Time is:")
+        
+        st.latex(r"SS_{raw} = Z \times \sqrt{ \underbrace{\left( \frac{L}{30} \times \sigma_D^2 \right)}_{\text{Demand Var}} + \underbrace{\left( \sigma_L^2 \times \left( \frac{D}{30} \right)^2 \right)}_{\text{Supply Var}} }")
+
+        st.markdown("**Step-by-Step Substitution:**")
+        
+        st.code(f"""
+        1. Demand Component = ({row['LT_Mean']} / 30) * ({row['Agg_Std_Hist']:.2f})² 
+                            = {term1_demand_var:,.2f}
+
+        2. Supply Component = ({row['LT_Std']}²) * ({row['Agg_Future_Demand']:.2f} / 30)² 
+                            = {term2_supply_var:,.2f}
+
+        3. Combined Variance = {term1_demand_var:,.2f} + {term2_supply_var:,.2f} 
+                             = {(term1_demand_var + term2_supply_var):,.2f}
+
+        4. Combined Std Dev  = sqrt(Combined Variance) 
+                             = {combined_sd:,.2f}
+
+        5. Raw SS            = {z:.2f} (Z-Score) * {combined_sd:,.2f}
+        """)
+        
+        st.info(f"🧮 **Resulting Statistical SS:** {raw_ss_calc:,.2f} units")
+
+        # 4. Rules Application
+        st.subheader("3. Business Rules Application")
+        
+        col_rule_1, col_rule_2 = st.columns(2)
+        
+        with col_rule_1:
+            st.markdown("**Check 1: Zero Demand Rule**")
+            if zero_if_no_net_fcst and row['Agg_Future_Demand'] <= 0:
+                st.error("❌ Network Demand is 0. SS Forced to 0.")
+            else:
+                st.success("✅ Network Demand exists. Keep Statistical SS.")
+
+        with col_rule_2:
+            st.markdown("**Check 2: Capping (Min/Max)**")
+            if apply_cap:
+                lower_limit = row['Agg_Future_Demand'] * (cap_range[0]/100)
+                upper_limit = row['Agg_Future_Demand'] * (cap_range[1]/100)
+                
+                st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
+                st.write(f"Range: [{lower_limit:,.1f}, {upper_limit:,.1f}]")
+                
+                if raw_ss_calc > upper_limit:
+                    st.warning(f"⚠️ Raw SS ({raw_ss_calc:,.1f}) > Max Cap ({upper_limit:,.1f}). Capping downwards.")
+                elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
+                    st.warning(f"⚠️ Raw SS ({raw_ss_calc:,.1f}) < Min Cap ({lower_limit:,.1f}). Buffering upwards.")
+                else:
+                    st.success("✅ Raw SS is within efficient boundaries.")
+            else:
+                st.write("Capping logic disabled.")
+
+        st.markdown("---")
+
+        # 5. SIMULATION MODE
+        st.subheader("4. What-If Simulation")
+        st.write("Tweak parameters below to see how Safety Stock reacts *without* changing the global settings.")
+        
+        
+
+        # Simulation Sliders
+        # We use dynamic keys to ensure sliders reset when you change SKU/Loc
+        sim_cols = st.columns(3)
+        
+        sim_sl = sim_cols[0].slider(
+            "Simulated Service Level (%)", 
+            min_value=50.0, max_value=99.9, 
+            value=service_level*100, 
+            key=f"sim_sl_{calc_sku}_{calc_loc}"
+        )
+        
+        sim_lt = sim_cols[1].slider(
+            "Simulated Avg Lead Time (Days)", 
+            min_value=0.0, max_value=max(30.0, row['LT_Mean']*2), 
+            value=float(row['LT_Mean']),
+            key=f"sim_lt_{calc_sku}_{calc_loc}"
+        )
+
+        sim_lt_std = sim_cols[2].slider(
+            "Simulated LT Variability (Days)", 
+            min_value=0.0, max_value=max(10.0, row['LT_Std']*2), 
+            value=float(row['LT_Std']),
+            key=f"sim_lt_std_{calc_sku}_{calc_loc}"
+        )
+
+        # Dynamic Recalculation
+        sim_z = norm.ppf(sim_sl / 100)
+        sim_ss = sim_z * np.sqrt(
+            (sim_lt / 30) * (row['Agg_Std_Hist']**2) +
+            (sim_lt_std**2) * (row['Agg_Future_Demand'] / 30)**2
+        )
+        
+        # Display Results
+        res_col1, res_col2 = st.columns(2)
+        res_col1.metric("Original SS (Actual)", f"{int(raw_ss_calc)}")
+        res_col2.metric(
+            "Simulated SS (New)", 
+            f"{int(sim_ss)}", 
+            delta=f"{int(sim_ss - raw_ss_calc)} Units",
+            delta_color="inverse"
+        )
+        
+        if sim_ss < raw_ss_calc:
+            st.success(f"📉 Reducing uncertainty could lower inventory by **{int(raw_ss_calc - sim_ss)}** units.")
+        elif sim_ss > raw_ss_calc:
+            st.warning(f"📈 Increasing service or lead time requires **{int(sim_ss - raw_ss_calc)}** more units.")
 
 else:
     st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
