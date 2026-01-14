@@ -327,8 +327,10 @@ if s_file and d_file and lt_file:
 
     with tab5:
         st.subheader("📉 Historical Forecast vs Actuals")
-        h_sku = st.selectbox("Select Product", sorted(hist['Product'].unique()), key="h1")
-        h_loc = st.selectbox("Select Location", sorted(hist[hist['Product'] == h_sku]['Location'].unique()), key="h2")
+        # OPTION 3: Selectboxes pull from 'results' to show ALL materials/locations
+        h_sku = st.selectbox("Select Product", sorted(results['Product'].unique()), key="h1")
+        h_loc = st.selectbox("Select Location", sorted(results[results['Product'] == h_sku]['Location'].unique()), key="h2")
+        
         hdf = hist[(hist['Product'] == h_sku) & (hist['Location'] == h_loc)].sort_values('Period')
         
         if not hdf.empty:
@@ -340,13 +342,17 @@ if s_file and d_file and lt_file:
             fig_hist = go.Figure([
                 go.Scatter(x=hdf['Period'], y=hdf['Consumption'], name='Actuals', line=dict(color='black')),
                 go.Scatter(x=hdf['Period'], y=hdf['Forecast_Hist'], name='Forecast', line=dict(color='blue', dash='dot')),
-                go.Bar(x=hdf['Period'], y=hdf['Deviation'], name='Error', marker_color='red', opacity=0.3)
             ])
             st.plotly_chart(fig_hist, use_container_width=True)
 
             st.subheader("📊 Detailed Accuracy by Month")
-            st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error', 'APE_%','Accuracy_%']], use_container_width=True, height=800)
-
+            st.dataframe(
+                hdf[['Period','Consumption','Forecast_Hist','Agg_Hist_Demand','Deviation','Abs_Error','APE_%','Accuracy_%']], 
+                use_container_width=True, 
+                height=500
+            )
+        else:
+            st.warning("⚠️ No historical sales data (sales.csv) found for this selection. Accuracy metrics cannot be calculated.")
     # ---------------------------------------------------------
     # TAB 6: CALCULATION TRACE & SIMULATION
     # ---------------------------------------------------------
