@@ -370,7 +370,7 @@ if s_file and d_file and lt_file:
             with c_net1:
                 st.dataframe(
                     net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']],
-                    use_container_width=True, height=260
+                    use_container_width=True, height=500
                 )
             with c_net2:
                 st.metric("Network WAPE (%)", f"{net_wape:.1f}")
