@@ -347,7 +347,7 @@ if s_file and d_file and lt_file:
 
             st.subheader("📊 Detailed Accuracy by Month")
             st.dataframe(
-                hdf[['Period','Consumption','Forecast_Hist','Agg_Hist_Demand','Deviation','Abs_Error','APE_%','Accuracy_%']], 
+                hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']], 
                 use_container_width=True, 
                 height=500
             )
