@@ -94,6 +94,13 @@ apply_cap = st.sidebar.checkbox("Enable SS Capping (% of Network Demand)", value
 cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200),
                               help="Ensures SS stays between these % of total network demand for that node.")
 
+# --- NEW RULE 3: Demand Variability Exposure Cap ---
+dv_cap_days = st.sidebar.slider(
+    "Demand Variability Exposure Cap (Days)",
+    min_value=0, max_value=120, value=45,
+    help="Limits the demand variability term by capping the exposure duration in days (used as min(LT, cap))."
+)
+
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Sources")
 
@@ -162,17 +169,22 @@ if s_file and d_file and lt_file:
     results = results.fillna({'Forecast': 0, 'Agg_Std_Hist': 0, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
 
     # --------------------------------
-    # RULE-BASED SAFETY STOCK LOGIC
+    # SAFETY STOCK ENGINE (Base + Rule 3 Cap)
     # --------------------------------
-    results['SS_Raw'] = (
-        z * np.sqrt(
-            (results['LT_Mean'] / 30) * (results['Agg_Std_Hist']**2) +
-            (results['LT_Std']**2) * (results['Agg_Future_Demand'] / 30)**2
-        )
-    )
+    # Base components (uncapped)
+    demand_component_uncapped = (results['LT_Mean'] / 30) * (results['Agg_Std_Hist']**2)
+    supply_component = (results['LT_Std']**2) * (results['Agg_Future_Demand'] / 30)**2
 
+    results['SS_Raw'] = z * np.sqrt(demand_component_uncapped + supply_component)
+
+    # Rule 3: Cap the demand variability exposure by days (min(LT_Mean, dv_cap_days))
+    demand_component_capped = (np.minimum(results['LT_Mean'], dv_cap_days) / 30) * (results['Agg_Std_Hist']**2)
+    results['SS_Raw_DV_Capped'] = z * np.sqrt(demand_component_capped + supply_component)
+
+    # Initialize rule status and Safety Stock with DV-capped value
     results['Adjustment_Status'] = 'Optimal (Statistical)'
-    results['Safety_Stock'] = results['SS_Raw']
+    results['Safety_Stock'] = results['SS_Raw_DV_Capped']
+    results['DV_Cap_Days'] = dv_cap_days  # store selected cap for traceability
 
     # Rule: Zero if no NETWORK demand
     if zero_if_no_net_fcst:
@@ -205,8 +217,7 @@ if s_file and d_file and lt_file:
     hist['APE_%'] = (hist['Abs_Error'] / hist['Consumption'].replace(0, np.nan)).fillna(0) * 100
     hist['Accuracy_%'] = (1 - hist['APE_%'] / 100) * 100
 
-    # --- NEW: Aggregated historical network view (per Product, Period) ---
-    # Uses df_s because it already holds historical Consumption and historical Forecast.
+    # Aggregated historical network view (per Product, Period)
     hist_net = (
         df_s.groupby(['Product', 'Period'], as_index=False)
             .agg(Network_Consumption=('Consumption', 'sum'),
@@ -320,6 +331,7 @@ if s_file and d_file and lt_file:
             st.table(eff['Adjustment_Status'].value_counts())
 
             st.markdown("**Top Nodes by Efficiency Gap**")
+            # Gap vs. fully uncapped statistical SS
             eff['Gap'] = (eff['Safety_Stock'] - eff['SS_Raw']).abs()
             st.dataframe(
                 eff.sort_values('Gap', ascending=False)[
@@ -349,7 +361,7 @@ if s_file and d_file and lt_file:
             ])
             st.plotly_chart(fig_hist, use_container_width=True)
 
-            # --- NEW: Aggregated historical network totals table for the selected product ---
+            # Aggregated historical network totals table for the selected product
             st.subheader("🌐 Aggregated Network History (Selected Product)")
             net_table = (
                 hist_net[hist_net['Product'] == h_sku]
@@ -358,7 +370,7 @@ if s_file and d_file and lt_file:
                         .drop(columns=['Product'])
             )
 
-            # Optional: add a quick network-level WAPE for extra context
+            # Optional: network-level WAPE
             if not net_table.empty:
                 net_table['Net_Abs_Error'] = (net_table['Network_Consumption'] - net_table['Network_Forecast_Hist']).abs()
                 net_wape = (net_table['Net_Abs_Error'].sum() /
@@ -414,41 +426,49 @@ if s_file and d_file and lt_file:
 
         # 2. Input Variables Display
         st.subheader("1. Actual Inputs (Frozen)")
-        i1, i2, i3, i4, i5 = st.columns(5)
+        i1, i2, i3, i4, i5, i6 = st.columns(6)
         i1.metric("Service Level", f"{service_level*100}%", help=f"Z-Score: {z:.2f}")
         i2.metric("Network Demand (D)", f"{row['Agg_Future_Demand']:,.1f}", help="Aggregated Future Demand")
         i3.metric("Network Std Dev (σ_D)", f"{row['Agg_Std_Hist']:,.1f}", help="Aggregated Historical Variability")
         i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days")
         i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
+        i6.metric("DV Exposure Cap", f"{dv_cap_days} days", help="Limits demand variability exposure used in SS")
 
-        # 3. Mathematical Trace
+        # 3. Statistical Calculation (Show raw + capped)
         st.subheader("2. Statistical Calculation (Actual)")
-        # Terms calculation for display
-        term1_demand_var = (row['LT_Mean'] / 30) * (row['Agg_Std_Hist']**2)
+        # Uncapped terms
+        term1_demand_var_uncapped = (row['LT_Mean'] / 30) * (row['Agg_Std_Hist']**2)
         term2_supply_var = (row['LT_Std']**2) * ((row['Agg_Future_Demand'] / 30)**2)
-        combined_sd = np.sqrt(term1_demand_var + term2_supply_var)
-        raw_ss_calc = z * combined_sd
+        raw_ss_uncapped = z * np.sqrt(term1_demand_var_uncapped + term2_supply_var)
 
         st.markdown("The standard formula for Safety Stock with variable Demand and variable Lead Time is:")
         st.latex(r"SS_{\text{raw}} = Z \times \sqrt{ \underbrace{\left( \frac{L}{30} \times \sigma_D^2 \right)}_{\text{Demand Var}} + \underbrace{\left( \sigma_L^2 \times \left( \frac{D}{30} \right)^2 \right)}_{\text{Supply Var}} }")
 
-        st.markdown("**Step-by-Step Substitution:**")
-        st.code(f"""
-1. Demand Component = ({row['LT_Mean']} / 30) * ({row['Agg_Std_Hist']:.2f})²
-   = {term1_demand_var:,.2f}
-2. Supply Component = ({row['LT_Std']}²) * ({row['Agg_Future_Demand']:.2f} / 30)²
-   = {term2_supply_var:,.2f}
-3. Combined Variance = {term1_demand_var:,.2f} + {term2_supply_var:,.2f}
-   = {(term1_demand_var + term2_supply_var):,.2f}
-4. Combined Std Dev = sqrt(Combined Variance)
-   = {combined_sd:,.2f}
-5. Raw SS = {z:.2f} (Z-Score) * {combined_sd:,.2f}
-""")
-        st.info(f"🧮 **Resulting Statistical SS:** {raw_ss_calc:,.2f} units")
+        # Capped demand exposure
+        effective_dv_days = min(row['LT_Mean'], dv_cap_days)
+        term1_demand_var_capped = (effective_dv_days / 30) * (row['Agg_Std_Hist']**2)
+        raw_ss_capped = z * np.sqrt(term1_demand_var_capped + term2_supply_var)
 
-        # 4. Rules Application
+        st.markdown("**Step-by-Step Substitution (Uncapped vs Capped):**")
+        st.code(f"""
+Uncapped Demand Component = ({row['LT_Mean']} / 30) * ({row['Agg_Std_Hist']:.2f})²
+  = {term1_demand_var_uncapped:,.2f}
+Supply Component          = ({row['LT_Std']}²) * ({row['Agg_Future_Demand']:.2f} / 30)²
+  = {term2_supply_var:,.2f}
+Raw SS (Uncapped)         = {z:.2f} * sqrt({term1_demand_var_uncapped:,.2f} + {term2_supply_var:,.2f})
+  = {raw_ss_uncapped:,.2f}
+
+Capped DV Exposure Days   = min(L, DV_Cap) = min({row['LT_Mean']}, {dv_cap_days}) = {effective_dv_days}
+Capped Demand Component   = ({effective_dv_days} / 30) * ({row['Agg_Std_Hist']:.2f})²
+  = {term1_demand_var_capped:,.2f}
+Raw SS (DV-Capped)        = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {term2_supply_var:,.2f})
+  = {raw_ss_capped:,.2f}
+""")
+        st.info(f"🧮 **Resulting Statistical SS (Applied in plan):** {raw_ss_capped:,.2f} units")
+
+        # 4. Business Rules Application (updated with Check 3)
         st.subheader("3. Business Rules Application")
-        col_rule_1, col_rule_2 = st.columns(2)
+        col_rule_1, col_rule_2, col_rule_3 = st.columns(3)
 
         with col_rule_1:
             st.markdown("**Check 1: Zero Demand Rule**")
@@ -464,23 +484,31 @@ if s_file and d_file and lt_file:
                 upper_limit = row['Agg_Future_Demand'] * (cap_range[1]/100)
                 st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
                 st.write(f"Range: [{lower_limit:,.1f}, {upper_limit:,.1f}]")
-                if raw_ss_calc > upper_limit:
-                    st.warning(f"⚠️ Raw SS ({raw_ss_calc:,.1f}) > Max Cap ({upper_limit:,.1f}). Capping downwards.")
-                elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
-                    st.warning(f"⚠️ Raw SS ({raw_ss_calc:,.1f}) < Min Cap ({lower_limit:,.1f}). Buffering upwards.")
+                if raw_ss_capped > upper_limit:
+                    st.warning(f"⚠️ DV-Capped SS ({raw_ss_capped:,.1f}) > Max Cap ({upper_limit:,.1f}). Capping downwards.")
+                elif raw_ss_capped < lower_limit and row['Agg_Future_Demand'] > 0:
+                    st.warning(f"⚠️ DV-Capped SS ({raw_ss_capped:,.1f}) < Min Cap ({lower_limit:,.1f}). Buffering upwards.")
                 else:
-                    st.success("✅ Raw SS is within efficient boundaries.")
+                    st.success("✅ DV-Capped SS is within efficient boundaries.")
             else:
                 st.write("Capping logic disabled.")
 
+        with col_rule_3:
+            st.markdown("**Check 3: Demand Variability Exposure Cap**")
+            st.write(f"Selected cap = **{dv_cap_days} days** → Effective exposure = **min({row['LT_Mean']}, {dv_cap_days}) = {effective_dv_days} days**.")
+            if dv_cap_days < row['LT_Mean']:
+                st.warning("⚠️ Demand variability impact reduced by exposure cap.")
+            else:
+                st.success("✅ Cap does not reduce demand variability (LT ≤ cap).")
+
         st.markdown("---")
 
-        # 5. SIMULATION MODE
+        # 5. What-If Simulation (updated to include DV cap slider)
         st.subheader("4. What-If Simulation")
         st.write("Tweak parameters below to see how Safety Stock reacts *without* changing the global settings.")
 
         # Simulation Sliders (dynamic keys to ensure sliders reset when you change SKU/Loc)
-        sim_cols = st.columns(3)
+        sim_cols = st.columns(4)
         sim_sl = sim_cols[0].slider(
             "Simulated Service Level (%)",
             min_value=50.0, max_value=99.9,
@@ -499,26 +527,30 @@ if s_file and d_file and lt_file:
             value=float(row['LT_Std']),
             key=f"sim_lt_std_{calc_sku}_{calc_loc}"
         )
-
-        # Dynamic Recalculation
-        sim_z = norm.ppf(sim_sl / 100)
-        sim_ss = sim_z * np.sqrt(
-            (sim_lt / 30) * (row['Agg_Std_Hist']**2) +
-            (sim_lt_std**2) * (row['Agg_Future_Demand'] / 30)**2
+        sim_dv_cap = sim_cols[3].slider(
+            "Simulated DV Exposure Cap (Days)",
+            min_value=0.0, max_value=120.0, value=float(dv_cap_days),
+            key=f"sim_dv_cap_{calc_sku}_{calc_loc}"
         )
+
+        # Dynamic Recalculation (uses DV cap)
+        sim_z = norm.ppf(sim_sl / 100)
+        sim_demand_component = (min(sim_lt, sim_dv_cap) / 30) * (row['Agg_Std_Hist']**2)
+        sim_supply_component = (sim_lt_std**2) * (row['Agg_Future_Demand'] / 30)**2
+        sim_ss = sim_z * np.sqrt(sim_demand_component + sim_supply_component)
 
         # Display Results
         res_col1, res_col2 = st.columns(2)
-        res_col1.metric("Original SS (Actual)", f"{int(raw_ss_calc)}")
+        res_col1.metric("Actual SS (DV-Capped)", f"{int(raw_ss_capped)}")
         res_col2.metric(
-            "Simulated SS (New)",
+            "Simulated SS (New, DV-Capped)",
             f"{int(sim_ss)}",
-            delta=f"{int(sim_ss - raw_ss_calc)} Units",
+            delta=f"{int(sim_ss - raw_ss_capped)} Units",
             delta_color="inverse"
         )
-        if sim_ss < raw_ss_calc:
-            st.success(f"📉 Reducing uncertainty could lower inventory by **{int(raw_ss_calc - sim_ss)}** units.")
-        elif sim_ss > raw_ss_calc:
-            st.warning(f"📈 Increasing service or lead time requires **{int(sim_ss - raw_ss_calc)}** more units.")
+        if sim_ss < raw_ss_capped:
+            st.success(f"📉 Reducing uncertainty/exposure could lower inventory by **{int(raw_ss_capped - sim_ss)}** units.")
+        elif sim_ss > raw_ss_capped:
+            st.warning(f"📈 Increasing service level, lead time, LT variability, or DV exposure requires **{int(sim_ss - raw_ss_capped)}** more units.")
 else:
     st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
