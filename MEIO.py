@@ -94,11 +94,11 @@ apply_cap = st.sidebar.checkbox("Enable SS Capping (% of Network Demand)", value
 cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200),
                               help="Ensures SS stays between these % of total network demand for that node.")
 
-# --- NEW RULE 3: Demand Variability Exposure Cap ---
+# --- NEW RULE 3: Demand Variability Exposure Cap (Node-level, default from sidebar) ---
 dv_cap_days = st.sidebar.slider(
     "Demand Variability Exposure Cap (Days)",
     min_value=0, max_value=120, value=45,
-    help="Limits the demand variability term by capping the exposure duration in days (used as min(LT, cap))."
+    help="Limits the demand variability term by capping the exposure duration in days at node level."
 )
 
 st.sidebar.markdown("---")
@@ -158,18 +158,29 @@ if s_file and d_file and lt_file:
     # NETWORK AGGREGATION
     network_stats = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt)
 
-    # LEAD TIME RECEIVING NODES
+    # LEAD TIME RECEIVING NODES (add node-level DV cap as default from sidebar)
     node_lt = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
     node_lt.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
+    node_lt['DV_Cap_Days'] = dv_cap_days  # node-level field set to the sidebar default
 
     # MERGE
     results = pd.merge(network_stats, df_d[['Product', 'Location', 'Period', 'Forecast']],
                        on=['Product', 'Location', 'Period'], how='left')
     results = pd.merge(results, node_lt, on=['Product', 'Location'], how='left')
-    results = results.fillna({'Forecast': 0, 'Agg_Std_Hist': 0, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
+    results = results.fillna({
+        'Forecast': 0,
+        'Agg_Std_Hist': 0,
+        'LT_Mean': 7,
+        'LT_Std': 2,
+        'Agg_Future_Demand': 0,
+        'DV_Cap_Days': dv_cap_days
+    })
+
+    # Precompute next month for cross-tab use
+    next_month = sorted(results['Period'].unique())[0]
 
     # --------------------------------
-    # SAFETY STOCK ENGINE (Base + Rule 3 Cap)
+    # SAFETY STOCK ENGINE (Base + Node DV Cap)
     # --------------------------------
     # Base components (uncapped)
     demand_component_uncapped = (results['LT_Mean'] / 30) * (results['Agg_Std_Hist']**2)
@@ -177,14 +188,14 @@ if s_file and d_file and lt_file:
 
     results['SS_Raw'] = z * np.sqrt(demand_component_uncapped + supply_component)
 
-    # Rule 3: Cap the demand variability exposure by days (min(LT_Mean, dv_cap_days))
-    demand_component_capped = (np.minimum(results['LT_Mean'], dv_cap_days) / 30) * (results['Agg_Std_Hist']**2)
+    # Node-level capped demand variability term
+    effective_dv_days_series = np.minimum(results['LT_Mean'], results['DV_Cap_Days'])
+    demand_component_capped = (effective_dv_days_series / 30) * (results['Agg_Std_Hist']**2)
     results['SS_Raw_DV_Capped'] = z * np.sqrt(demand_component_capped + supply_component)
 
     # Initialize rule status and Safety Stock with DV-capped value
     results['Adjustment_Status'] = 'Optimal (Statistical)'
     results['Safety_Stock'] = results['SS_Raw_DV_Capped']
-    results['DV_Cap_Days'] = dv_cap_days  # store selected cap for traceability
 
     # Rule: Zero if no NETWORK demand
     if zero_if_no_net_fcst:
@@ -250,7 +261,6 @@ if s_file and d_file and lt_file:
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        next_month = sorted(results['Period'].unique())[0]
         label_data = results[results['Period'] == next_month].set_index(['Product', 'Location']).to_dict('index')
         sku_lt = df_lt[df_lt['Product'] == sku]
 
@@ -382,7 +392,7 @@ if s_file and d_file and lt_file:
             with c_net1:
                 st.dataframe(
                     net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']],
-                    use_container_width=True, height=500
+                    use_container_width=True, height=260
                 )
             with c_net2:
                 st.metric("Network WAPE (%)", f"{net_wape:.1f}")
@@ -432,9 +442,9 @@ if s_file and d_file and lt_file:
         i3.metric("Network Std Dev (σ_D)", f"{row['Agg_Std_Hist']:,.1f}", help="Aggregated Historical Variability")
         i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days")
         i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
-        i6.metric("DV Exposure Cap", f"{dv_cap_days} days", help="Limits demand variability exposure used in SS")
+        i6.metric("DV Exposure Cap (Node)", f"{int(row['DV_Cap_Days'])} days", help="Node-level cap set from sidebar default")
 
-        # 3. Statistical Calculation (Show raw + capped)
+        # 3. Statistical Calculation (Show raw + node DV-capped)
         st.subheader("2. Statistical Calculation (Actual)")
         # Uncapped terms
         term1_demand_var_uncapped = (row['LT_Mean'] / 30) * (row['Agg_Std_Hist']**2)
@@ -444,12 +454,12 @@ if s_file and d_file and lt_file:
         st.markdown("The standard formula for Safety Stock with variable Demand and variable Lead Time is:")
         st.latex(r"SS_{\text{raw}} = Z \times \sqrt{ \underbrace{\left( \frac{L}{30} \times \sigma_D^2 \right)}_{\text{Demand Var}} + \underbrace{\left( \sigma_L^2 \times \left( \frac{D}{30} \right)^2 \right)}_{\text{Supply Var}} }")
 
-        # Capped demand exposure
-        effective_dv_days = min(row['LT_Mean'], dv_cap_days)
+        # Node-level DV cap
+        effective_dv_days = min(row['LT_Mean'], row['DV_Cap_Days'])
         term1_demand_var_capped = (effective_dv_days / 30) * (row['Agg_Std_Hist']**2)
         raw_ss_capped = z * np.sqrt(term1_demand_var_capped + term2_supply_var)
 
-        st.markdown("**Step-by-Step Substitution (Uncapped vs Capped):**")
+        st.markdown("**Step-by-Step Substitution (Uncapped vs Node DV-Capped):**")
         st.code(f"""
 Uncapped Demand Component = ({row['LT_Mean']} / 30) * ({row['Agg_Std_Hist']:.2f})²
   = {term1_demand_var_uncapped:,.2f}
@@ -458,15 +468,16 @@ Supply Component          = ({row['LT_Std']}²) * ({row['Agg_Future_Demand']:.2f
 Raw SS (Uncapped)         = {z:.2f} * sqrt({term1_demand_var_uncapped:,.2f} + {term2_supply_var:,.2f})
   = {raw_ss_uncapped:,.2f}
 
-Capped DV Exposure Days   = min(L, DV_Cap) = min({row['LT_Mean']}, {dv_cap_days}) = {effective_dv_days}
+Node DV Cap Days          = {int(row['DV_Cap_Days'])}
+Effective DV Exposure     = min(L, Cap) = min({row['LT_Mean']}, {int(row['DV_Cap_Days'])}) = {effective_dv_days}
 Capped Demand Component   = ({effective_dv_days} / 30) * ({row['Agg_Std_Hist']:.2f})²
   = {term1_demand_var_capped:,.2f}
-Raw SS (DV-Capped)        = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {term2_supply_var:,.2f})
+Raw SS (Node DV-Capped)   = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {term2_supply_var:,.2f})
   = {raw_ss_capped:,.2f}
 """)
         st.info(f"🧮 **Resulting Statistical SS (Applied in plan):** {raw_ss_capped:,.2f} units")
 
-        # 4. Business Rules Application (updated with Check 3)
+        # 4. Business Rules Application (updated with Check 3: node DV cap)
         st.subheader("3. Business Rules Application")
         col_rule_1, col_rule_2, col_rule_3 = st.columns(3)
 
@@ -494,16 +505,16 @@ Raw SS (DV-Capped)        = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {ter
                 st.write("Capping logic disabled.")
 
         with col_rule_3:
-            st.markdown("**Check 3: Demand Variability Exposure Cap**")
-            st.write(f"Selected cap = **{dv_cap_days} days** → Effective exposure = **min({row['LT_Mean']}, {dv_cap_days}) = {effective_dv_days} days**.")
-            if dv_cap_days < row['LT_Mean']:
-                st.warning("⚠️ Demand variability impact reduced by exposure cap.")
+            st.markdown("**Check 3: Demand Variability Exposure Cap (Node-level)**")
+            st.write(f"Node DV cap = **{int(row['DV_Cap_Days'])} days** → Effective exposure = **min({row['LT_Mean']}, {int(row['DV_Cap_Days'])}) = {effective_dv_days} days**.")
+            if row['DV_Cap_Days'] < row['LT_Mean']:
+                st.warning("⚠️ Demand variability impact reduced by node DV exposure cap.")
             else:
-                st.success("✅ Cap does not reduce demand variability (LT ≤ cap).")
+                st.success("✅ Cap does not reduce demand variability (LT ≤ node DV cap).")
 
         st.markdown("---")
 
-        # 5. What-If Simulation (updated to include DV cap slider)
+        # 5. What-If Simulation (includes node DV cap slider defaulting to node value)
         st.subheader("4. What-If Simulation")
         st.write("Tweak parameters below to see how Safety Stock reacts *without* changing the global settings.")
 
@@ -529,11 +540,11 @@ Raw SS (DV-Capped)        = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {ter
         )
         sim_dv_cap = sim_cols[3].slider(
             "Simulated DV Exposure Cap (Days)",
-            min_value=0.0, max_value=120.0, value=float(dv_cap_days),
+            min_value=0.0, max_value=120.0, value=float(row['DV_Cap_Days']),
             key=f"sim_dv_cap_{calc_sku}_{calc_loc}"
         )
 
-        # Dynamic Recalculation (uses DV cap)
+        # Dynamic Recalculation (uses simulated node DV cap)
         sim_z = norm.ppf(sim_sl / 100)
         sim_demand_component = (min(sim_lt, sim_dv_cap) / 30) * (row['Agg_Std_Hist']**2)
         sim_supply_component = (sim_lt_std**2) * (row['Agg_Future_Demand'] / 30)**2
@@ -541,7 +552,7 @@ Raw SS (DV-Capped)        = {z:.2f} * sqrt({term1_demand_var_capped:,.2f} + {ter
 
         # Display Results
         res_col1, res_col2 = st.columns(2)
-        res_col1.metric("Actual SS (DV-Capped)", f"{int(raw_ss_capped)}")
+        res_col1.metric("Actual SS (Node DV-Capped)", f"{int(raw_ss_capped)}")
         res_col2.metric(
             "Simulated SS (New, DV-Capped)",
             f"{int(sim_ss)}",
