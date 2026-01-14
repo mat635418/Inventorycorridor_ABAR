@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -523,4 +522,3 @@ if s_file and d_file and lt_file:
             st.warning(f"📈 Increasing service or lead time requires **{int(sim_ss - raw_ss_calc)}** more units.")
 else:
     st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
-``
