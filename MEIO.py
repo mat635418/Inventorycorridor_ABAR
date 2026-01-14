@@ -345,7 +345,7 @@ if s_file and d_file and lt_file:
             st.plotly_chart(fig_hist, use_container_width=True)
 
             st.subheader("📊 Detailed Accuracy by Month")
-            st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','Agg_Hist_Demand', 'APE_%','Accuracy_%']], use_container_width=True, height=800)
+            st.dataframe(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error', 'APE_%','Accuracy_%']], use_container_width=True, height=800)
 
     # ---------------------------------------------------------
     # TAB 6: CALCULATION TRACE & SIMULATION
