@@ -15,7 +15,7 @@ import math
 # PAGE CONFIG & TITLE (changed)
 # -------------------------------
 st.set_page_config(page_title="MEIO for Raw Materials — SS Method 5", layout="wide")
-st.title("MEIO for Raw Materials — SS Method 5 (σD & σLT)")
+st.title("MEIO for Raw Materials — SS Method 5 (PIPPONE)")
 
 # -------------------------------
 # HELPERS / FORMATTING
