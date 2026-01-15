@@ -1,3 +1,5 @@
+# Multi-Echelon Inventory Optimizer — Enhanced Version
+# Enhanced by Copilot for mat635418 — 2026-01-15
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,15 +9,17 @@ from pyvis.network import Network
 import streamlit.components.v1 as components
 from scipy.stats import norm
 import os
+import math
+from io import StringIO
 
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="Multi-Echelon Inventory Optimizer (Method 5 SS)", layout="wide")
-st.title("📊 Multi-Echelon Network Inventory Optimizer — SS Method 5 (σD & σLT)")
+st.title("📊 Multi-Echelon Network Inventory Optimizer — SS Method 5 (σD & σLT) — Enhanced")
 
 # -------------------------------
-# HELPERS
+# HELPERS / FORMATTING
 # -------------------------------
 def clean_numeric(series):
     """Cleans strings/objects into numeric values, handling formatting issues."""
@@ -28,6 +32,47 @@ def clean_numeric(series):
         .str.strip(),
         errors='coerce'
     ).fillna(0)
+
+def euro_format(x, always_two_decimals=True):
+    """
+    Formats numbers with '.' as thousand separator and ',' as decimal separator.
+    Examples: 1234.5 -> '1.234,50' (if always_two_decimals True)
+    """
+    try:
+        if pd.isna(x):
+            return ""
+        neg = x < 0
+        x_abs = abs(float(x))
+        if always_two_decimals:
+            s = f"{x_abs:,.2f}"  # 1,234,567.89
+        else:
+            # choose integer if it's whole
+            if math.isclose(x_abs, round(x_abs)):
+                s = f"{x_abs:,.0f}"
+            else:
+                s = f"{x_abs:,.2f}"
+        # swap separators: comma->tmp, dot->comma, tmp->dot
+        s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
+        return f"-{s}" if neg else s
+    except Exception:
+        return str(x)
+
+def df_format_for_display(df, cols=None, two_decimals_cols=None):
+    """
+    Returns a copy of df with selected numeric columns formatted to euro_format strings.
+    If cols is None, attempt to format common columns.
+    two_decimals_cols: list of columns to force two decimals; others will be formatted with integer where possible.
+    """
+    d = df.copy()
+    if cols is None:
+        cols = [c for c in d.columns if d[c].dtype.kind in 'biufc']
+    for c in cols:
+        if c in d.columns:
+            if two_decimals_cols and c in two_decimals_cols:
+                d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=True))
+            else:
+                d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=False))
+    return d
 
 def aggregate_network_stats(df_forecast, df_stats, df_lt):
     """Propagates demand and variance up the supply chain network."""
@@ -84,9 +129,12 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 # SIDEBAR & FILE LOADING LOGIC
 # -------------------------------
 st.sidebar.header("⚙️ Parameters")
-service_level = st.sidebar.slider("Service Level (%)", 90.0, 99.9, 99.0) / 100
+service_level = st.sidebar.slider("Service Level (%)", 50.0, 99.9, 99.0) / 100
 z = norm.ppf(service_level)
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("📐 Calculation Settings")
+days_per_month = st.sidebar.number_input("Days per month (used to convert monthly->daily)", value=30, min_value=1)
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛡️ Safety Stock Rules")
 zero_if_no_net_fcst = st.sidebar.checkbox("Force Zero SS if No Network Demand", value=True)
@@ -162,23 +210,12 @@ if s_file and d_file and lt_file:
     results = results.fillna({'Forecast': 0, 'Agg_Std_Hist': 0, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
 
     # --------------------------------
-    # SAFETY STOCK — SS METHOD 5
+    # SAFETY STOCK — SS METHOD 5 (vectorized)
     # --------------------------------
-    # Method 5 formula (daily terms):
-    # SS = Z * sqrt( σ_D^2 * LT + σ_LT^2 * D^2 )
-    # Where:
-    # - σ_D is demand std dev per day (we store monthly std dev in Agg_Std_Hist, so σ_D_daily = Agg_Std_Hist / sqrt(30))
-    # - D is average demand per day = Agg_Future_Demand / 30
-    # - LT and σ_LT are in days (LT_Mean and LT_Std)
-    #
-    # Vectorized implementation (maintaining same units and behavior):
-    # σ_D_daily^2 = (Agg_Std_Hist ** 2) / 30
-    # D_daily = Agg_Future_Demand / 30
-    # SS_Raw = z * sqrt( σ_D_daily^2 * LT_Mean + (LT_Std ** 2) * (D_daily ** 2) )
-
+    # Convert monthly -> daily using days_per_month
     results['SS_Raw'] = z * np.sqrt(
-        (results['Agg_Std_Hist']**2 / 30.0) * results['LT_Mean'] +
-        (results['LT_Std']**2) * (results['Agg_Future_Demand'] / 30.0)**2
+        (results['Agg_Std_Hist']**2 / float(days_per_month)) * results['LT_Mean'] +
+        (results['LT_Std']**2) * (results['Agg_Future_Demand'] / float(days_per_month))**2
     )
 
     results['Adjustment_Status'] = 'Optimal (Statistical)'
@@ -203,7 +240,9 @@ if s_file and d_file and lt_file:
 
         results['Safety_Stock'] = results['Safety_Stock'].clip(lower=l_lim, upper=u_lim)
 
+    # Round Safety Stock for final presentation, but keep raw in SS_Raw for trace
     results['Safety_Stock'] = results['Safety_Stock'].round(0)
+    # Domain-specific overrides (kept from original)
     results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0
     results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast']
 
@@ -216,7 +255,6 @@ if s_file and d_file and lt_file:
     hist['Accuracy_%'] = (1 - hist['APE_%'] / 100) * 100
 
     # --- NEW: Aggregated historical network view (per Product, Period) ---
-    # Uses df_s because it already holds historical Consumption and historical Forecast.
     hist_net = (
         df_s.groupby(['Product', 'Period'], as_index=False)
             .agg(Network_Consumption=('Consumption', 'sum'),
@@ -224,62 +262,123 @@ if s_file and d_file and lt_file:
     )
 
     # -------------------------------
-    # TABS
+    # TABS (added "By Material")
     # -------------------------------
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📈 Inventory Corridor",
         "🕸️ Network Topology",
         "📋 Full Plan",
         "⚖️ Efficiency Analysis",
         "📉 Forecast Accuracy",
-        "🧮 Calculation Trace & Sim"
+        "🧮 Calculation Trace & Sim",
+        "📦 By Material"
     ])
 
+    # -------------------------------
+    # TAB 1: Inventory Corridor (with highlighted selection)
+    # -------------------------------
     with tab1:
-        sku = st.selectbox("Product", sorted(results['Product'].unique()))
-        loc = st.selectbox("Location", sorted(results[results['Product'] == sku]['Location'].unique()))
-        plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
+        # Left: selectors + plot ; Right: highlighted badge + quick KPIs
+        left, right = st.columns([3, 1])
+        with left:
+            sku = st.selectbox("Product", sorted(results['Product'].unique()))
+            loc = st.selectbox("Location", sorted(results[results['Product'] == sku]['Location'].unique()))
+            plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
 
-        fig = go.Figure([
-            go.Scatter(x=plot_df['Period'], y=plot_df['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=0)),
-            go.Scatter(x=plot_df['Period'], y=plot_df['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
-            go.Scatter(x=plot_df['Period'], y=plot_df['Forecast'], name='Local Direct Forecast', line=dict(color='black', dash='dot')),
-            go.Scatter(x=plot_df['Period'], y=plot_df['Agg_Future_Demand'], name='Total Network Demand', line=dict(color='blue', dash='dash'))
-        ])
-        st.plotly_chart(fig, use_container_width=True)
+            # show corridor chart
+            fig = go.Figure([
+                go.Scatter(x=plot_df['Period'], y=plot_df['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=0)),
+                go.Scatter(x=plot_df['Period'], y=plot_df['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
+                go.Scatter(x=plot_df['Period'], y=plot_df['Forecast'], name='Local Direct Forecast', line=dict(color='black', dash='dot')),
+                go.Scatter(x=plot_df['Period'], y=plot_df['Agg_Future_Demand'], name='Total Network Demand', line=dict(color='blue', dash='dash'))
+            ])
+            fig.update_layout(legend=dict(orientation="h"))
+            st.plotly_chart(fig, use_container_width=True)
 
+        # Right: big highlighted badge with selection and key numbers (top-right)
+        with right:
+            # badge with large font and background
+            badge_html = f"""
+            <div style="background:#0b3d91;padding:18px;border-radius:8px;color:white;text-align:right;">
+                <div style="font-size:14px;opacity:0.8">Selected</div>
+                <div style="font-size:22px;font-weight:700">{sku} — {loc}</div>
+                <div style="margin-top:8px;font-size:13px;opacity:0.95">
+                    Fcst (Local): <strong>{euro_format(float(plot_df['Forecast'].sum()))}</strong><br>
+                    Net Demand: <strong>{euro_format(float(plot_df['Agg_Future_Demand'].sum()))}</strong><br>
+                    SS (Current): <strong>{euro_format(float(plot_df['Safety_Stock'].sum()), True)}</strong>
+                </div>
+            </div>
+            """
+            st.markdown(badge_html, unsafe_allow_html=True)
+
+            # quick KPIs
+            s1, s2 = st.columns(2)
+            s1.metric("Total SS (sku/loc)", euro_format(float(plot_df['Safety_Stock'].sum()), True))
+            s2.metric("Total Net Demand", euro_format(float(plot_df['Agg_Future_Demand'].sum()), True))
+
+    # -------------------------------
+    # TAB 2: Network Topology (enhanced greying)
+    # -------------------------------
     with tab2:
+        sku = st.selectbox("Product for Network View", sorted(results['Product'].unique()), key="network_sku")
         next_month = sorted(results['Period'].unique())[0]
         label_data = results[results['Period'] == next_month].set_index(['Product', 'Location']).to_dict('index')
         sku_lt = df_lt[df_lt['Product'] == sku]
 
-        net = Network(height="1200px", width="100%", directed=True, bgcolor="#eeeeee")
+        net = Network(height="1200px", width="100%", directed=True, bgcolor="#ffffff", font_color="#222222")
         all_nodes = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
 
-        for n in all_nodes:
-            m = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
-            if m['Agg_Future_Demand'] == 0:
-                node_color = '#DDDDDD'
-                font_color = '#888888'
+        # Build a quick lookup to know which nodes have demand for this sku in the period
+        demand_lookup = {loc: label_data.get((sku, loc), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0}) for loc in all_nodes}
+
+        for n in sorted(all_nodes):
+            m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
+            used = (m['Agg_Future_Demand'] > 0) or (m['Forecast'] > 0)
+            # format label numbers using euro_format
+            lbl = f"{n}\nFcst: {euro_format(m['Forecast'])}\nNet: {euro_format(m['Agg_Future_Demand'])}\nSS: {euro_format(m['Safety_Stock'], True)}"
+            if not used:
+                # much greyer, smaller font, muted background
+                net.add_node(
+                    n,
+                    label=lbl,
+                    title=lbl,
+                    color={'background': '#f0f0f0', 'border': '#cccccc'},
+                    shape='box',
+                    font={'color': '#888888', 'size': 10}
+                )
             else:
-                node_color = '#31333F' if n in sku_lt['From_Location'].values else '#ff4b4b'
-                font_color = 'white'
-            label = f"{n}\nFcst: {int(m['Forecast'])}\nNet: {int(m['Agg_Future_Demand'])}\nSS: {int(m['Safety_Stock'])}"
-            net.add_node(
-                n,
-                label=label,
-                title=label,
-                color=node_color,
-                shape='box',
-                font={'color': font_color}
-            )
+                # stronger node color
+                is_source = n in set(sku_lt['From_Location'])
+                bg = '#2E7D32' if is_source else '#FF5252'
+                net.add_node(
+                    n,
+                    label=lbl,
+                    title=lbl,
+                    color={'background': bg, 'border': '#222222'},
+                    shape='box',
+                    font={'color': 'white', 'size': 12}
+                )
 
+        # Add edges and grey them if both ends unused
         for _, r in sku_lt.iterrows():
-            net.add_edge(r['From_Location'], r['To_Location'], label=f"{r['Lead_Time_Days']}d")
+            from_n, to_n = r['From_Location'], r['To_Location']
+            from_used = (demand_lookup.get(from_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(from_n, {}).get('Forecast', 0) > 0)
+            to_used = (demand_lookup.get(to_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(to_n, {}).get('Forecast', 0) > 0)
+            edge_color = '#bbbbbb' if (not from_used and not to_used) else '#666666'
+            net.add_edge(from_n, to_n, label=f"{int(r['Lead_Time_Days'])}d", color=edge_color)
 
+        net.set_options("""
+        var options = {
+          "physics": {"stabilization": {"iterations": 250}},
+          "nodes": {"borderWidthSelected":2}
+        }
+        """)
         net.save_graph("net.html")
         components.html(open("net.html").read(), height=1250)
 
+    # -------------------------------
+    # TAB 3: Full Plan (with exports)
+    # -------------------------------
     with tab3:
         st.subheader("📋 Global Inventory Plan")
         col1, col2, col3 = st.columns(3)
@@ -292,12 +391,22 @@ if s_file and d_file and lt_file:
         if f_loc: filtered = filtered[filtered['Location'].isin(f_loc)]
         if f_period: filtered = filtered[filtered['Period'].isin(f_period)]
 
-        st.dataframe(filtered[['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']],
-                     use_container_width=True, height=700)
+        # Format for display
+        display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
+        disp = df_format_for_display(filtered[display_cols].copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock','Max_Corridor'], two_decimals_cols=['Forecast'])
+        st.dataframe(disp, use_container_width=True, height=700)
 
-  
+        # Export CSV of the filtered view
+        csv_buf = filtered[display_cols].to_csv(index=False)
+        st.download_button("📥 Download Filtered Plan (CSV)", data=csv_buf, file_name="filtered_plan.csv", mime="text/csv")
+
+    # -------------------------------
+    # TAB 4: Efficiency Analysis
+    # -------------------------------
     with tab4:
-        st.subheader(f"⚖️ Efficiency & Policy Analysis: {next_month}")
+        st.subheader("⚖️ Efficiency & Policy Analysis")
+        sku = st.selectbox("Material", sorted(results['Product'].unique()), key="eff_sku")
+        next_month = sorted(results['Period'].unique())[0]
         eff = results[(results['Product'] == sku) & (results['Period'] == next_month)].copy()
 
         # Ratio based on network demand
@@ -313,7 +422,7 @@ if s_file and d_file and lt_file:
         m1, m2, m3 = st.columns(3)
         m1.metric(f"Network Ratio ({sku})", f"{sku_ratio:.2f}")
         m2.metric("Global Network Ratio (All Items)", f"{global_ratio:.2f}")
-        m3.metric("Total SS for Material", f"{int(total_ss_sku)}")
+        m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
 
         st.markdown("---")
         c1, c2 = st.columns([2, 1])
@@ -333,12 +442,19 @@ if s_file and d_file and lt_file:
             st.markdown("**Top Nodes by Efficiency Gap**")
             eff['Gap'] = (eff['Safety_Stock'] - eff['SS_Raw']).abs()
             st.dataframe(
-                eff.sort_values('Gap', ascending=False)[
-                    ['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']
-                ].head(10),
+                df_format_for_display(
+                    eff.sort_values('Gap', ascending=False)[
+                        ['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']
+                    ],
+                    cols=['Safety_Stock'],
+                    two_decimals_cols=['Safety_Stock']
+                ).head(10),
                 use_container_width=True
             )
 
+    # -------------------------------
+    # TAB 5: Forecast Accuracy
+    # -------------------------------
     with tab5:
         st.subheader("📉 Historical Forecast vs Actuals")
 
@@ -350,9 +466,12 @@ if s_file and d_file and lt_file:
 
         if not hdf.empty:
             k1, k2, k3 = st.columns(3)
-            k1.metric("WAPE (%)", f"{(hdf['Abs_Error'].sum() / hdf['Consumption'].replace(0, np.nan).sum() * 100):.1f}")
-            k2.metric("Bias (%)", f"{(hdf['Deviation'].sum() / hdf['Consumption'].replace(0, np.nan).sum() * 100):.1f}")
-            k3.metric("Avg Accuracy (%)", f"{hdf['Accuracy_%'].mean():.1f}")
+            wape_val = (hdf['Abs_Error'].sum() / hdf['Consumption'].replace(0, np.nan).sum() * 100)
+            bias_val = (hdf['Deviation'].sum() / hdf['Consumption'].replace(0, np.nan).sum() * 100)
+            avg_acc = hdf['Accuracy_%'].mean()
+            k1.metric("WAPE (%)", f"{wape_val:.1f}")
+            k2.metric("Bias (%)", f"{bias_val:.1f}")
+            k3.metric("Avg Accuracy (%)", f"{avg_acc:.1f}")
 
             fig_hist = go.Figure([
                 go.Scatter(x=hdf['Period'], y=hdf['Consumption'], name='Actuals', line=dict(color='black')),
@@ -360,7 +479,7 @@ if s_file and d_file and lt_file:
             ])
             st.plotly_chart(fig_hist, use_container_width=True)
 
-            # --- NEW: Aggregated historical network totals table for the selected product ---
+            # Aggregated network totals table for the selected product
             st.subheader("🌐 Aggregated Network History (Selected Product)")
             net_table = (
                 hist_net[hist_net['Product'] == h_sku]
@@ -369,7 +488,7 @@ if s_file and d_file and lt_file:
                         .drop(columns=['Product'])
             )
 
-            # Optional: add a quick network-level WAPE for extra context
+            # Network-level WAPE
             if not net_table.empty:
                 net_table['Net_Abs_Error'] = (net_table['Network_Consumption'] - net_table['Network_Forecast_Hist']).abs()
                 net_wape = (net_table['Net_Abs_Error'].sum() /
@@ -379,24 +498,19 @@ if s_file and d_file and lt_file:
 
             c_net1, c_net2 = st.columns([3, 1])
             with c_net1:
-                st.dataframe(
-                    net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']],
-                    use_container_width=True, height=500
-                )
+                st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(),
+                                                   cols=['Network_Consumption','Network_Forecast_Hist'], two_decimals_cols=['Network_Consumption']), use_container_width=True, height=500)
             with c_net2:
                 st.metric("Network WAPE (%)", f"{net_wape:.1f}")
 
             st.subheader("📊 Detailed Accuracy by Month")
-            st.dataframe(
-                hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']],
-                use_container_width=True,
-                height=500
-            )
+            st.dataframe(df_format_for_display(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']].copy(),
+                                              cols=['Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']), use_container_width=True, height=500)
         else:
             st.warning("⚠️ No historical sales data (sales.csv) found for this selection. Accuracy metrics cannot be calculated.")
 
     # --------------------------------
-    # TAB 6: CALCULATION TRACE & SIMULATION
+    # TAB 6: Calculation Trace & Simulation
     # --------------------------------
     with tab6:
         st.header("🧮 Transparent Calculation Engine")
@@ -406,15 +520,12 @@ if s_file and d_file and lt_file:
         c1, c2, c3 = st.columns(3)
         calc_sku = c1.selectbox("Select Product", sorted(results['Product'].unique()), key="c_sku")
 
-        # Filter locations based on SKU
         avail_locs = sorted(results[results['Product'] == calc_sku]['Location'].unique())
         calc_loc = c2.selectbox("Select Location", avail_locs, key="c_loc")
 
-        # Filter periods
         avail_periods = sorted(results['Period'].unique())
         calc_period = c3.selectbox("Select Period", avail_periods, key="c_period")
 
-        # Get specific row data
         row = results[
             (results['Product'] == calc_sku) &
             (results['Location'] == calc_loc) &
@@ -423,22 +534,19 @@ if s_file and d_file and lt_file:
 
         st.markdown("---")
 
-        # 2. Input Variables Display
+        # 2. Input Variables Display (formatted)
         st.subheader("1. Actual Inputs (Frozen)")
         i1, i2, i3, i4, i5 = st.columns(5)
-        i1.metric("Service Level", f"{service_level*100}%", help=f"Z-Score: {z:.2f}")
-        i2.metric("Network Demand (D, monthly)", f"{row['Agg_Future_Demand']:,.1f}", help="Aggregated Future Demand (monthly)")
-        i3.metric("Network Std Dev (σ_D, monthly)", f"{row['Agg_Std_Hist']:,.1f}", help="Aggregated Historical Std Dev (monthly totals)")
+        i1.metric("Service Level", f"{service_level*100:.2f}%", help=f"Z-Score: {z:.4f}")
+        i2.metric("Network Demand (D, monthly)", euro_format(row['Agg_Future_Demand'], True), help="Aggregated Future Demand (monthly)")
+        i3.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True), help="Aggregated Historical Std Dev (monthly totals)")
         i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days")
         i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
 
         # 3. Mathematical Trace
         st.subheader("2. Statistical Calculation (Actual)")
-        # For Method 5 we convert monthly statistics to daily equivalents where needed:
-        # σ_D_daily^2 = (Agg_Std_Hist ** 2) / 30
-        # D_daily = Agg_Future_Demand / 30
-        term1_demand_var = (row['Agg_Std_Hist']**2 / 30.0) * row['LT_Mean']   # σ_D_daily^2 * LT
-        term2_supply_var = (row['LT_Std']**2) * ((row['Agg_Future_Demand'] / 30.0)**2)  # σ_LT^2 * D_daily^2
+        term1_demand_var = (row['Agg_Std_Hist']**2 / float(days_per_month)) * row['LT_Mean']
+        term2_supply_var = (row['LT_Std']**2) * ((row['Agg_Future_Demand'] / float(days_per_month))**2)
         combined_sd = np.sqrt(term1_demand_var + term2_supply_var)
         raw_ss_calc = z * combined_sd
 
@@ -448,18 +556,18 @@ if s_file and d_file and lt_file:
 
         st.markdown("**Step-by-Step Substitution (values used):**")
         st.code(f"""
-1. σ_D_daily^2 (from monthly agg std) = ({row['Agg_Std_Hist']:.2f})^2 / 30
-   Demand Component = σ_D_daily^2 * L = {term1_demand_var:,.2f}
-2. Supply Component = σ_L^2 * D_daily^2 = ({row['LT_Std']:.2f})^2 * ({row['Agg_Future_Demand']:.2f} / 30)^2
-   = {term2_supply_var:,.2f}
-3. Combined Variance = {term1_demand_var:,.2f} + {term2_supply_var:,.2f}
-   = {(term1_demand_var + term2_supply_var):,.2f}
+1. σ_D_daily^2 (from monthly agg std) = ({euro_format(row['Agg_Std_Hist'], True)})^2 / {days_per_month}
+   Demand Component = σ_D_daily^2 * L = {euro_format(term1_demand_var, True)}
+2. Supply Component = σ_L^2 * D_daily^2 = ({euro_format(row['LT_Std'], True)})^2 * ({euro_format(row['Agg_Future_Demand'], True)} / {days_per_month})^2
+   = {euro_format(term2_supply_var, True)}
+3. Combined Variance = {euro_format(term1_demand_var, True)} + {euro_format(term2_supply_var, True)}
+   = {euro_format(term1_demand_var + term2_supply_var, True)}
 4. Combined Std Dev = sqrt(Combined Variance)
-   = {combined_sd:,.2f}
-5. Raw SS = {z:.2f} (Z-Score) * {combined_sd:,.2f}
-   = {raw_ss_calc:,.2f} units
+   = {euro_format(combined_sd, True)}
+5. Raw SS = {z:.4f} (Z-Score) * {euro_format(combined_sd, True)}
+   = {euro_format(raw_ss_calc, True)} units
 """)
-        st.info(f"🧮 **Resulting Statistical SS (Method 5):** {raw_ss_calc:,.2f} units")
+        st.info(f"🧮 **Resulting Statistical SS (Method 5):** {euro_format(raw_ss_calc, True)} units")
 
         # 4. Rules Application
         st.subheader("3. Business Rules Application")
@@ -478,11 +586,11 @@ if s_file and d_file and lt_file:
                 lower_limit = row['Agg_Future_Demand'] * (cap_range[0]/100)
                 upper_limit = row['Agg_Future_Demand'] * (cap_range[1]/100)
                 st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
-                st.write(f"Range: [{lower_limit:,.1f}, {upper_limit:,.1f}]")
+                st.write(f"Range: [{euro_format(lower_limit, True)}, {euro_format(upper_limit, True)}]")
                 if raw_ss_calc > upper_limit:
-                    st.warning(f"⚠️ Raw SS ({raw_ss_calc:,.1f}) > Max Cap ({upper_limit:,.1f}). Capping downwards.")
+                    st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) > Max Cap ({euro_format(upper_limit, True)}). Capping downwards.")
                 elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
-                    st.warning(f"⚠️ Raw SS ({raw_ss_calc:,.1f}) < Min Cap ({lower_limit:,.1f}). Buffering upwards.")
+                    st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) < Min Cap ({euro_format(lower_limit, True)}). Buffering upwards.")
                 else:
                     st.success("✅ Raw SS is within efficient boundaries.")
             else:
@@ -494,7 +602,6 @@ if s_file and d_file and lt_file:
         st.subheader("4. What-If Simulation")
         st.write("Tweak parameters below to see how Safety Stock reacts *without* changing the global settings.")
 
-        # Simulation Sliders (dynamic keys to ensure sliders reset when you change SKU/Loc)
         sim_cols = st.columns(3)
         sim_sl = sim_cols[0].slider(
             "Simulated Service Level (%)",
@@ -515,25 +622,54 @@ if s_file and d_file and lt_file:
             key=f"sim_lt_std_{calc_sku}_{calc_loc}"
         )
 
-        # Dynamic Recalculation using Method 5 (with same monthly->daily conversions)
         sim_z = norm.ppf(sim_sl / 100.0)
         sim_ss = sim_z * np.sqrt(
-            (row['Agg_Std_Hist']**2 / 30.0) * sim_lt +
-            (sim_lt_std**2) * (row['Agg_Future_Demand'] / 30.0)**2
+            (row['Agg_Std_Hist']**2 / float(days_per_month)) * sim_lt +
+            (sim_lt_std**2) * (row['Agg_Future_Demand'] / float(days_per_month))**2
         )
 
-        # Display Results
         res_col1, res_col2 = st.columns(2)
-        res_col1.metric("Original SS (Actual)", f"{int(raw_ss_calc)}")
+        res_col1.metric("Original SS (Actual)", euro_format(raw_ss_calc, True))
         res_col2.metric(
             "Simulated SS (New)",
-            f"{int(sim_ss)}",
-            delta=f"{int(sim_ss - raw_ss_calc)} Units",
+            euro_format(sim_ss, True),
+            delta=euro_format(sim_ss - raw_ss_calc, True),
             delta_color="inverse"
         )
         if sim_ss < raw_ss_calc:
-            st.success(f"📉 Reducing uncertainty could lower inventory by **{int(raw_ss_calc - sim_ss)}** units.")
+            st.success(f"📉 Reducing uncertainty could lower inventory by **{euro_format(raw_ss_calc - sim_ss, True)}** units.")
         elif sim_ss > raw_ss_calc:
-            st.warning(f"📈 Increasing service or lead time requires **{int(sim_ss - raw_ss_calc)}** more units.")
+            st.warning(f"📈 Increasing service or lead time requires **{euro_format(sim_ss - raw_ss_calc, True)}** more units.")
+
+    # -------------------------------
+    # TAB 7: By Material (new tab)
+    # -------------------------------
+    with tab7:
+        st.header("📦 View by Material (No Locations)")
+        t_period = st.selectbox("Select Period", sorted(results['Period'].unique()), key="mat_period")
+        mat_agg = (
+            results[results['Period'] == t_period]
+            .groupby('Product', as_index=False)
+            .agg(
+                Forecast=('Forecast', 'sum'),
+                Net_Demand=('Agg_Future_Demand', 'sum'),
+                Safety_Stock=('Safety_Stock', 'sum'),
+                Nodes=('Location', lambda s: s.nunique())
+            )
+            .sort_values('Net_Demand', ascending=False)
+        )
+
+        st.plotly_chart(
+            px.bar(mat_agg.melt(id_vars=['Product'], value_vars=['Net_Demand','Safety_Stock']),
+                   x='Product', y='value', color='variable', barmode='group',
+                   labels={'value': 'Units'}, title=f"Material Totals — {t_period.strftime('%Y-%m')}")
+            , use_container_width=True)
+
+        st.subheader("Table — Aggregated by Material")
+        st.dataframe(df_format_for_display(mat_agg.copy(), cols=['Forecast','Net_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=500)
+
+        # Export
+        st.download_button("📥 Download Material Aggregation (CSV)", data=mat_agg.to_csv(index=False), file_name="material_aggregation.csv", mime="text/csv")
+
 else:
     st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
