@@ -10,12 +10,13 @@ import streamlit.components.v1 as components
 from scipy.stats import norm
 import os
 import math
+from io import StringIO
 
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
-st.set_page_config(page_title="Multi-Echelon Inventory Optimizer (Method 5)", layout="wide")
-st.title("📊 MEIO for Raw Materials - Method 5 SS formula")
+st.set_page_config(page_title="Multi-Echelon Inventory Optimizer (Method 5 SS)", layout="wide")
+st.title("📊 MEIO for Raw Materials — SS Method 5 - Jan 2026")
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -30,23 +31,32 @@ def clean_numeric(series):
     Returns numeric (float) with NaN for unparsable values.
     """
     s = series.astype(str).str.strip()
+    # Convert empty or dash-like placeholders to NaN
     s = s.replace({'': np.nan, '-': np.nan, '—': np.nan, 'na': np.nan, 'n/a': np.nan, 'None': np.nan})
-    # parentheses to negative
+    # Handle parentheses indicating negatives: (123) -> -123
     paren_mask = s.str.startswith('(') & s.str.endswith(')')
     s.loc[paren_mask] = '-' + s.loc[paren_mask].str[1:-1]
+    # Remove common thousand separators and non-numeric characters but preserve '-' and '.' and digits
+    # Replace commas (thousand separators), spaces
     s = s.str.replace(',', '', regex=False).str.replace(' ', '', regex=False)
+    # Drop any trailing non-numeric characters (e.g., currency), and keep minus and dot and digits
     s = s.str.replace(r'[^\d\.\-]+', '', regex=True)
+    # Convert to numeric
     out = pd.to_numeric(s, errors='coerce')
     return out
 
 def euro_format(x, always_two_decimals=True):
+    """
+    Formats numbers with '.' as thousand separator and ',' as decimal separator.
+    Examples: 1234.5 -> '1.234,50' (if always_two_decimals True)
+    """
     try:
         if x is None or (isinstance(x, float) and np.isnan(x)):
             return ""
         neg = float(x) < 0
         x_abs = abs(float(x))
         if always_two_decimals:
-            s = f"{x_abs:,.2f}"
+            s = f"{x_abs:,.2f}"  # 1,234,567.89
         else:
             if math.isclose(x_abs, round(x_abs)):
                 s = f"{x_abs:,.0f}"
@@ -58,6 +68,10 @@ def euro_format(x, always_two_decimals=True):
         return str(x)
 
 def df_format_for_display(df, cols=None, two_decimals_cols=None):
+    """
+    Returns a copy of df with selected numeric columns formatted to euro_format strings.
+    If cols is None, attempt to format common numeric columns.
+    """
     d = df.copy()
     if cols is None:
         cols = [c for c in d.columns if d[c].dtype.kind in 'biufc']
@@ -72,6 +86,12 @@ def df_format_for_display(df, cols=None, two_decimals_cols=None):
 def aggregate_network_stats(df_forecast, df_stats, df_lt):
     """
     Propagates demand and variance up the supply chain network.
+
+    Notes:
+    - Expects df_forecast with columns ['Product','Location','Period','Forecast'] (Forecast is local direct forecast monthly).
+    - df_stats should contain ['Product','Location','Local_Std'] where Local_Std is monthly std of local consumption.
+    - df_lt contains network routes with 'From_Location' -> 'To_Location' mapping for the product.
+    - Algorithm aggregated demand (sum of downstream children) upwards to parents iteratively.
     """
     results = []
     months = df_forecast['Period'].unique()
@@ -95,19 +115,26 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
             agg_var = {}
             for n in nodes:
                 local_std = p_stats.get(n, {}).get('Local_Std', np.nan)
-                agg_var[n] = np.nan if pd.isna(local_std) else float(local_std)**2
+                # If missing local std, we will set as NaN for now and handle later
+                if pd.isna(local_std):
+                    agg_var[n] = np.nan
+                else:
+                    agg_var[n] = float(local_std)**2
 
+            # Build children map (parent -> list(children))
             children = {}
             if not p_lt.empty:
                 for _, row in p_lt.iterrows():
                     children.setdefault(row['From_Location'], []).append(row['To_Location'])
 
+            # Propagate children demand up to parents iteratively
             for _ in range(30):
                 changed = False
                 for parent in nodes:
                     child_list = children.get(parent, [])
                     if child_list:
                         new_d = float(p_fore.get(parent, {'Forecast': 0})['Forecast']) + sum(agg_demand.get(c, 0) for c in child_list)
+                        # For variance: sum variances of children + local variance
                         child_vars = [agg_var.get(c, np.nan) for c in child_list]
                         if any(pd.isna(v) for v in child_vars) or pd.isna(agg_var.get(parent, np.nan)):
                             new_v = np.nan
@@ -120,6 +147,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
                 if not changed:
                     break
 
+            # Finalize: replace NaN variances with np.nan (to be handled by caller with fallback)
             for n in nodes:
                 results.append({
                     'Product': prod,
@@ -149,8 +177,10 @@ cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200),
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Sources (CSV)")
+# Default local filenames
 DEFAULT_FILES = {"sales": "sales.csv", "demand": "demand.csv", "lt": "leadtime.csv"}
 
+# File Uploaders
 s_upload = st.sidebar.file_uploader("1. Sales Data (Historical: sales.csv)", type="csv")
 d_upload = st.sidebar.file_uploader("2. Demand Data (Future Forecast: demand.csv)", type="csv")
 lt_upload = st.sidebar.file_uploader("3. Lead Time Data (Network Routes: leadtime.csv)", type="csv")
@@ -178,9 +208,11 @@ if s_file and d_file and lt_file:
         st.error(f"Error reading uploaded files: {e}")
         st.stop()
 
+    # Trim column names
     for df in [df_s, df_d, df_lt]:
         df.columns = [c.strip() for c in df.columns]
 
+    # Validate required columns (minimal set)
     needed_sales_cols = {'Product', 'Location', 'Period', 'Consumption', 'Forecast'}
     needed_demand_cols = {'Product', 'Location', 'Period', 'Forecast'}
     needed_lt_cols = {'Product', 'From_Location', 'To_Location', 'Lead_Time_Days', 'Lead_Time_Std_Dev'}
@@ -195,22 +227,29 @@ if s_file and d_file and lt_file:
         st.error(f"leadtime.csv missing columns: {needed_lt_cols - set(df_lt.columns)}")
         st.stop()
 
+    # Parse Periods to month start timestamps
     df_s['Period'] = pd.to_datetime(df_s['Period'], errors='coerce')
     df_d['Period'] = pd.to_datetime(df_d['Period'], errors='coerce')
     df_s['Period'] = df_s['Period'].dt.to_period('M').dt.to_timestamp()
     df_d['Period'] = df_d['Period'].dt.to_period('M').dt.to_timestamp()
 
+    # Clean numeric columns robustly
     df_s['Consumption'] = clean_numeric(df_s['Consumption'])
     df_s['Forecast'] = clean_numeric(df_s['Forecast'])
     df_d['Forecast'] = clean_numeric(df_d['Forecast'])
     df_lt['Lead_Time_Days'] = clean_numeric(df_lt['Lead_Time_Days'])
     df_lt['Lead_Time_Std_Dev'] = clean_numeric(df_lt['Lead_Time_Std_Dev'])
 
+    # HISTORICAL VARIABILITY (monthly, per product-location)
     stats = df_s.groupby(['Product', 'Location'])['Consumption'].agg(['mean', 'std']).reset_index()
     stats.columns = ['Product', 'Location', 'Local_Mean', 'Local_Std']
+    # Where std is NaN (insufficient data), we'll keep NaN and apply fallback below
+    # Provide a better fallback: global median std for same product or global if not available
     global_median_std = stats['Local_Std'].median(skipna=True)
     if pd.isna(global_median_std) or global_median_std == 0:
-        global_median_std = 1.0
+        global_median_std = 1.0  # conservative fallback if everything is zero/missing
+
+    # For any missing Local_Std use product median or global median
     prod_medians = stats.groupby('Product')['Local_Std'].median().to_dict()
     def fill_local_std(row):
         if not pd.isna(row['Local_Std']) and row['Local_Std'] > 0:
@@ -219,63 +258,31 @@ if s_file and d_file and lt_file:
         return pm if not pd.isna(pm) else global_median_std
     stats['Local_Std'] = stats.apply(fill_local_std, axis=1)
 
+    # NETWORK AGGREGATION
     network_stats = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt)
 
+    # LEAD TIME RECEIVING NODES: mean lead times for the receiving location (To_Location)
     node_lt = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
     node_lt.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
 
+    # MERGE
     results = pd.merge(network_stats, df_d[['Product', 'Location', 'Period', 'Forecast']],
                        on=['Product', 'Location', 'Period'], how='left')
     results = pd.merge(results, node_lt, on=['Product', 'Location'], how='left')
 
+    # Fill defaults
     results = results.fillna({'Forecast': 0, 'Agg_Std_Hist': np.nan, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
+
+    # If Agg_Std_Hist is NaN, replace with product/global fallback
     product_median_localstd = stats.groupby('Product')['Local_Std'].median().to_dict()
     results['Agg_Std_Hist'] = results.apply(
         lambda r: product_median_localstd.get(r['Product'], global_median_std) if pd.isna(r['Agg_Std_Hist']) else r['Agg_Std_Hist'],
         axis=1
     )
 
-    # -------------------------------
-    # Initial global selection modal (asks product + location on first run)
-    # The selection is stored in st.session_state['global_product'] and ['global_location'].
-    # It is applied as default across tabs, but users can change per-tab using the small "Change global selection" button (opens same modal).
-    # -------------------------------
-    def open_global_selection_modal(preselect_product=None):
-        # Use modal UI if available
-        try:
-            modal_ctx = st.modal("Primary selection — Apply globally")
-        except Exception:
-            # fallback: use expander if modal not available
-            modal_ctx = st.expander("Primary selection — Apply globally (fallback)")
-
-        with modal_ctx:
-            st.write("Select a primary Product and (optionally) a Location to use as default across tabs.")
-            products = sorted(results['Product'].unique())
-            sel_prod = st.selectbox("Product (primary)", options=[""] + products, index=0 if not preselect_product else (1 + products.index(preselect_product) if preselect_product in products else 0))
-            sel_loc = ""
-            if sel_prod:
-                locs = sorted(results[results['Product'] == sel_prod]['Location'].unique())
-                sel_loc = st.selectbox("Location (primary, optional)", options=[""] + locs, index=0)
-            if st.button("Confirm selection"):
-                st.session_state['global_product'] = sel_prod
-                st.session_state['global_location'] = sel_loc if sel_loc else ""
-                st.experimental_rerun()
-
-    # Auto open modal on first execution (when session state not yet set)
-    if 'global_product' not in st.session_state:
-        # Show modal automatically to force initial selection
-        open_global_selection_modal()
-
-    # Helper to expose change button in pages
-    def change_global_selection_button(preselect=None):
-        col1, col2 = st.columns([1, 9])
-        with col1:
-            if st.button("🔁", help="Change global Product/Location (applies across tabs)"):
-                open_global_selection_modal(preselect_product=preselect)
-
-    # -------------------------------
-    # SAFETY STOCK — SS METHOD 5
-    # -------------------------------
+    # --------------------------------
+    # SAFETY STOCK — SS METHOD 5 (vectorized)
+    # --------------------------------
     results['Pre_Rule_SS'] = z * np.sqrt(
         (results['Agg_Std_Hist']**2 / float(days_per_month)) * results['LT_Mean'] +
         (results['LT_Std']**2) * (results['Agg_Future_Demand'] / float(days_per_month))**2
@@ -283,12 +290,15 @@ if s_file and d_file and lt_file:
 
     results['Adjustment_Status'] = 'Optimal (Statistical)'
     results['Safety_Stock'] = results['Pre_Rule_SS']
+
+    # Rule: Zero if no NETWORK demand
     results['Pre_Zero_SS'] = results['Safety_Stock']
     if zero_if_no_net_fcst:
         zero_mask = (results['Agg_Future_Demand'] <= 0)
         results.loc[zero_mask, 'Adjustment_Status'] = 'Forced to Zero'
         results.loc[zero_mask, 'Safety_Stock'] = 0
 
+    # Rule: Capping based on NETWORK demand
     results['Pre_Cap_SS'] = results['Safety_Stock']
     if apply_cap:
         l_cap, u_cap = cap_range[0] / 100.0, cap_range[1] / 100.0
@@ -302,7 +312,9 @@ if s_file and d_file and lt_file:
 
         results['Safety_Stock'] = results['Safety_Stock'].clip(lower=l_lim, upper=u_lim)
 
+    # Final rounding & additional derived columns
     results['Safety_Stock'] = results['Safety_Stock'].round(0)
+    # domain-specific override preserved
     results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0
     results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast']
 
@@ -314,11 +326,30 @@ if s_file and d_file and lt_file:
     hist['APE_%'] = (hist['Abs_Error'] / hist['Consumption'].replace(0, np.nan)).fillna(0) * 100
     hist['Accuracy_%'] = (1 - hist['APE_%'] / 100) * 100
 
+    # Aggregated historical network view (per Product, Period)
     hist_net = (
         df_s.groupby(['Product', 'Period'], as_index=False)
             .agg(Network_Consumption=('Consumption', 'sum'),
                  Network_Forecast_Hist=('Forecast', 'sum'))
     )
+
+    # -------------------------------
+    # GLOBAL SELECTION (material + location) — applied across tabs but still override-able per tab
+    # -------------------------------
+    st.markdown("## Global quick filter — select a primary Material + Location (applies as default across tabs)")
+    col_a, col_b, col_c = st.columns([3,3,2])
+    all_products = sorted(results['Product'].unique())
+    global_product = col_a.selectbox("Primary Product (global)", options=[""] + all_products, index=0, key="global_product")
+    global_location = None
+    if global_product:
+        locs = sorted(results[results['Product'] == global_product]['Location'].unique())
+        global_location = col_b.selectbox("Primary Location (global)", options=[""] + locs, index=0, key="global_location")
+    col_c.write("")  # spacing
+    # show the chosen combination clearly
+    if global_product and global_location:
+        st.info(f"Global selection: Product = {global_product}  •  Location = {global_location}")
+    elif global_product:
+        st.info(f"Global selection: Product = {global_product}  •  Location = (not selected)")
 
     # -------------------------------
     # TABS
@@ -337,21 +368,20 @@ if s_file and d_file and lt_file:
     # TAB 1: Inventory Corridor
     # -------------------------------
     with tab1:
-        st.markdown("### Inventory Corridor — Selection & context")
-        change_global_selection_button(preselect=st.session_state.get('global_product', None))
-        col_left, col_right = st.columns([3, 1])
-        with col_left:
-            products = sorted(results['Product'].unique())
-            default_prod = st.session_state.get('global_product', products[0] if products else "")
-            prod_index = products.index(default_prod) if default_prod in products else 0
-            sku = st.selectbox("Product", products, index=prod_index, key='tab1_sku')
+        left, right = st.columns([3, 1])
+        with left:
+            # default to global selection if set
+            sku_default = global_product if global_product else sorted(results['Product'].unique())[0]
+            sku = st.selectbox("Product", sorted(results['Product'].unique()), index=all_products.index(sku_default) if sku_default in all_products else 0, key='tab1_sku')
+            loc_opts = sorted(results[results['Product'] == sku]['Location'].unique())
+            if global_product == sku and global_location:
+                # if global location belongs to this product, set as default
+                loc_default = global_location if global_location in loc_opts else loc_opts[0]
+            else:
+                loc_default = loc_opts[0]
+            loc = st.selectbox("Location", loc_opts, index=loc_opts.index(loc_default), key='tab1_loc')
+            st.markdown(f"**Selected (global/default)**: {sku} — {loc}")
 
-            locs = sorted(results[results['Product'] == sku]['Location'].unique())
-            default_loc = st.session_state.get('global_location', locs[0] if locs else "")
-            loc_index = locs.index(default_loc) if default_loc in locs else 0
-            loc = st.selectbox("Location", locs, index=loc_index, key='tab1_loc')
-
-            st.markdown(f"**Global selection (applied by default):** {st.session_state.get('global_product','(none)')} — {st.session_state.get('global_location','(none)')}")
             plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
 
             fig = go.Figure([
@@ -363,12 +393,12 @@ if s_file and d_file and lt_file:
             fig.update_layout(legend=dict(orientation="h"), xaxis_title='Period', yaxis_title='Units')
             st.plotly_chart(fig, use_container_width=True)
 
-        with col_right:
+        with right:
             badge_html = f"""
-            <div style="background:#0b3d91;padding:14px;border-radius:8px;color:white;text-align:right;">
-                <div style="font-size:12px;opacity:0.8">Selected</div>
-                <div style="font-size:16px;font-weight:700">{sku} — {loc}</div>
-                <div style="margin-top:8px;font-size:12px;opacity:0.95">
+            <div style="background:#0b3d91;padding:18px;border-radius:8px;color:white;text-align:right;">
+                <div style="font-size:14px;opacity:0.8">Selected</div>
+                <div style="font-size:18px;font-weight:700">{sku} — {loc}</div>
+                <div style="margin-top:8px;font-size:13px;opacity:0.95">
                     Fcst (Local): <strong>{euro_format(float(plot_df['Forecast'].sum()))}</strong><br>
                     Net Demand: <strong>{euro_format(float(plot_df['Agg_Future_Demand'].sum()))}</strong><br>
                     SS (Current): <strong>{euro_format(float(plot_df['Safety_Stock'].sum()), True)}</strong>
@@ -376,19 +406,19 @@ if s_file and d_file and lt_file:
             </div>
             """
             st.markdown(badge_html, unsafe_allow_html=True)
+
             s1, s2 = st.columns(2)
             s1.metric("Total SS (sku/loc)", euro_format(float(plot_df['Safety_Stock'].sum()), True))
             s2.metric("Total Net Demand", euro_format(float(plot_df['Agg_Future_Demand'].sum()), True))
 
     # -------------------------------
-    # TAB 2: Network Topology (rolled back to physics layout with new colors)
+    # TAB 2: Network Topology (rolled back layout, color-coded)
     # -------------------------------
     with tab2:
-        st.markdown("### Network Topology")
-        change_global_selection_button(preselect=st.session_state.get('global_product', None))
-        sku_default = st.session_state.get('global_product', None)
-        sku = sku_default if sku_default else st.selectbox("Product for Network View", sorted(results['Product'].unique()), key="network_sku")
+        sku = global_product if global_product else st.selectbox("Product for Network View", sorted(results['Product'].unique()), key="network_sku")
+        # default to latest period
         period_choices = sorted(results['Period'].unique())
+        default_period = period_choices[-1] if period_choices else None
         chosen_period = st.selectbox("Period", period_choices, index=len(period_choices)-1 if period_choices else 0, key="network_period")
 
         label_data = results[results['Period'] == chosen_period].set_index(['Product', 'Location']).to_dict('index')
@@ -396,17 +426,19 @@ if s_file and d_file and lt_file:
 
         net = Network(height="1200px", width="100%", directed=True, bgcolor="#ffffff", font_color="#222222")
 
-        # Color rules:
+        # Color rules requested:
         # - B616 very light green
-        # - BEEX light blue (first hub after B616)
+        # - BEEX first hub (after B616) light blue
         # - LUEX light blue
-        # - Other ACTIVE nodes: very light yellow
-        # - INACTIVE nodes: greyed out
+        # - Other ACTIVE nodes very light yellow
+        # - INACTIVE nodes greyed out
         hubs = {"B616", "BEEX", "LUEX"}
 
         all_nodes = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
+        # ensure hubs present
         all_nodes = set(all_nodes).union(hubs)
 
+        # Build demand lookup for the chosen period (for the product)
         demand_lookup = {}
         for n in all_nodes:
             demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
@@ -414,19 +446,20 @@ if s_file and d_file and lt_file:
         for n in sorted(all_nodes):
             m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
             used = (m['Agg_Future_Demand'] > 0) or (m['Forecast'] > 0)
+            # color mapping
             if n == 'B616':
-                bg = '#e8f5e9'  # very light green
+                bg = '#dcedc8'  # very light green
                 border = '#8bc34a'
                 font_color = '#0b3d91'
                 size = 14
-            elif n in {'BEEX', 'LUEX'}:
-                bg = '#e3f2fd'  # light blue
+            elif n == 'BEEX' or n == 'LUEX':
+                bg = '#bbdefb'  # light blue
                 border = '#64b5f6'
                 font_color = '#0b3d91'
                 size = 14
             else:
                 if used:
-                    bg = '#fffde7'  # very light yellow
+                    bg = '#fff9c4'  # very light yellow for active
                     border = '#fbc02d'
                     font_color = '#222222'
                     size = 12
@@ -440,14 +473,17 @@ if s_file and d_file and lt_file:
                          color={'background': bg, 'border': border},
                          shape='box', font={'color': font_color, 'size': size})
 
+        # Add edges; grey if both endpoints inactive
         for _, r in sku_lt.iterrows():
             from_n, to_n = r['From_Location'], r['To_Location']
             from_used = (demand_lookup.get(from_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(from_n, {}).get('Forecast', 0) > 0)
             to_used = (demand_lookup.get(to_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(to_n, {}).get('Forecast', 0) > 0)
             if not from_used and not to_used:
                 edge_color = '#dddddd'
+                font_color_edge = '#9e9e9e'
             else:
                 edge_color = '#888888'
+                font_color_edge = '#444444'
             label = f"{int(r.get('Lead_Time_Days', 0))}d" if not pd.isna(r.get('Lead_Time_Days', 0)) else ""
             net.add_edge(from_n, to_n, label=label, color=edge_color)
 
@@ -468,18 +504,18 @@ if s_file and d_file and lt_file:
     # TAB 3: Full Plan
     # -------------------------------
     with tab3:
-        st.markdown("### Full Plan — Global snapshot (defaults to primary selection)")
-        change_global_selection_button(preselect=st.session_state.get('global_product', None))
+        st.subheader("📋 Global Inventory Plan")
         col1, col2, col3 = st.columns(3)
         f_prod = col1.multiselect("Filter Product", sorted(results['Product'].unique()))
         f_loc = col2.multiselect("Filter Location", sorted(results['Location'].unique()))
         f_period = col3.multiselect("Filter Period", sorted(results['Period'].unique()))
 
         filtered = results.copy()
-        if st.session_state.get('global_product') and not f_prod:
-            filtered = filtered[filtered['Product'] == st.session_state.get('global_product')]
-        if st.session_state.get('global_location') and not f_loc:
-            filtered = filtered[filtered['Location'] == st.session_state.get('global_location')]
+        # If global selections exist, apply as defaults to filtered unless user overrides
+        if global_product and not f_prod:
+            filtered = filtered[filtered['Product'] == global_product]
+        if global_location and not f_loc:
+            filtered = filtered[filtered['Location'] == global_location]
 
         if f_prod: filtered = filtered[filtered['Product'].isin(f_prod)]
         if f_loc: filtered = filtered[filtered['Location'].isin(f_loc)]
@@ -496,11 +532,10 @@ if s_file and d_file and lt_file:
     # TAB 4: Efficiency Analysis
     # -------------------------------
     with tab4:
-        st.markdown("### Efficiency & Policy — defaults from primary selection")
-        change_global_selection_button(preselect=st.session_state.get('global_product', None))
-        all_products = sorted(results['Product'].unique())
-        sku_default = st.session_state.get('global_product', all_products[0] if all_products else "")
-        sku = st.selectbox("Material", all_products, index=all_products.index(sku_default) if sku_default in all_products else 0, key="eff_sku")
+        st.subheader("⚖️ Efficiency & Policy Analysis")
+        sku_default = global_product if global_product else sorted(results['Product'].unique())[0]
+        sku = st.selectbox("Material", sorted(results['Product'].unique()), index=all_products.index(sku_default) if sku_default in all_products else 0, key="eff_sku")
+        # default to latest period
         next_month = sorted(results['Period'].unique())[-1]
         eff = results[(results['Product'] == sku) & (results['Period'] == next_month)].copy()
 
@@ -530,6 +565,7 @@ if s_file and d_file and lt_file:
         with c2:
             st.markdown("**Status Breakdown**")
             st.table(eff['Adjustment_Status'].value_counts())
+
             st.markdown("**Top Nodes by Efficiency Gap**")
             eff['Gap'] = (eff['Safety_Stock'] - eff['Pre_Rule_SS']).abs()
             st.dataframe(
@@ -547,14 +583,15 @@ if s_file and d_file and lt_file:
     # TAB 5: Forecast Accuracy
     # -------------------------------
     with tab5:
-        st.markdown("### Forecast Accuracy")
-        change_global_selection_button(preselect=st.session_state.get('global_product', None))
-        all_products = sorted(results['Product'].unique())
-        h_sku_default = st.session_state.get('global_product', all_products[0] if all_products else "")
-        h_sku = st.selectbox("Select Product", all_products, index=all_products.index(h_sku_default) if h_sku_default in all_products else 0, key="h1")
+        st.subheader("📉 Historical Forecast vs Actuals")
+        h_sku_default = global_product if global_product else sorted(results['Product'].unique())[0]
+        h_sku = st.selectbox("Select Product", sorted(results['Product'].unique()), index=all_products.index(h_sku_default) if h_sku_default in all_products else 0, key="h1")
         h_loc_opts = sorted(results[results['Product'] == h_sku]['Location'].unique())
-        h_loc_default = st.session_state.get('global_location', h_loc_opts[0] if h_loc_opts else "")
-        h_loc = st.selectbox("Select Location", h_loc_opts, index=h_loc_opts.index(h_loc_default) if h_loc_default in h_loc_opts else 0, key="h2")
+        if global_product == h_sku and global_location:
+            h_loc_default = global_location if global_location in h_loc_opts else h_loc_opts[0]
+        else:
+            h_loc_default = h_loc_opts[0]
+        h_loc = st.selectbox("Select Location", h_loc_opts, index=h_loc_opts.index(h_loc_default), key="h2")
 
         hdf = hist[(hist['Product'] == h_sku) & (hist['Location'] == h_loc)].sort_values('Period')
         if not hdf.empty:
@@ -599,20 +636,24 @@ if s_file and d_file and lt_file:
         else:
             st.warning("⚠️ No historical sales data found for this selection. Accuracy metrics cannot be calculated.")
 
-    # -------------------------------
+    # --------------------------------
     # TAB 6: Calculation Trace & Simulation
-    # -------------------------------
+    # --------------------------------
     with tab6:
-        st.markdown("### Calculation Trace & Simulation")
-        change_global_selection_button(preselect=st.session_state.get('global_product', None))
-        all_products = sorted(results['Product'].unique())
-        calc_sku_default = st.session_state.get('global_product', all_products[0] if all_products else "")
-        calc_sku = st.selectbox("Select Product", all_products, index=all_products.index(calc_sku_default) if calc_sku_default in all_products else 0, key="c_sku")
+        st.header("🧮 Transparent Calculation Engine")
+        st.write("Select a specific node and period to see exactly how the Safety Stock number was derived.")
+
+        c1, c2, c3 = st.columns(3)
+        calc_sku_default = global_product if global_product else sorted(results['Product'].unique())[0]
+        calc_sku = c1.selectbox("Select Product", sorted(results['Product'].unique()), index=all_products.index(calc_sku_default) if calc_sku_default in all_products else 0, key="c_sku")
         avail_locs = sorted(results[results['Product'] == calc_sku]['Location'].unique())
-        calc_loc_default = st.session_state.get('global_location', avail_locs[0] if avail_locs else "")
-        calc_loc = st.selectbox("Select Location", avail_locs, index=avail_locs.index(calc_loc_default) if calc_loc_default in avail_locs else 0, key="c_loc")
+        if global_product == calc_sku and global_location:
+            calc_loc_default = global_location if global_location in avail_locs else avail_locs[0]
+        else:
+            calc_loc_default = avail_locs[0]
+        calc_loc = c2.selectbox("Select Location", avail_locs, index=avail_locs.index(calc_loc_default), key="c_loc")
         avail_periods = sorted(results['Period'].unique())
-        calc_period = st.selectbox("Select Period", avail_periods, index=len(avail_periods)-1 if avail_periods else 0, key="c_period")
+        calc_period = c3.selectbox("Select Period", avail_periods, index=len(avail_periods)-1 if avail_periods else 0, key="c_period")
 
         row = results[
             (results['Product'] == calc_sku) &
@@ -623,11 +664,12 @@ if s_file and d_file and lt_file:
             st.warning("Selection not found in results.")
         else:
             row = row.iloc[0]
+            st.markdown("---")
             st.subheader("1. Actual Inputs (Frozen)")
             i1, i2, i3, i4, i5 = st.columns(5)
             i1.metric("Service Level", f"{service_level*100:.2f}%", help=f"Z-Score: {z:.4f}")
-            i2.metric("Network Demand (D, monthly)", euro_format(row['Agg_Future_Demand'], True))
-            i3.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True))
+            i2.metric("Network Demand (D, monthly)", euro_format(row['Agg_Future_Demand'], True), help="Aggregated Future Demand (monthly)")
+            i3.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True), help="Aggregated Historical Std Dev (monthly totals)")
             i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days")
             i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
 
@@ -637,69 +679,96 @@ if s_file and d_file and lt_file:
             combined_sd = np.sqrt(term1_demand_var + term2_supply_var)
             raw_ss_calc = z * combined_sd
 
+            st.markdown("Using Safety Stock Method 5 (daily form):")
             st.latex(r"SS_{\text{raw}} = Z \times \sqrt{\,\sigma_D^2 \times L \;+\; \sigma_L^2 \times D^2\,}")
+            st.markdown("Where σ_D and D are daily values (converted from monthly inputs in the dataset).")
+
+            st.markdown("**Step-by-Step Substitution (values used):**")
             st.code(f"""
-1. Demand component (variance term) = {euro_format(term1_demand_var, True)}
-2. Lead-time component (variance term) = {euro_format(term2_supply_var, True)}
-3. Combined Std Dev = {euro_format(combined_sd, True)}
-4. Raw SS = {euro_format(raw_ss_calc, True)}
+1. σ_D_daily^2 (from monthly agg std) = ({euro_format(row['Agg_Std_Hist'], True)})^2 / {days_per_month}
+   Demand Component = σ_D_daily^2 * L = {euro_format(term1_demand_var, True)}
+2. Supply Component = σ_L^2 * D_daily^2 = ({euro_format(row['LT_Std'], True)})^2 * ({euro_format(row['Agg_Future_Demand'], True)} / {days_per_month})^2
+   = {euro_format(term2_supply_var, True)}
+3. Combined Variance = {euro_format(term1_demand_var, True)} + {euro_format(term2_supply_var, True)}
+   = {euro_format(term1_demand_var + term2_supply_var, True)}
+4. Combined Std Dev = sqrt(Combined Variance)
+   = {euro_format(combined_sd, True)}
+5. Raw SS = {z:.4f} (Z-Score) * {euro_format(combined_sd, True)}
+   = {euro_format(raw_ss_calc, True)} units
 """)
-            st.info(f"🧮 Statistical SS (Method 5, raw): {euro_format(raw_ss_calc, True)} units")
+            st.info(f"🧮 **Resulting Statistical SS (Method 5):** {euro_format(raw_ss_calc, True)} units")
 
             st.subheader("3. Business Rules Application")
             col_rule_1, col_rule_2 = st.columns(2)
             with col_rule_1:
-                st.markdown("**Zero Demand Rule**")
+                st.markdown("**Check 1: Zero Demand Rule**")
                 if zero_if_no_net_fcst and row['Agg_Future_Demand'] <= 0:
                     st.error("❌ Network Demand is 0. SS Forced to 0.")
                 else:
                     st.success("✅ Network Demand exists. Keep Statistical SS.")
             with col_rule_2:
-                st.markdown("**Capping (Min/Max)**")
+                st.markdown("**Check 2: Capping (Min/Max)**")
                 if apply_cap:
                     lower_limit = row['Agg_Future_Demand'] * (cap_range[0]/100)
                     upper_limit = row['Agg_Future_Demand'] * (cap_range[1]/100)
                     st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
                     st.write(f"Range: [{euro_format(lower_limit, True)}, {euro_format(upper_limit, True)}]")
                     if raw_ss_calc > upper_limit:
-                        st.warning("⚠️ Raw SS > Max Cap. Capping downwards.")
+                        st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) > Max Cap ({euro_format(upper_limit, True)}). Capping downwards.")
                     elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
-                        st.warning("⚠️ Raw SS < Min Cap. Buffering upwards.")
+                        st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) < Min Cap ({euro_format(lower_limit, True)}). Buffering upwards.")
                     else:
-                        st.success("✅ Raw SS is within boundaries.")
+                        st.success("✅ Raw SS is within efficient boundaries.")
                 else:
-                    st.write("Capping disabled.")
+                    st.write("Capping logic disabled.")
 
+            st.markdown("---")
             st.subheader("4. What-If Simulation")
             sim_cols = st.columns(3)
-            sim_sl = sim_cols[0].slider("Simulated Service Level (%)", 50.0, 99.9, value=service_level*100)
-            sim_lt = sim_cols[1].slider("Simulated Avg Lead Time (Days)", 0.0, max(30.0, row['LT_Mean']*2), value=float(row['LT_Mean']))
-            sim_lt_std = sim_cols[2].slider("Simulated LT Variability (Days)", 0.0, max(10.0, row['LT_Std']*2), value=float(row['LT_Std']))
+            sim_sl = sim_cols[0].slider(
+                "Simulated Service Level (%)",
+                min_value=50.0, max_value=99.9,
+                value=service_level*100,
+                key=f"sim_sl_{calc_sku}_{calc_loc}"
+            )
+            sim_lt = sim_cols[1].slider(
+                "Simulated Avg Lead Time (Days)",
+                min_value=0.0, max_value=max(30.0, row['LT_Mean']*2),
+                value=float(row['LT_Mean']),
+                key=f"sim_lt_{calc_sku}_{calc_loc}"
+            )
+            sim_lt_std = sim_cols[2].slider(
+                "Simulated LT Variability (Days)",
+                min_value=0.0, max_value=max(10.0, row['LT_Std']*2),
+                value=float(row['LT_Std']),
+                key=f"sim_lt_std_{calc_sku}_{calc_loc}"
+            )
 
             sim_z = norm.ppf(sim_sl / 100.0)
             sim_ss = sim_z * np.sqrt(
                 (row['Agg_Std_Hist']**2 / float(days_per_month)) * sim_lt +
                 (sim_lt_std**2) * (row['Agg_Future_Demand'] / float(days_per_month))**2
             )
+
             res_col1, res_col2 = st.columns(2)
             res_col1.metric("Original SS (Actual)", euro_format(row['Pre_Rule_SS'], True))
-            res_col2.metric("Simulated SS (New)", euro_format(sim_ss, True), delta=euro_format(sim_ss - row['Pre_Rule_SS'], True))
+            res_col2.metric(
+                "Simulated SS (New)",
+                euro_format(sim_ss, True),
+                delta=euro_format(sim_ss - row['Pre_Rule_SS'], True),
+                delta_color="inverse"
+            )
             if sim_ss < row['Pre_Rule_SS']:
-                st.success(f"📉 Possible inventory reduction: {euro_format(row['Pre_Rule_SS'] - sim_ss, True)} units")
+                st.success(f"📉 Reducing uncertainty could lower inventory by **{euro_format(row['Pre_Rule_SS'] - sim_ss, True)}** units.")
             elif sim_ss > row['Pre_Rule_SS']:
-                st.warning(f"📈 Additional inventory needed: {euro_format(sim_ss - row['Pre_Rule_SS'], True)} units")
+                st.warning(f"📈 Increasing service or lead time requires **{euro_format(sim_ss - row['Pre_Rule_SS'], True)}** more units.")
 
     # -------------------------------
-    # TAB 7: By Material (single-material focus + 8R whose sum equals total SS)
+    # TAB 7: By Material (reworked — single-material + 8 reasons breakdown)
     # -------------------------------
     with tab7:
-        st.markdown("### By Material — single-material focus. Defaults to primary selection.")
-        change_global_selection_button(preselect=st.session_state.get('global_product', None))
-        all_products = sorted(results['Product'].unique())
-        selected_product = st.session_state.get('global_product', all_products[0] if all_products else "")
-        # allow override
-        selected_product = st.selectbox("Material (default = primary)", all_products, index=all_products.index(selected_product) if selected_product in all_products else 0, key="mat_sel")
-
+        st.header("📦 View by Material (Single Material Focus + 8 Reasons for Inventory)")
+        selected_product = global_product if global_product else st.selectbox("Select Material", sorted(results['Product'].unique()), key="mat_sel")
         period_choices = sorted(results['Period'].unique())
         selected_period = st.selectbox("Select Period to Snapshot", period_choices, index=len(period_choices)-1 if period_choices else 0, key="mat_period")
 
@@ -710,6 +779,7 @@ if s_file and d_file and lt_file:
         nodes_count = mat_period_df['Location'].nunique()
         avg_ss_per_node = (mat_period_df['Safety_Stock'].mean() if nodes_count > 0 else 0)
 
+        # KPIs
         k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Total Local Forecast", euro_format(total_forecast, True))
         k2.metric("Total Network Demand", euro_format(total_net, True))
@@ -717,98 +787,78 @@ if s_file and d_file and lt_file:
         k4.metric("Nodes", f"{nodes_count}")
         k5.metric("Avg SS per Node", euro_format(avg_ss_per_node, True))
 
-        st.markdown("### 8 Reasons decomposition — drivers that sum to Total Safety Stock")
+        st.markdown("### Why do we carry this SS? — 8 Reasons breakdown (aggregated for selected material)")
+        # Compute driver values per node, then aggregate
         if mat_period_df.empty:
             st.warning("No data for this material/period.")
         else:
+            # Per-node terms
             mat = mat_period_df.copy()
+            # Avoid negative/NaN earlier by filling zeros where logical
             mat['LT_Mean'] = mat['LT_Mean'].fillna(0)
             mat['LT_Std'] = mat['LT_Std'].fillna(0)
             mat['Agg_Std_Hist'] = mat['Agg_Std_Hist'].fillna(0)
-            # variance components
-            mat['term1'] = (mat['Agg_Std_Hist']**2 / float(days_per_month)) * mat['LT_Mean']
-            mat['term2'] = (mat['LT_Std']**2) * (mat['Agg_Future_Demand'] / float(days_per_month))**2
-            # Pre-rule SS
-            mat['Pre_Rule_SS'] = mat['Pre_Rule_SS'].fillna(0)
-            # Allocate Pre_Rule_SS into demand and lt components proportionally to variance
-            mat['var_sum'] = mat['term1'] + mat['term2']
-            # avoid division by zero
-            mat['demand_alloc'] = np.where(mat['var_sum'] > 0, mat['Pre_Rule_SS'] * (mat['term1'] / mat['var_sum']), 0.0)
-            mat['lt_alloc'] = np.where(mat['var_sum'] > 0, mat['Pre_Rule_SS'] * (mat['term2'] / mat['var_sum']), 0.0)
-            # policy deltas
-            mat['cap_delta'] = mat['Safety_Stock'] - mat['Pre_Rule_SS']  # can be negative (reduction) or positive (increase)
-            # forced zero and B616: capture and exclude from general cap_reduction to avoid double counting
-            mat['forced_zero'] = np.where((mat['Adjustment_Status'] == 'Forced to Zero') & (mat['Pre_Rule_SS'] > 0), mat['Pre_Rule_SS'], 0.0)
-            mat['b616_override'] = np.where((mat['Location'] == 'B616') & (mat['Safety_Stock'] == 0) & (mat['Pre_Rule_SS'] > 0), mat['Pre_Rule_SS'], 0.0)
-            # Make forced_zero and b616_override exclusive: if a row was forced_zero and also B616, prefer B616 to show explicit hub policy
-            mat['forced_zero'] = np.where((mat['forced_zero'] > 0) & (mat['b616_override'] > 0), 0.0, mat['forced_zero'])
+            # Terms
+            mat['term1'] = (mat['Agg_Std_Hist']**2 / float(days_per_month)) * mat['LT_Mean']   # demand-related variance contribution
+            mat['term2'] = (mat['LT_Std']**2) * (mat['Agg_Future_Demand'] / float(days_per_month))**2  # lead-time-related variance contribution
+            # Convert to SS-like contributions (z * sqrt(term))
+            mat['demand_uncertainty'] = z * np.sqrt(mat['term1'].clip(lower=0))
+            mat['lt_uncertainty'] = z * np.sqrt(mat['term2'].clip(lower=0))
+            # Direct vs indirect demand
+            mat['direct_forecast'] = mat['Forecast'].clip(lower=0)
+            mat['indirect_network'] = (mat['Agg_Future_Demand'] - mat['Forecast']).clip(lower=0)
+            # Policy & adjustments
+            mat['cap_reduction'] = ((mat['Pre_Rule_SS'] - mat['Safety_Stock']).clip(lower=0)).fillna(0)
+            mat['cap_increase'] = ((mat['Safety_Stock'] - mat['Pre_Rule_SS']).clip(lower=0)).fillna(0)
+            mat['forced_zero'] = mat.apply(lambda r: r['Pre_Rule_SS'] if r['Adjustment_Status'] == 'Forced to Zero' else 0, axis=1)
+            mat['b616_override'] = mat.apply(lambda r: r['Pre_Rule_SS'] if (r['Location'] == 'B616' and r['Safety_Stock'] == 0) else 0, axis=1)
 
-            # Now compute cap increases and cap reductions excluding forced_zero and b616_override
-            mat['cap_increase'] = mat['cap_delta'].apply(lambda x: x if x > 0 else 0.0)
-            mat['cap_reduction_total'] = mat['cap_delta'].apply(lambda x: -x if x < 0 else 0.0)
-            # exclude forced_zero and b616 from cap_reduction_total for separate reporting
-            mat['cap_reduction_excl'] = mat['cap_reduction_total'] - mat['forced_zero'] - mat['b616_override']
-            mat['cap_reduction_excl'] = mat['cap_reduction_excl'].clip(lower=0.0)
+            # Aggregate drivers
+            drivers = {
+                'Demand Uncertainty (z*sqrt(term1))': mat['demand_uncertainty'].sum(),
+                'Lead-time Uncertainty (z*sqrt(term2))': mat['lt_uncertainty'].sum(),
+                'Direct Local Forecast (sum Fcst)': mat['direct_forecast'].sum(),
+                'Indirect Network Demand (sum extra downstream)': mat['indirect_network'].sum(),
+                'Caps — Reductions (policy lowering SS)': mat['cap_reduction'].sum(),
+                'Caps — Increases (policy increasing SS)': mat['cap_increase'].sum(),
+                'Forced Zero Overrides (policy)': mat['forced_zero'].sum(),
+                'B616 Policy Override': mat['b616_override'].sum()
+            }
 
-            # Aggregate driver totals
-            demand_total = mat['demand_alloc'].sum()
-            lt_total = mat['lt_alloc'].sum()
-            cap_increase_total = mat['cap_increase'].sum()
-            cap_reduction_excl_total = mat['cap_reduction_excl'].sum()
-            forced_zero_total = mat['forced_zero'].sum()
-            b616_total = mat['b616_override'].sum()
+            # Prepare dataframe for plotting and table
+            drv_df = pd.DataFrame({
+                'driver': list(drivers.keys()),
+                'amount': [float(v) for v in drivers.values()]
+            })
+            # Compute percent of total SS (using total_ss or if zero use 1 to avoid div by zero)
+            denom = total_ss if total_ss > 0 else drv_df['amount'].sum()
+            denom = denom if denom > 0 else 1.0
+            drv_df['pct_of_total_ss'] = drv_df['amount'] / denom * 100
 
-            # Compose drivers list such that their signed sum equals total_ss:
-            # total_ss = (demand_total + lt_total) + (cap_increase_total - cap_reduction_excl_total - forced_zero_total - b616_total) + residual
-            net_pre = demand_total + lt_total
-            net_policy = cap_increase_total - cap_reduction_excl_total - forced_zero_total - b616_total
-            net_total = net_pre + net_policy
-            residual = total_ss - net_total
-            # Put residual into small driver to make perfect balance (this handles rounding, minor differences)
-            residual = float(residual)
-
-            drivers = [
-                ("Demand Uncertainty (allocated)", float(demand_total)),
-                ("Lead-time Uncertainty (allocated)", float(lt_total)),
-                ("Caps — Increases (policy)", float(cap_increase_total)),
-                ("Caps — Reductions (policy, excl forced/B616)", float(-cap_reduction_excl_total)),  # show as negative (reduces SS)
-                ("Forced Zero Overrides (policy)", float(-forced_zero_total)),
-                ("B616 Override (policy)", float(-b616_total)),
-                ("Residual / Rounding (to match Total SS)", float(residual)),
-            ]
-
-            drv_df = pd.DataFrame(drivers, columns=['Driver', 'Signed_Units'])
-            # For display, also show absolute contribution and percent of total_ss
-            drv_df['Units'] = drv_df['Signed_Units']
-            # For percent, use total_ss as denominator (if zero then denom=1)
-            denom = total_ss if total_ss != 0 else 1.0
-            drv_df['Pct_of_total_SS'] = drv_df['Units'] / denom * 100
-
-            # Plot signed bars (positive bars up, reductions negative)
+            # Bar chart with amount and annotation of percent
             fig_drv = go.Figure()
-            colors = []
-            for val in drv_df['Units']:
-                if val >= 0:
-                    colors.append('#6baed6')  # blue-ish for positive contributors
-                else:
-                    colors.append('#fdae6b')  # orange-ish for negative/reductions
-            fig_drv.add_trace(go.Bar(x=drv_df['Driver'], y=drv_df['Units'], marker_color=colors))
+            fig_drv.add_trace(go.Bar(
+                x=drv_df['driver'],
+                y=drv_df['amount'],
+                marker_color=px.colors.qualitative.Pastel
+            ))
             # annotate percent
             annotations = []
-            for idx, r in drv_df.iterrows():
-                annotations.append(dict(x=r['Driver'], y=r['Units'], text=f"{r['Pct_of_total_SS']:.1f}%", showarrow=False, yshift=8 if r['Units'] >= 0 else -16))
-            fig_drv.update_layout(title=f"{selected_product} — Drivers of Total Safety Stock (signed components)", xaxis_title="Driver", yaxis_title="Units", annotations=annotations, height=420)
+            for idx, rowd in drv_df.iterrows():
+                annotations.append(dict(x=rowd['driver'], y=rowd['amount'], text=f"{rowd['pct_of_total_ss']:.1f}%", showarrow=False, yshift=8))
+            fig_drv.update_layout(title=f"{selected_product} — Drivers of Inventory (aggregated)", xaxis_title="Driver", yaxis_title="Units", annotations=annotations, height=420)
             st.plotly_chart(fig_drv, use_container_width=True)
 
-            # Table view with clear sign
-            display_table = drv_df[['Driver', 'Units', 'Pct_of_total_SS']].copy()
-            st.dataframe(df_format_for_display(display_table.round(2), cols=['Units','Pct_of_total_SS']), use_container_width=True, height=240)
+            st.markdown("Driver table (numbers and % of total SS)")
+            st.dataframe(df_format_for_display(drv_df.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS']), use_container_width=True, height=260)
 
-            # Sanity check: show sums
-            st.markdown(f"**Sanity check:** Sum of driver-signed units = {euro_format(drv_df['Units'].sum(), True)}; Total Safety Stock = {euro_format(total_ss, True)}")
-
-            if abs(drv_df['Units'].sum() - total_ss) > 1e-6:
-                st.warning("Driver decomposition does not exactly match Total Safety Stock — a residual has been added to balance. Investigate rounding/policy overlaps if the discrepancy is large.")
+            st.markdown("Notes on interpretation:")
+            st.markdown("""
+            - Demand Uncertainty and Lead-time Uncertainty are the two statistical drivers in the Method 5 formula (shown as z * sqrt(term)).
+            - Direct vs Indirect shows how much of the network demand is local forecast vs aggregated downstream demand.
+            - Caps/Policy explain differences between the statistical SS (Pre_Rule_SS) and final Safety_Stock.
+            - Forced Zero / B616 override indicate policy-driven removals of inventory.
+            """)
 
         st.markdown("---")
         st.subheader("Top Locations by Safety Stock (snapshot)")
