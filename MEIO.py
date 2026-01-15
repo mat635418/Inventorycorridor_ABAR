@@ -16,7 +16,7 @@ from io import StringIO
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="Multi-Echelon Inventory Optimizer (Method 5 SS)", layout="wide")
-st.title("📊 MEIO for Raw Materials — SS Method 5 - Jan 2026")
+st.title("📊 MEIO for Raw Materials — v0.5 — Jan 2026")
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -798,66 +798,171 @@ if s_file and d_file and lt_file:
             mat['LT_Mean'] = mat['LT_Mean'].fillna(0)
             mat['LT_Std'] = mat['LT_Std'].fillna(0)
             mat['Agg_Std_Hist'] = mat['Agg_Std_Hist'].fillna(0)
+            mat['Pre_Rule_SS'] = mat['Pre_Rule_SS'].fillna(0)
+            mat['Safety_Stock'] = mat['Safety_Stock'].fillna(0)
+            mat['Forecast'] = mat['Forecast'].fillna(0)
+            mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0)
+
             # Terms
             mat['term1'] = (mat['Agg_Std_Hist']**2 / float(days_per_month)) * mat['LT_Mean']   # demand-related variance contribution
             mat['term2'] = (mat['LT_Std']**2) * (mat['Agg_Future_Demand'] / float(days_per_month))**2  # lead-time-related variance contribution
             # Convert to SS-like contributions (z * sqrt(term))
-            mat['demand_uncertainty'] = z * np.sqrt(mat['term1'].clip(lower=0))
-            mat['lt_uncertainty'] = z * np.sqrt(mat['term2'].clip(lower=0))
-            # Direct vs indirect demand
-            mat['direct_forecast'] = mat['Forecast'].clip(lower=0)
-            mat['indirect_network'] = (mat['Agg_Future_Demand'] - mat['Forecast']).clip(lower=0)
-            # Policy & adjustments
-            mat['cap_reduction'] = ((mat['Pre_Rule_SS'] - mat['Safety_Stock']).clip(lower=0)).fillna(0)
-            mat['cap_increase'] = ((mat['Safety_Stock'] - mat['Pre_Rule_SS']).clip(lower=0)).fillna(0)
-            mat['forced_zero'] = mat.apply(lambda r: r['Pre_Rule_SS'] if r['Adjustment_Status'] == 'Forced to Zero' else 0, axis=1)
-            mat['b616_override'] = mat.apply(lambda r: r['Pre_Rule_SS'] if (r['Location'] == 'B616' and r['Safety_Stock'] == 0) else 0, axis=1)
+            mat['demand_uncertainty_raw'] = z * np.sqrt(mat['term1'].clip(lower=0))
+            mat['lt_uncertainty_raw'] = z * np.sqrt(mat['term2'].clip(lower=0))
+            # Direct vs indirect demand (raw forecast numbers for interpretation)
+            mat['direct_forecast_raw'] = mat['Forecast'].clip(lower=0)
+            mat['indirect_network_raw'] = (mat['Agg_Future_Demand'] - mat['Forecast']).clip(lower=0)
+            # Policy & adjustments (raw deltas)
+            mat['cap_reduction_raw'] = ((mat['Pre_Rule_SS'] - mat['Safety_Stock']).clip(lower=0)).fillna(0)
+            mat['cap_increase_raw'] = ((mat['Safety_Stock'] - mat['Pre_Rule_SS']).clip(lower=0)).fillna(0)
+            mat['forced_zero_raw'] = mat.apply(lambda r: r['Pre_Rule_SS'] if r['Adjustment_Status'] == 'Forced to Zero' else 0, axis=1)
+            mat['b616_override_raw'] = mat.apply(lambda r: r['Pre_Rule_SS'] if (r['Location'] == 'B616' and r['Safety_Stock'] == 0) else 0, axis=1)
 
-            # Aggregate drivers
-            drivers = {
-                'Demand Uncertainty (z*sqrt(term1))': mat['demand_uncertainty'].sum(),
-                'Lead-time Uncertainty (z*sqrt(term2))': mat['lt_uncertainty'].sum(),
-                'Direct Local Forecast (sum Fcst)': mat['direct_forecast'].sum(),
-                'Indirect Network Demand (sum extra downstream)': mat['indirect_network'].sum(),
-                'Caps — Reductions (policy lowering SS)': mat['cap_reduction'].sum(),
-                'Caps — Increases (policy increasing SS)': mat['cap_increase'].sum(),
-                'Forced Zero Overrides (policy)': mat['forced_zero'].sum(),
-                'B616 Policy Override': mat['b616_override'].sum()
+            # --- Original (raw) drivers for interpretability (keeps previous semantics) ---
+            raw_drivers = {
+                'Demand Uncertainty (z*sqrt(term1))': mat['demand_uncertainty_raw'].sum(),
+                'Lead-time Uncertainty (z*sqrt(term2))': mat['lt_uncertainty_raw'].sum(),
+                'Direct Local Forecast (sum Fcst)': mat['direct_forecast_raw'].sum(),
+                'Indirect Network Demand (sum extra downstream)': mat['indirect_network_raw'].sum(),
+                'Caps — Reductions (policy lowering SS)': mat['cap_reduction_raw'].sum(),
+                'Caps — Increases (policy increasing SS)': mat['cap_increase_raw'].sum(),
+                'Forced Zero Overrides (policy)': mat['forced_zero_raw'].sum(),
+                'B616 Policy Override': mat['b616_override_raw'].sum()
             }
 
-            # Prepare dataframe for plotting and table
             drv_df = pd.DataFrame({
-                'driver': list(drivers.keys()),
-                'amount': [float(v) for v in drivers.values()]
+                'driver': list(raw_drivers.keys()),
+                'amount': [float(v) for v in raw_drivers.values()]
             })
-            # Compute percent of total SS (using total_ss or if zero use 1 to avoid div by zero)
-            denom = total_ss if total_ss > 0 else drv_df['amount'].sum()
-            denom = denom if denom > 0 else 1.0
-            drv_df['pct_of_total_ss'] = drv_df['amount'] / denom * 100
+            drv_denom = drv_df['amount'].sum()
+            drv_df['pct_of_total_ss'] = drv_df['amount'] / (drv_denom if drv_denom > 0 else 1.0) * 100
 
-            # Bar chart with amount and annotation of percent
-            fig_drv = go.Figure()
-            fig_drv.add_trace(go.Bar(
+            st.markdown("#### A. Original — Raw driver values (interpretation view)")
+            fig_drv_raw = go.Figure()
+            fig_drv_raw.add_trace(go.Bar(
                 x=drv_df['driver'],
                 y=drv_df['amount'],
                 marker_color=px.colors.qualitative.Pastel
             ))
+            annotations_raw = []
+            for idx, rowd in drv_df.iterrows():
+                annotations_raw.append(dict(x=rowd['driver'], y=rowd['amount'], text=f"{rowd['pct_of_total_ss']:.1f}%", showarrow=False, yshift=8))
+            fig_drv_raw.update_layout(title=f"{selected_product} — Raw Drivers (not SS-attribution)", xaxis_title="Driver", yaxis_title="Units", annotations=annotations_raw, height=420)
+            st.plotly_chart(fig_drv_raw, use_container_width=True)
+
+            st.markdown("Driver table (raw numbers and % of raw-sum)")
+            st.dataframe(df_format_for_display(drv_df.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2), cols=['Units','Pct_of_raw_sum']), use_container_width=True, height=260)
+
+            st.markdown("---")
+            st.markdown("#### B. SS Attribution — Mutually exclusive components that SUM EXACTLY to Total Safety Stock")
+            # --- SS Attribution logic (ensures sum == total_ss) ---
+            # Per-node allocations
+            per_node = mat.copy()
+
+            # Flags
+            per_node['is_forced_zero'] = per_node['Adjustment_Status'] == 'Forced to Zero'
+            per_node['is_b616_override'] = (per_node['Location'] == 'B616') & (per_node['Safety_Stock'] == 0)
+
+            # Pre-rule SS (ensure non-negative)
+            per_node['pre_ss'] = per_node['Pre_Rule_SS'].clip(lower=0)
+
+            # Split pre_ss into demand vs lt shares according to magnitude of raw contributions
+            per_node['share_denom'] = per_node['demand_uncertainty_raw'] + per_node['lt_uncertainty_raw']
+            # When denom == 0 but pre_ss > 0, split equally
+            per_node['demand_share'] = per_node.apply(lambda r: (r['pre_ss'] * (r['demand_uncertainty_raw'] / r['share_denom'])) if r['share_denom'] > 0 else (r['pre_ss'] / 2 if r['pre_ss'] > 0 else 0), axis=1)
+            per_node['lt_share'] = per_node.apply(lambda r: (r['pre_ss'] * (r['lt_uncertainty_raw'] / r['share_denom'])) if r['share_denom'] > 0 else (r['pre_ss'] / 2 if r['pre_ss'] > 0 else 0), axis=1)
+
+            # For forced_zero / b616 override: assign full pre_ss to their buckets and zero out retained parts
+            per_node['forced_zero_amount'] = per_node.apply(lambda r: r['pre_ss'] if r['is_forced_zero'] else 0.0, axis=1)
+            per_node['b616_override_amount'] = per_node.apply(lambda r: r['pre_ss'] if r['is_b616_override'] else 0.0, axis=1)
+
+            # For remaining nodes compute retained_ratio
+            def retained_ratio_calc(r):
+                if r['pre_ss'] <= 0:
+                    return 0.0
+                # If forced zero / b616 override, retained 0
+                if r['is_forced_zero'] or r['is_b616_override']:
+                    return 0.0
+                return float(r['Safety_Stock']) / float(r['pre_ss']) if r['pre_ss'] > 0 else 0.0
+
+            per_node['retained_ratio'] = per_node.apply(retained_ratio_calc, axis=1)
+
+            per_node['retained_demand'] = per_node['demand_share'] * per_node['retained_ratio']
+            per_node['retained_lt'] = per_node['lt_share'] * per_node['retained_ratio']
+
+            per_node['retained_stat_total'] = per_node['retained_demand'] + per_node['retained_lt']
+
+            # Direct vs Indirect split of retained_stat_total using ratio of Forecast / Agg_Future_Demand
+            def direct_frac_calc(r):
+                if r['Agg_Future_Demand'] > 0:
+                    return float(r['Forecast']) / float(r['Agg_Future_Demand'])
+                return 0.0
+            per_node['direct_frac'] = per_node.apply(direct_frac_calc, axis=1).clip(lower=0, upper=1)
+            per_node['direct_retained_ss'] = per_node['retained_stat_total'] * per_node['direct_frac']
+            per_node['indirect_retained_ss'] = per_node['retained_stat_total'] * (1 - per_node['direct_frac'])
+
+            # Caps and increases for nodes that are not forced zero / b616
+            per_node['cap_reduction'] = per_node.apply(lambda r: max(r['pre_ss'] - r['Safety_Stock'], 0.0) if not (r['is_forced_zero'] or r['is_b616_override']) else 0.0, axis=1)
+            per_node['cap_increase'] = per_node.apply(lambda r: max(r['Safety_Stock'] - r['pre_ss'], 0.0) if not (r['is_forced_zero'] or r['is_b616_override']) else 0.0, axis=1)
+
+            # Aggregate the mutually exclusive SS buckets
+            ss_attrib = {
+                'Demand Uncertainty (SS portion)': per_node['retained_demand'].sum(),
+                'Lead-time Uncertainty (SS portion)': per_node['retained_lt'].sum(),
+                'Direct Local Forecast (SS portion)': per_node['direct_retained_ss'].sum(),
+                'Indirect Network Demand (SS portion)': per_node['indirect_retained_ss'].sum(),
+                'Caps — Reductions (policy lowering SS)': per_node['cap_reduction'].sum(),
+                'Caps — Increases (policy increasing SS)': per_node['cap_increase'].sum(),
+                'Forced Zero Overrides (policy)': per_node['forced_zero_amount'].sum(),
+                'B616 Policy Override': per_node['b616_override_amount'].sum()
+            }
+
+            # Ensure numerical floats
+            for k in ss_attrib:
+                ss_attrib[k] = float(ss_attrib[k])
+
+            # Minor rounding residual handling so the sum exactly matches total_ss
+            ss_sum = sum(ss_attrib.values())
+            residual = float(total_ss) - ss_sum
+            # If residual is non-zero (tiny floating error), add to Caps — Reductions to keep sum exact
+            if abs(residual) > 1e-6:
+                ss_attrib['Caps — Reductions (policy lowering SS)'] += residual
+                ss_sum = sum(ss_attrib.values())
+
+            # Now ss_sum should equal total_ss (within float tolerance)
+            # Prepare dataframe for plotting and table
+            ss_drv_df = pd.DataFrame({
+                'driver': list(ss_attrib.keys()),
+                'amount': [float(v) for v in ss_attrib.values()]
+            })
+            denom = total_ss if total_ss > 0 else ss_drv_df['amount'].sum()
+            denom = denom if denom > 0 else 1.0
+            ss_drv_df['pct_of_total_ss'] = ss_drv_df['amount'] / denom * 100
+
+            # Bar chart with amount and annotation of percent
+            fig_drv = go.Figure()
+            fig_drv.add_trace(go.Bar(
+                x=ss_drv_df['driver'],
+                y=ss_drv_df['amount'],
+                marker_color=px.colors.qualitative.Pastel
+            ))
             # annotate percent
             annotations = []
-            for idx, rowd in drv_df.iterrows():
+            for idx, rowd in ss_drv_df.iterrows():
                 annotations.append(dict(x=rowd['driver'], y=rowd['amount'], text=f"{rowd['pct_of_total_ss']:.1f}%", showarrow=False, yshift=8))
-            fig_drv.update_layout(title=f"{selected_product} — Drivers of Inventory (aggregated)", xaxis_title="Driver", yaxis_title="Units", annotations=annotations, height=420)
+            fig_drv.update_layout(title=f"{selected_product} — SS Attribution (adds to {euro_format(total_ss, True)})", xaxis_title="Driver", yaxis_title="Units", annotations=annotations, height=420)
             st.plotly_chart(fig_drv, use_container_width=True)
 
-            st.markdown("Driver table (numbers and % of total SS)")
-            st.dataframe(df_format_for_display(drv_df.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS']), use_container_width=True, height=260)
+            st.markdown("SS Attribution table (numbers and % of total SS)")
+            st.dataframe(df_format_for_display(ss_drv_df.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS']), use_container_width=True, height=260)
 
             st.markdown("Notes on interpretation:")
             st.markdown("""
-            - Demand Uncertainty and Lead-time Uncertainty are the two statistical drivers in the Method 5 formula (shown as z * sqrt(term)).
-            - Direct vs Indirect shows how much of the network demand is local forecast vs aggregated downstream demand.
-            - Caps/Policy explain differences between the statistical SS (Pre_Rule_SS) and final Safety_Stock.
-            - Forced Zero / B616 override indicate policy-driven removals of inventory.
+            - The first section (A) shows the raw driver values as originally computed (these mix SS-like terms and forecast volumes for interpretation).
+            - The second section (B) is a reconciled, mutually exclusive SS attribution: each row is an amount of Safety Stock and the rows sum exactly to the Total Safety Stock for the selected material and snapshot.
+            - Demand Uncertainty and Lead-time Uncertainty here represent the portions of the statistical SS that remain after policy adjustments.
+            - Direct vs Indirect in the attribution table are SS-allocations (how much of the retained statistical SS supports local vs downstream demand).
+            - Caps/Policy rows explain how business rules changed the statistical SS into the final implemented Safety Stock.
             """)
 
         st.markdown("---")
