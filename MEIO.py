@@ -11,8 +11,8 @@ import os
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
-st.set_page_config(page_title="Multi-Echelon Inventory Optimizer", layout="wide")
-st.title("📊 Multi-Echelon Network Inventory Optimizer")
+st.set_page_config(page_title="Multi-Echelon Inventory Optimizer (Method 5 SS)", layout="wide")
+st.title("📊 Multi-Echelon Network Inventory Optimizer — SS Method 5 (σD & σLT)")
 
 # -------------------------------
 # HELPERS
@@ -162,13 +162,23 @@ if s_file and d_file and lt_file:
     results = results.fillna({'Forecast': 0, 'Agg_Std_Hist': 0, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
 
     # --------------------------------
-    # RULE-BASED SAFETY STOCK LOGIC
+    # SAFETY STOCK — SS METHOD 5
     # --------------------------------
-    results['SS_Raw'] = (
-        z * np.sqrt(
-            (results['LT_Mean'] / 30) * (results['Agg_Std_Hist']**2) +
-            (results['LT_Std']**2) * (results['Agg_Future_Demand'] / 30)**2
-        )
+    # Method 5 formula (daily terms):
+    # SS = Z * sqrt( σ_D^2 * LT + σ_LT^2 * D^2 )
+    # Where:
+    # - σ_D is demand std dev per day (we store monthly std dev in Agg_Std_Hist, so σ_D_daily = Agg_Std_Hist / sqrt(30))
+    # - D is average demand per day = Agg_Future_Demand / 30
+    # - LT and σ_LT are in days (LT_Mean and LT_Std)
+    #
+    # Vectorized implementation (maintaining same units and behavior):
+    # σ_D_daily^2 = (Agg_Std_Hist ** 2) / 30
+    # D_daily = Agg_Future_Demand / 30
+    # SS_Raw = z * sqrt( σ_D_daily^2 * LT_Mean + (LT_Std ** 2) * (D_daily ** 2) )
+
+    results['SS_Raw'] = z * np.sqrt(
+        (results['Agg_Std_Hist']**2 / 30.0) * results['LT_Mean'] +
+        (results['LT_Std']**2) * (results['Agg_Future_Demand'] / 30.0)**2
     )
 
     results['Adjustment_Status'] = 'Optimal (Statistical)'
@@ -311,7 +321,8 @@ if s_file and d_file and lt_file:
             fig_eff = px.scatter(
                 eff, x="Agg_Future_Demand", y="Safety_Stock", color="Adjustment_Status",
                 size="SS_to_FCST_Ratio", hover_name="Location",
-                color_discrete_map={'Optimal (Statistical)': '#00CC96', 'Capped (High)': '#EF553B','Capped (Low)': '#636EFA', 'Forced to Zero': '#AB63FA'}, title="Policy Impact & Efficiency Ratio (Bubble Size = SS/Network Demand Ratio)"
+                color_discrete_map={'Optimal (Statistical)': '#00CC96', 'Capped (High)': '#EF553B','Capped (Low)': '#636EFA', 'Forced to Zero': '#AB63FA'},
+                title="Policy Impact & Efficiency Ratio (Bubble Size = SS_to_FCST_Ratio)"
             )
             st.plotly_chart(fig_eff, use_container_width=True)
 
@@ -416,35 +427,39 @@ if s_file and d_file and lt_file:
         st.subheader("1. Actual Inputs (Frozen)")
         i1, i2, i3, i4, i5 = st.columns(5)
         i1.metric("Service Level", f"{service_level*100}%", help=f"Z-Score: {z:.2f}")
-        i2.metric("Network Demand (D)", f"{row['Agg_Future_Demand']:,.1f}", help="Aggregated Future Demand")
-        i3.metric("Network Std Dev (σ_D)", f"{row['Agg_Std_Hist']:,.1f}", help="Aggregated Historical Variability")
+        i2.metric("Network Demand (D, monthly)", f"{row['Agg_Future_Demand']:,.1f}", help="Aggregated Future Demand (monthly)")
+        i3.metric("Network Std Dev (σ_D, monthly)", f"{row['Agg_Std_Hist']:,.1f}", help="Aggregated Historical Std Dev (monthly totals)")
         i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days")
         i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
 
         # 3. Mathematical Trace
         st.subheader("2. Statistical Calculation (Actual)")
-        # Terms calculation for display
-        term1_demand_var = (row['LT_Mean'] / 30) * (row['Agg_Std_Hist']**2)
-        term2_supply_var = (row['LT_Std']**2) * ((row['Agg_Future_Demand'] / 30)**2)
+        # For Method 5 we convert monthly statistics to daily equivalents where needed:
+        # σ_D_daily^2 = (Agg_Std_Hist ** 2) / 30
+        # D_daily = Agg_Future_Demand / 30
+        term1_demand_var = (row['Agg_Std_Hist']**2 / 30.0) * row['LT_Mean']   # σ_D_daily^2 * LT
+        term2_supply_var = (row['LT_Std']**2) * ((row['Agg_Future_Demand'] / 30.0)**2)  # σ_LT^2 * D_daily^2
         combined_sd = np.sqrt(term1_demand_var + term2_supply_var)
         raw_ss_calc = z * combined_sd
 
-        st.markdown("The standard formula for Safety Stock with variable Demand and variable Lead Time is:")
-        st.latex(r"SS_{\text{raw}} = Z \times \sqrt{ \underbrace{\left( \frac{L}{30} \times \sigma_D^2 \right)}_{\text{Demand Var}} + \underbrace{\left( \sigma_L^2 \times \left( \frac{D}{30} \right)^2 \right)}_{\text{Supply Var}} }")
+        st.markdown("Using Safety Stock Method 5 (daily form):")
+        st.latex(r"SS_{\text{raw}} = Z \times \sqrt{\,\sigma_D^2 \times L \;+\; \sigma_L^2 \times D^2\,}")
+        st.markdown("Where σ_D and D are daily values (converted from monthly inputs in the dataset).")
 
-        st.markdown("**Step-by-Step Substitution:**")
+        st.markdown("**Step-by-Step Substitution (values used):**")
         st.code(f"""
-1. Demand Component = ({row['LT_Mean']} / 30) * ({row['Agg_Std_Hist']:.2f})²
-   = {term1_demand_var:,.2f}
-2. Supply Component = ({row['LT_Std']}²) * ({row['Agg_Future_Demand']:.2f} / 30)²
+1. σ_D_daily^2 (from monthly agg std) = ({row['Agg_Std_Hist']:.2f})^2 / 30
+   Demand Component = σ_D_daily^2 * L = {term1_demand_var:,.2f}
+2. Supply Component = σ_L^2 * D_daily^2 = ({row['LT_Std']:.2f})^2 * ({row['Agg_Future_Demand']:.2f} / 30)^2
    = {term2_supply_var:,.2f}
 3. Combined Variance = {term1_demand_var:,.2f} + {term2_supply_var:,.2f}
    = {(term1_demand_var + term2_supply_var):,.2f}
 4. Combined Std Dev = sqrt(Combined Variance)
    = {combined_sd:,.2f}
 5. Raw SS = {z:.2f} (Z-Score) * {combined_sd:,.2f}
+   = {raw_ss_calc:,.2f} units
 """)
-        st.info(f"🧮 **Resulting Statistical SS:** {raw_ss_calc:,.2f} units")
+        st.info(f"🧮 **Resulting Statistical SS (Method 5):** {raw_ss_calc:,.2f} units")
 
         # 4. Rules Application
         st.subheader("3. Business Rules Application")
@@ -500,11 +515,11 @@ if s_file and d_file and lt_file:
             key=f"sim_lt_std_{calc_sku}_{calc_loc}"
         )
 
-        # Dynamic Recalculation
-        sim_z = norm.ppf(sim_sl / 100)
+        # Dynamic Recalculation using Method 5 (with same monthly->daily conversions)
+        sim_z = norm.ppf(sim_sl / 100.0)
         sim_ss = sim_z * np.sqrt(
-            (sim_lt / 30) * (row['Agg_Std_Hist']**2) +
-            (sim_lt_std**2) * (row['Agg_Future_Demand'] / 30)**2
+            (row['Agg_Std_Hist']**2 / 30.0) * sim_lt +
+            (sim_lt_std**2) * (row['Agg_Future_Demand'] / 30.0)**2
         )
 
         # Display Results
