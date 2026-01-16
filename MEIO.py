@@ -876,29 +876,6 @@ if s_file and d_file and lt_file:
         st.dataframe(df_format_for_display(top_nodes.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
 
         st.markdown("---")
-        st.subheader("Actionable Insights (simple heuristics based on current data)")
-        if not mat_period_df.empty:
-            insights = []
-            mat_period_df['SS_to_FCST_Ratio'] = (mat_period_df['Safety_Stock'] / mat_period_df['Forecast'].replace(0, np.nan)).fillna(np.inf)
-            high_ratio = mat_period_df[mat_period_df['SS_to_FCST_Ratio'] > 1.0].sort_values('SS_to_FCST_Ratio', ascending=False)
-            if not high_ratio.empty:
-                insights.append(f"- Nodes with SS > Forecast (ratio>1): {len(high_ratio)} (top examples below)")
-                st.dataframe(df_format_for_display(high_ratio[['Location','Forecast','Safety_Stock','SS_to_FCST_Ratio']].head(10), cols=['Forecast','Safety_Stock','SS_to_FCST_Ratio']), use_container_width=True)
-            else:
-                insights.append("- No nodes found with SS > Forecast (good sign).")
-            policy_nodes = mat_period_df[mat_period_df['Adjustment_Status'] != 'Optimal (Statistical)']
-            if not policy_nodes.empty:
-                insights.append(f"- Nodes with business-rule adjustments: {len(policy_nodes)} (forced zeros, caps).")
-                st.dataframe(df_format_for_display(policy_nodes[['Location','Adjustment_Status','Safety_Stock']], cols=['Safety_Stock']), use_container_width=True)
-            else:
-                insights.append("- No nodes currently modified by policy rules.")
-            long_lt = mat_period_df.sort_values('LT_Mean', ascending=False).head(5)
-            insights.append(f"- Top lead time nodes (highest avg LT): {', '.join(long_lt['Location'].tolist())}")
-            for s in insights: st.markdown(s)
-        else:
-            st.write("No actionable insights — dataset empty for this material/period.")
-
-        st.markdown("---")
         st.subheader("Export — Material Snapshot")
         if not mat_period_df.empty:
             st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="text/csv")
