@@ -360,61 +360,91 @@ if s_file and d_file and lt_file:
             st.markdown(extra_html, unsafe_allow_html=True)
 
     # -------------------------------
-    # TAB 2: Network Topology (Horizontal Centering & Fit)
+    # TAB 2: Network Topology (Restored Colors + Horizontal Centering)
     # -------------------------------
     with tab2:
-        sku_nt = st.selectbox("Product for Network View", all_products, key="nt_sku")
-        per_nt = st.selectbox("Period", all_periods, key="nt_period")
+        sku_default = default_product
+        sku_index = all_products.index(sku_default) if sku_default in all_products else 0
+        sku = st.selectbox("Product for Network View", all_products, index=sku_index, key="network_sku")
         
-        # CSS to center the iframe and the network div horizontally
+        period_choices = all_periods
+        if period_choices:
+            try:
+                period_index = period_choices.index(default_period)
+            except Exception:
+                period_index = len(period_choices)-1
+            chosen_period = st.selectbox("Period", period_choices, index=period_index, key="network_period")
+        else:
+            chosen_period = st.selectbox("Period", [CURRENT_MONTH_TS], index=0, key="network_period")
+
+        # CSS to force horizontal centering of the iframe container
         st.markdown("""
             <style>
-                /* Center the iframe within the Streamlit column */
                 iframe {
                     display: block;
                     margin-left: auto;
                     margin-right: auto;
-                }
-                /* Ensure the Pyvis container itself is centered */
-                .vis-network {
-                    margin-left: auto !important;
-                    margin-right: auto !important;
+                    border: none;
                 }
             </style>
         """, unsafe_allow_html=True)
+
+        render_selection_badge(product=sku, location=None, df_context=results[(results['Product']==sku)&(results['Period']==chosen_period)])
         
-        label_data = results[results['Period'] == per_nt].set_index(['Product', 'Location']).to_dict('index')
-        sku_lt = df_lt[df_lt['Product'] == sku_nt] if 'Product' in df_lt.columns else df_lt.copy()
+        label_data = results[results['Period'] == chosen_period].set_index(['Product', 'Location']).to_dict('index')
+        sku_lt = df_lt[df_lt['Product'] == sku] if 'Product' in df_lt.columns else df_lt.copy()
         
-        # Use 100% width and a fixed height; 'physics' will handle the initial "fit"
-        net = Network(height="600px", width="100%", directed=True, bgcolor="#ffffff", font_color="#333")
+        # Initialize network with 100% width
+        net = Network(height="700px", width="100%", directed=True, bgcolor="#ffffff", font_color="#222222")
         
-        nodes_present = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
-        for n in nodes_present:
-            m = label_data.get((sku_nt, n), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
+        hubs = {"B616", "BEEX", "LUEX"}
+        all_nodes = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
+        all_nodes = set(all_nodes).union(hubs)
+        
+        demand_lookup = {}
+        for n in all_nodes:
+            demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
+        
+        # RESTORED ORIGINAL COLOR LOGIC
+        for n in sorted(all_nodes):
+            m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
+            used = (m['Agg_Future_Demand'] > 0) or (m['Forecast'] > 0)
+            
+            if n == 'B616':
+                bg = '#dcedc8'; border = '#8bc34a'; font_color = '#0b3d91'; size = 14
+            elif n == 'BEEX' or n == 'LUEX':
+                bg = '#bbdefb'; border = '#64b5f6'; font_color = '#0b3d91'; size = 14
+            else:
+                if used:
+                    bg = '#fff9c4'; border = '#fbc02d'; font_color = '#222222'; size = 12
+                else:
+                    bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
+            
             lbl = f"{n}\nFcst: {euro_format(m['Forecast'])}\nNet: {euro_format(m['Agg_Future_Demand'])}\nSS: {euro_format(m['Safety_Stock'], True)}"
-            net.add_node(n, label=lbl, title=lbl, shape='box', color='#e3f2fd' if n in ['BEEX','LUEX'] else '#fffde7')
+            net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
         
         for _, r in sku_lt.iterrows():
-            net.add_edge(r['From_Location'], r['To_Location'], label=f"{int(r['Lead_Time_Days'])}d")
-        
-        # SET OPTIONS: 'improvedLayout' and 'stabilization' help fit the screen horizontally
+            from_n, to_n = r['From_Location'], r['To_Location']
+            from_used = (demand_lookup.get(from_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(from_n, {}).get('Forecast', 0) > 0)
+            to_used = (demand_lookup.get(to_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(to_n, {}).get('Forecast', 0) > 0)
+            edge_color = '#dddddd' if not from_used and not to_used else '#888888'
+            label = f"{int(r.get('Lead_Time_Days', 0))}d" if not pd.isna(r.get('Lead_Time_Days', 0)) else ""
+            net.add_edge(from_n, to_n, label=label, color=edge_color)
+
+        # Options optimized for fitting screen and stabilizing the center
         net.set_options("""
         {
-          "nodes": { "font": { "size": 12 } },
-          "edges": { "smooth": false },
           "physics": {
-            "forceAtlas2Based": { "gravitationalConstant": -50, "centralGravity": 0.01, "springLength": 100, "springStrength": 0.08 },
-            "solver": "forceAtlas2Based",
-            "stabilization": { "iterations": 150, "fit": true }
+            "stabilization": { "iterations": 200, "fit": true }
           },
+          "nodes": { "borderWidthSelected": 2 },
+          "interaction": { "hover": true, "zoomView": true },
           "layout": { "improvedLayout": true }
         }
         """)
         
-        net.save_graph("net.html")
-        # Reducing width in components.html slightly (e.g., 95%) often helps horizontal centering visual balance
-        components.html(open("net.html", 'r', encoding='utf-8').read(), height=650)
+        tmpfile = "net.html"; net.save_graph(tmpfile)
+        components.html(open(tmpfile, 'r', encoding='utf-8').read(), height=750)
 
     # -------------------------------
     # TAB 3: Full Plan
