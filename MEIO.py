@@ -1,4 +1,4 @@
- Multi-Echelon Inventory Optimizer — Enhanced Version (Reviewed & Improved)
+# Multi-Echelon Inventory Optimizer — Enhanced Version (Reviewed & Improved)
 # Enhanced by Copilot for mat635418 — 2026-01-15 (with UI/UX updates)
 # Modified: 2026-01-16 — removed global filtering & fixed historical FC vs Actuals robustness
 import streamlit as st
