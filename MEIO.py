@@ -18,8 +18,8 @@ from datetime import datetime
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
-st.set_page_config(page_title="Multi-Echelon Inventory Optimizer (Method 5 SS)", layout="wide")
-st.title("📊 MEIO for Raw Materials — v0.5 — Jan 2026 (Updated UI)")
+st.set_page_config(page_title="MEIO for RM", layout="wide")
+st.title("📊 MEIO for Raw Materials — v0.55 — Jan 2026")
 
 # -------------------------------
 # HELPERS / FORMATTING
