@@ -544,11 +544,6 @@ if s_file and d_file and lt_file:
                 c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                 st.metric("Network WAPE (%)", c_val)
 
-            st.subheader("📊 Detailed Accuracy by Month")
-            st.dataframe(df_format_for_display(hdf[['Period','Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']].copy(), cols=['Consumption','Forecast_Hist','Deviation','Abs_Error','APE_%','Accuracy_%']), use_container_width=True, height=500)
-        else:
-            st.warning("⚠️ No historical sales data found for this selection. Accuracy metrics cannot be calculated.")
-
     # -------------------------------
     # TAB 6: Calculation Trace & Simulation (ENHANCED)
     # -------------------------------
