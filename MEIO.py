@@ -1,6 +1,7 @@
 # Multi-Echelon Inventory Optimizer — Enhanced Version (Reviewed & Improved)
 # Enhanced by Copilot for mat635418 — 2026-01-15 (with UI/UX updates)
-# Modified: 2026-01-16 — removed global filtering & fixed historical FC vs Actuals robustness
+# Modified: 2026-01-16/2026-01-17 — removed global filtering, fixed historical FC vs Actuals robustness (badge + tab5)
+# Added: default selection NOKANDO2 / BEEX across tabs and default period = current month when available
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -12,12 +13,13 @@ from scipy.stats import norm
 import os
 import math
 from io import StringIO
+from datetime import datetime
 
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
-st.set_page_config(page_title="Multi-Echelon Inventory Optimizer (Method 5 SS)", layout="wide")
-st.title("📊 MEIO for Raw Materials — v0.5 — Jan 2026 (Updated UI)")
+st.set_page_config(page_title="MEIO for Raws", layout="wide")
+st.title("📊 MEIO for Raw Materials — v0.55 — Jan 2026 (standard filtering)")
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -32,12 +34,9 @@ def clean_numeric(series):
     Returns numeric (float) with NaN for unparsable values.
     """
     s = series.astype(str).str.strip()
-    # Convert empty or dash-like placeholders to NaN
     s = s.replace({'': np.nan, '-': np.nan, '—': np.nan, 'na': np.nan, 'n/a': np.nan, 'None': np.nan})
-    # Handle parentheses indicating negatives: (123) -> -123
     paren_mask = s.str.startswith('(') & s.str.endswith(')')
     s.loc[paren_mask] = '-' + s.loc[paren_mask].str[1:-1]
-    # Remove common thousand separators and non-numeric characters but preserve '-' and '.' and digits
     s = s.str.replace(',', '', regex=False).str.replace(' ', '', regex=False)
     s = s.str.replace(r'[^\d\.\-]+', '', regex=True)
     out = pd.to_numeric(s, errors='coerce')
@@ -147,24 +146,29 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 
 def render_selection_badge(product=None, location=None, df_context=None, small=False):
     """
-    Renders the consistent blue badge used in Tab 1 across multiple tabs.
-    - product: product string or None
-    - location: location string or None
-    - df_context: dataframe slice for the chosen product/location (should contain Forecast, Agg_Future_Demand, Safety_Stock)
-    - small: if True, render with a slightly smaller overall footprint (useful for narrow columns)
+    Renders the consistent blue badge used in multiple tabs.
+    - df_context may be a slice from `results` (preferred) or from `hist`.
+    The function is defensive and accepts alternative column names (Forecast_Hist).
     """
     if product is None or product == "":
         return
 
-    # Compute aggregates from provided df_context if present, else empty zeros
-    if df_context is not None and not df_context.empty:
-        total_fcst = float(df_context['Forecast'].sum())
-        total_net = float(df_context['Agg_Future_Demand'].sum())
-        total_ss = float(df_context['Safety_Stock'].sum())
-    else:
-        total_fcst = total_net = total_ss = 0.0
+    def _sum_candidates(df, candidates):
+        """Return sum of the first existing candidate column in df, else 0.0"""
+        if df is None or df.empty:
+            return 0.0
+        for c in candidates:
+            if c in df.columns:
+                try:
+                    return float(df[c].sum())
+                except Exception:
+                    return 0.0
+        return 0.0
 
-    # compact / readable font sizes and clear contrast
+    total_fcst = _sum_candidates(df_context, ['Forecast', 'Forecast_Hist'])
+    total_net = _sum_candidates(df_context, ['Agg_Future_Demand', 'Agg_Future_Demand'])  # second duplicate just for clarity
+    total_ss = _sum_candidates(df_context, ['Safety_Stock'])
+
     badge_html = f"""
     <div style="background:#0b3d91;padding:14px;border-radius:8px;color:white;">
       <div style="font-size:12px;opacity:0.85">Selected</div>
@@ -226,6 +230,12 @@ if lt_file:
 # -------------------------------
 # MAIN LOGIC
 # -------------------------------
+# Defaults requested by user
+DEFAULT_PRODUCT_CHOICE = "NOKANDO2"
+DEFAULT_LOCATION_CHOICE = "BEEX"
+# current month as period timestamp (month start)
+CURRENT_MONTH_TS = pd.Timestamp.now().to_period('M').to_timestamp()
+
 if s_file and d_file and lt_file:
     try:
         df_s = pd.read_csv(s_file)
@@ -252,6 +262,7 @@ if s_file and d_file and lt_file:
         st.error(f"leadtime.csv missing columns: {needed_lt_cols - set(df_lt.columns)}")
         st.stop()
 
+    # Normalize period columns to month-start timestamps
     df_s['Period'] = pd.to_datetime(df_s['Period'], errors='coerce')
     df_d['Period'] = pd.to_datetime(df_d['Period'], errors='coerce')
     df_s['Period'] = df_s['Period'].dt.to_period('M').dt.to_timestamp()
@@ -294,9 +305,7 @@ if s_file and d_file and lt_file:
         axis=1
     )
 
-    # --------------------------------
     # SAFETY STOCK — SS METHOD 5 (vectorized)
-    # --------------------------------
     results['Pre_Rule_SS'] = z * np.sqrt(
         (results['Agg_Std_Hist']**2 / float(days_per_month)) * results['LT_Mean'] +
         (results['LT_Std']**2) * (results['Agg_Future_Demand'] / float(days_per_month))**2
@@ -335,7 +344,6 @@ if s_file and d_file and lt_file:
     hist.rename(columns={'Forecast': 'Forecast_Hist'}, inplace=True)
     hist['Deviation'] = hist['Consumption'] - hist['Forecast_Hist']
     hist['Abs_Error'] = hist['Deviation'].abs()
-    # APE as % of consumption. Avoid division-by-zero and represent missing gracefully.
     hist['APE_%'] = (hist['Abs_Error'] / hist['Consumption'].replace(0, np.nan)) * 100
     hist['APE_%'] = hist['APE_%'].fillna(0)
     hist['Accuracy_%'] = (1 - hist['APE_%'] / 100) * 100
@@ -347,13 +355,18 @@ if s_file and d_file and lt_file:
     )
 
     # -------------------------------
-    # Remove global filtering UI (entirely)
+    # Prepare lists + defaults
     # -------------------------------
-    # Previous global quick filter removed per user request.
-    # We'll default selection widgets across tabs to sensible defaults (first product / first location).
-
-    # Prepare product list for use across tabs
-    all_products = sorted(results['Product'].unique())
+    all_products = sorted(results['Product'].unique().tolist())
+    # Determine defaults: prefer provided default names, else fallback to first available
+    default_product = DEFAULT_PRODUCT_CHOICE if DEFAULT_PRODUCT_CHOICE in all_products else (all_products[0] if all_products else "")
+    # We'll set default location per product when needed
+    def default_location_for(prod):
+        locs = sorted(results[results['Product'] == prod]['Location'].unique().tolist())
+        return DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in locs else (locs[0] if locs else "")
+    # Period choices and default as CURRENT_MONTH_TS when present
+    all_periods = sorted(results['Period'].unique().tolist())
+    default_period = CURRENT_MONTH_TS if CURRENT_MONTH_TS in all_periods else (all_periods[-1] if all_periods else None)
 
     # -------------------------------
     # TABS
@@ -374,11 +387,16 @@ if s_file and d_file and lt_file:
     with tab1:
         left, right = st.columns([3, 1])
         with left:
-            sku_default = all_products[0] if len(all_products) > 0 else ""
-            sku = st.selectbox("Product", sorted(results['Product'].unique()), index=all_products.index(sku_default) if sku_default in all_products else 0, key='tab1_sku')
-            loc_opts = sorted(results[results['Product'] == sku]['Location'].unique())
-            loc_default = loc_opts[0] if loc_opts else ""
-            loc = st.selectbox("Location", loc_opts, index=loc_opts.index(loc_default) if loc_default in loc_opts else 0, key='tab1_loc') if loc_opts else st.selectbox("Location", ["(no location)"], index=0, key='tab1_loc')
+            sku_default = default_product
+            sku_index = all_products.index(sku_default) if sku_default in all_products else 0
+            sku = st.selectbox("Product", all_products, index=sku_index, key='tab1_sku')
+            loc_opts = sorted(results[results['Product'] == sku]['Location'].unique().tolist())
+            loc_default = default_location_for(sku)
+            loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
+            if loc_opts:
+                loc = st.selectbox("Location", loc_opts, index=loc_index, key='tab1_loc')
+            else:
+                loc = st.selectbox("Location", ["(no location)"], index=0, key='tab1_loc')
             st.markdown(f"**Selected**: {sku} — {loc}")
 
             plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
@@ -393,7 +411,6 @@ if s_file and d_file and lt_file:
             st.plotly_chart(fig, use_container_width=True)
 
         with right:
-            # Use the shared badge renderer
             render_selection_badge(product=sku, location=loc if loc != "(no location)" else None, df_context=plot_df)
             ssum = float(plot_df['Safety_Stock'].sum()) if not plot_df.empty else 0.0
             ndsum = float(plot_df['Agg_Future_Demand'].sum()) if not plot_df.empty else 0.0
@@ -418,12 +435,19 @@ if s_file and d_file and lt_file:
     # TAB 2: Network Topology
     # -------------------------------
     with tab2:
-        sku = st.selectbox("Product for Network View", sorted(results['Product'].unique()), key="network_sku")
-        period_choices = sorted(results['Period'].unique())
-        default_period = period_choices[-1] if period_choices else None
-        chosen_period = st.selectbox("Period", period_choices, index=len(period_choices)-1 if period_choices else 0, key="network_period")
+        sku_default = default_product
+        sku_index = all_products.index(sku_default) if sku_default in all_products else 0
+        sku = st.selectbox("Product for Network View", all_products, index=sku_index, key="network_sku")
+        period_choices = all_periods
+        if period_choices:
+            try:
+                period_index = period_choices.index(default_period)
+            except ValueError:
+                period_index = len(period_choices)-1
+            chosen_period = st.selectbox("Period", period_choices, index=period_index, key="network_period")
+        else:
+            chosen_period = st.selectbox("Period", [CURRENT_MONTH_TS], index=0, key="network_period")
 
-        # Show selection badge (product-level; no location)
         render_selection_badge(product=sku, location=None, df_context=results[(results['Product']==sku)&(results['Period']==chosen_period)])
 
         label_data = results[results['Period'] == chosen_period].set_index(['Product', 'Location']).to_dict('index')
@@ -504,15 +528,12 @@ if s_file and d_file and lt_file:
         f_period = col3.multiselect("Filter Period", sorted(results['Period'].unique()))
 
         filtered = results.copy()
-
         if f_prod: filtered = filtered[filtered['Product'].isin(f_prod)]
         if f_loc: filtered = filtered[filtered['Location'].isin(f_loc)]
         if f_period: filtered = filtered[filtered['Period'].isin(f_period)]
 
-        # Sort descending by Safety Stock as requested
         filtered = filtered.sort_values('Safety_Stock', ascending=False)
 
-        # Show badge for filtered selection if single product/location else show first product as context
         if (filtered['Product'].nunique() == 1) and (filtered['Location'].nunique() == 1) and not filtered.empty:
             badge_prod = filtered['Product'].iloc[0]
             badge_loc = filtered['Location'].iloc[0]
@@ -535,19 +556,24 @@ if s_file and d_file and lt_file:
     # -------------------------------
     with tab4:
         st.subheader("⚖️ Efficiency & Policy Analysis")
-        sku_default = all_products[0] if all_products else ""
-        sku = st.selectbox("Material", sorted(results['Product'].unique()), index=all_products.index(sku_default) if sku_default in all_products else 0, key="eff_sku")
-        next_month = sorted(results['Period'].unique())[-1]
-        eff = results[(results['Product'] == sku) & (results['Period'] == next_month)].copy()
+        sku_default = default_product
+        sku_index = all_products.index(sku_default) if sku_default in all_products else 0
+        sku = st.selectbox("Material", all_products, index=sku_index, key="eff_sku")
+        # choose snapshot period = current month if available
+        snapshot_period = default_period if default_period in all_periods else (all_periods[-1] if all_periods else None)
+        if snapshot_period is None:
+            st.warning("No period data available for Efficiency Analysis.")
+            eff = results[(results['Product'] == sku)].copy()
+        else:
+            eff = results[(results['Product'] == sku) & (results['Period'] == snapshot_period)].copy()
 
         eff['SS_to_FCST_Ratio'] = (eff['Safety_Stock'] / eff['Agg_Future_Demand'].replace(0, np.nan)).fillna(0)
         total_ss_sku = eff['Safety_Stock'].sum()
         total_net_demand_sku = eff['Agg_Future_Demand'].sum()
         sku_ratio = total_ss_sku / total_net_demand_sku if total_net_demand_sku > 0 else 0
-        all_res = results[results['Period'] == next_month]
-        global_ratio = all_res['Safety_Stock'].sum() / all_res['Agg_Future_Demand'].replace(0, np.nan).sum()
+        all_res = results[results['Period'] == snapshot_period] if snapshot_period is not None else results
+        global_ratio = all_res['Safety_Stock'].sum() / all_res['Agg_Future_Demand'].replace(0, np.nan).sum() if not all_res.empty else 0
 
-        # Show product-level badge
         render_selection_badge(product=sku, location=None, df_context=eff)
 
         m1, m2, m3 = st.columns(3)
@@ -571,7 +597,6 @@ if s_file and d_file and lt_file:
             st.table(eff['Adjustment_Status'].value_counts())
 
             st.markdown("**Top Nodes by Safety Stock (snapshot)**")
-            # Sort descending by Safety_Stock as requested (changed from Gap)
             eff_top = eff.sort_values('Safety_Stock', ascending=False)
             st.dataframe(
                 df_format_for_display(
@@ -583,21 +608,32 @@ if s_file and d_file and lt_file:
             )
 
     # -------------------------------
-    # TAB 5: Forecast Accuracy (fixed robustness)
+    # TAB 5: Forecast Accuracy (robust + use results for badge)
     # -------------------------------
     with tab5:
         st.subheader("📉 Historical Forecast vs Actuals")
-        h_sku_default = all_products[0] if all_products else ""
-        h_sku = st.selectbox("Select Product", sorted(results['Product'].unique()), index=all_products.index(h_sku_default) if h_sku_default in all_products else 0, key="h1")
-        h_loc_opts = sorted(results[results['Product'] == h_sku]['Location'].unique())
+        h_sku_default = default_product
+        h_sku_index = all_products.index(h_sku_default) if h_sku_default in all_products else 0
+        h_sku = st.selectbox("Select Product", all_products, index=h_sku_index, key="h1")
+        h_loc_opts = sorted(results[results['Product'] == h_sku]['Location'].unique().tolist())
+        # if no locations found in results for selected product, fall back to historical locs
+        if not h_loc_opts:
+            h_loc_opts = sorted(hist[hist['Product'] == h_sku]['Location'].unique().tolist())
         if not h_loc_opts:
             h_loc_opts = ["(no location)"]
-        h_loc = st.selectbox("Select Location", h_loc_opts, index=0, key="h2")
+        # prefer default location
+        h_loc_default = DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in h_loc_opts else (h_loc_opts[0] if h_loc_opts else "(no location)")
+        h_loc_index = h_loc_opts.index(h_loc_default) if h_loc_default in h_loc_opts else 0
+        h_loc = st.selectbox("Select Location", h_loc_opts, index=h_loc_index, key="h2")
 
-        # show badge (only if real location available)
-        badge_df = hist[(hist['Product']==h_sku)&(hist['Location']==h_loc)] if h_loc != "(no location)" else None
-        render_selection_badge(product=h_sku, location=h_loc if h_loc != "(no location)" else None, df_context=badge_df)
+        # show badge: use the planning 'results' table as context so columns Forecast/Agg_Future_Demand/Safety_Stock exist
+        if h_loc != "(no location)":
+            badge_df = results[(results['Product'] == h_sku) & (results['Location'] == h_loc)]
+        else:
+            badge_df = results[results['Product'] == h_sku]
+        render_selection_badge(product=h_sku, location=(h_loc if h_loc != "(no location)" else None), df_context=badge_df)
 
+        # Prepare historical dataframe selection
         hdf = hist.copy()
         if h_loc != "(no location)":
             hdf = hdf[(hdf['Product'] == h_sku) & (hdf['Location'] == h_loc)].sort_values('Period')
@@ -643,7 +679,7 @@ if s_file and d_file and lt_file:
             with c_net1:
                 if not net_table.empty:
                     st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(),
-                                                   cols=['Network_Consumption','Network_Forecast_Hist'], two_decimals_cols=['Network_Consumption']), use_container_width=True, height=500)
+                                                       cols=['Network_Consumption','Network_Forecast_Hist'], two_decimals_cols=['Network_Consumption']), use_container_width=True, height=500)
                 else:
                     st.write("No aggregated network history available for the chosen selection.")
             with c_net2:
@@ -664,13 +700,24 @@ if s_file and d_file and lt_file:
         st.write("Select a specific node and period to see exactly how the Safety Stock number was derived and simulate impacts interactively.")
 
         c1, c2, c3 = st.columns(3)
-        calc_sku_default = all_products[0] if all_products else ""
-        calc_sku = c1.selectbox("Select Product", sorted(results['Product'].unique()), index=all_products.index(calc_sku_default) if calc_sku_default in all_products else 0, key="c_sku")
-        avail_locs = sorted(results[results['Product'] == calc_sku]['Location'].unique())
-        calc_loc_default = avail_locs[0] if avail_locs else ""
-        calc_loc = c2.selectbox("Select Location", avail_locs, index=avail_locs.index(calc_loc_default) if calc_loc_default in avail_locs else 0, key="c_loc") if avail_locs else c2.selectbox("Select Location", ["(no location)"], index=0, key="c_loc")
-        avail_periods = sorted(results['Period'].unique())
-        calc_period = c3.selectbox("Select Period", avail_periods, index=len(avail_periods)-1 if avail_periods else 0, key="c_period")
+        calc_sku_default = default_product
+        calc_sku_index = all_products.index(calc_sku_default) if calc_sku_default in all_products else 0
+        calc_sku = c1.selectbox("Select Product", all_products, index=calc_sku_index, key="c_sku")
+        avail_locs = sorted(results[results['Product'] == calc_sku]['Location'].unique().tolist())
+        if not avail_locs:
+            avail_locs = ["(no location)"]
+        calc_loc_default = DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in avail_locs else (avail_locs[0] if avail_locs else "(no location)")
+        calc_loc_index = avail_locs.index(calc_loc_default) if calc_loc_default in avail_locs else 0
+        calc_loc = c2.selectbox("Select Location", avail_locs, index=calc_loc_index, key="c_loc")
+        avail_periods = all_periods
+        if avail_periods:
+            try:
+                calc_period_index = avail_periods.index(default_period)
+            except ValueError:
+                calc_period_index = len(avail_periods)-1
+            calc_period = c3.selectbox("Select Period", avail_periods, index=calc_period_index, key="c_period")
+        else:
+            calc_period = c3.selectbox("Select Period", [CURRENT_MONTH_TS], index=0, key="c_period")
 
         row = results[
             (results['Product'] == calc_sku) &
@@ -681,7 +728,6 @@ if s_file and d_file and lt_file:
             st.warning("Selection not found in results.")
         else:
             row = row.iloc[0]
-            # show badge for selected node
             render_selection_badge(product=calc_sku, location=calc_loc if calc_loc != "(no location)" else None, df_context=results[(results['Product']==calc_sku)&(results['Location']==calc_loc)&(results['Period']==calc_period)])
 
             st.markdown("---")
@@ -718,9 +764,7 @@ if s_file and d_file and lt_file:
 """)
             st.info(f"🧮 **Resulting Statistical SS (Method 5):** {euro_format(raw_ss_calc, True)} units")
 
-            # ----------------------
             # SIMULATION (interactive visuals)
-            # ----------------------
             st.markdown("---")
             st.subheader("3. What-If Simulation (interactive visuals)")
             sim_cols = st.columns(3)
@@ -749,7 +793,6 @@ if s_file and d_file and lt_file:
                 (sim_lt_std**2) * (row['Agg_Future_Demand'] / float(days_per_month))**2
             )
 
-            # Bar comparison: Pre-rule SS, Original Safety_Stock (final), Simulated SS
             bar_df = pd.DataFrame({
                 'label': ['Pre_Rule_SS', 'Implemented SS', 'Simulated SS'],
                 'value': [row['Pre_Rule_SS'], row['Safety_Stock'], sim_ss]
@@ -759,7 +802,6 @@ if s_file and d_file and lt_file:
             fig_bar.add_trace(go.Bar(x=bar_df['label'], y=bar_df['value'], marker_color=colors))
             fig_bar.update_layout(title="SS Comparison: Statistical vs Implemented vs Simulated", yaxis_title="Units")
 
-            # Curve: SS vs Service Level (sensitivity) using current sim_lt and sim_lt_std
             sl_range = np.linspace(50.0, 99.9, 50)
             ss_curve = []
             for slev in sl_range:
@@ -774,7 +816,6 @@ if s_file and d_file and lt_file:
             fig_curve.add_vline(x=sim_sl, line_dash="dash", line_color="red", annotation_text=f"Selected SL {sim_sl:.1f}%", annotation_position="top right")
             fig_curve.update_layout(title="Simulated SS Sensitivity to Service Level (other inputs fixed)", xaxis_title="Service Level (%)", yaxis_title="Simulated SS (units)")
 
-            # Display charts side-by-side
             chart_col1, chart_col2 = st.columns([1,1])
             with chart_col1:
                 st.plotly_chart(fig_bar, use_container_width=True)
@@ -794,9 +835,7 @@ if s_file and d_file and lt_file:
             elif sim_ss > row['Pre_Rule_SS']:
                 st.warning(f"📈 Increasing service or lead time requires **{euro_format(sim_ss - row['Pre_Rule_SS'], True)}** more units.")
 
-            # ----------------------
             # BUSINESS RULES
-            # ----------------------
             st.markdown("---")
             st.subheader("4. Business Rules Application")
             col_rule_1, col_rule_2 = st.columns(2)
@@ -827,9 +866,18 @@ if s_file and d_file and lt_file:
     # -------------------------------
     with tab7:
         st.header("📦 View by Material (Single Material Focus + 8 Reasons for Inventory)")
-        selected_product = st.selectbox("Select Material", sorted(results['Product'].unique()), key="mat_sel")
-        period_choices = sorted(results['Period'].unique())
-        selected_period = st.selectbox("Select Period to Snapshot", period_choices, index=len(period_choices)-1 if period_choices else 0, key="mat_period")
+        sel_prod_default = default_product
+        sel_prod_index = all_products.index(sel_prod_default) if sel_prod_default in all_products else 0
+        selected_product = st.selectbox("Select Material", all_products, index=sel_prod_index, key="mat_sel")
+        period_choices = all_periods
+        if period_choices:
+            try:
+                sel_period_index = period_choices.index(default_period)
+            except ValueError:
+                sel_period_index = len(period_choices)-1
+            selected_period = st.selectbox("Select Period to Snapshot", period_choices, index=sel_period_index, key="mat_period")
+        else:
+            selected_period = st.selectbox("Select Period to Snapshot", [CURRENT_MONTH_TS], index=0, key="mat_period")
 
         mat_period_df = results[(results['Product'] == selected_product) & (results['Period'] == selected_period)].copy()
         total_forecast = mat_period_df['Forecast'].sum()
@@ -838,10 +886,8 @@ if s_file and d_file and lt_file:
         nodes_count = mat_period_df['Location'].nunique()
         avg_ss_per_node = (mat_period_df['Safety_Stock'].mean() if nodes_count > 0 else 0)
 
-        # Show selection badge
         render_selection_badge(product=selected_product, location=None, df_context=mat_period_df)
 
-        # KPIs
         k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Total Local Forecast", euro_format(total_forecast, True))
         k2.metric("Total Network Demand", euro_format(total_net, True))
@@ -1003,7 +1049,6 @@ if s_file and d_file and lt_file:
         st.subheader("Actionable Insights (simple heuristics based on current data)")
         if not mat_period_df.empty:
             insights = []
-            # High SS to Forecast ratio
             mat_period_df['SS_to_FCST_Ratio'] = (mat_period_df['Safety_Stock'] / mat_period_df['Forecast'].replace(0, np.nan)).fillna(np.inf)
             high_ratio = mat_period_df[mat_period_df['SS_to_FCST_Ratio'] > 1.0].sort_values('SS_to_FCST_Ratio', ascending=False)
             if not high_ratio.empty:
@@ -1012,7 +1057,6 @@ if s_file and d_file and lt_file:
             else:
                 insights.append("- No nodes found with SS > Forecast (good sign).")
 
-            # Nodes with policy adjustments
             policy_nodes = mat_period_df[mat_period_df['Adjustment_Status'] != 'Optimal (Statistical)']
             if not policy_nodes.empty:
                 insights.append(f"- Nodes with business-rule adjustments: {len(policy_nodes)} (forced zeros, caps).")
@@ -1020,7 +1064,6 @@ if s_file and d_file and lt_file:
             else:
                 insights.append("- No nodes currently modified by policy rules.")
 
-            # Long lead-time nodes
             long_lt = mat_period_df.sort_values('LT_Mean', ascending=False).head(5)
             insights.append(f"- Top lead time nodes (highest avg LT): {', '.join(long_lt['Location'].tolist())}")
             for s in insights:
