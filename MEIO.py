@@ -173,10 +173,6 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
 # SIDEBAR & FILES
 # -------------------------------
 st.sidebar.header("⚙️ Parameters")
-
-st.session_state.setdefault("selected_product", "NOKANDO2")
-st.session_state.setdefault("selected_location", "BEEX")
-
 service_level = st.sidebar.slider("Service Level (%)", 50.0, 99.9, 99.0) / 100
 z = norm.ppf(service_level)
 
@@ -263,7 +259,8 @@ if s_file and d_file and lt_file:
 
     # SAFETY STOCK calculation (Method 5)
     results['Pre_Rule_SS'] = z * np.sqrt(
-        (results['Agg_Std_Hist']**2 / float(days_per_month)) * results['LT_Mean'] )**2
+        (results['Agg_Std_Hist']**2 / float(days_per_month)) * results['LT_Mean'] +
+        (results['LT_Std']**2) * (results['Agg_Future_Demand'] / float(days_per_month))**2
     )
     results['Adjustment_Status'] = 'Optimal (Statistical)'
     results['Safety_Stock'] = results['Pre_Rule_SS']
