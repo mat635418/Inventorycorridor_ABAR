@@ -1,8 +1,9 @@
 # Multi-Echelon Inventory Optimizer — Enhanced Version (Reviewed & Improved)
 # Enhanced by Copilot for mat635418 — 2026-01-15 (with UI/UX updates)
 # Modified: 2026-01-17 — fixes: badge robustness, Forecast Accuracy, defaults, current month default,
-# restored & enhanced scenario simulation (multi-scenario compare) and ensured By Material SS Attribution (Part B) present.
+# restored & enhanced scenario simulation (multi-scenario compare) and ensured By Material SS Attribution (Part B) present
 # Modified: 2026-01-19 — v0.60 UI/UX: badge sizing, network centering, full-plan defaults, scenario defaults, waterfall for SS attribution
+# Modified: 2026-01-19 — v0.61 fixes: restore network rendering, enforce 1-scenario default
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -21,7 +22,7 @@ import re
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
-st.title("📊 MEIO for Raw Materials — v0.60 — Jan 2026")
+st.title("📊 MEIO for Raw Materials — v0.61 — Jan 2026")
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -365,7 +366,7 @@ if s_file and d_file and lt_file:
             st.markdown(extra_html, unsafe_allow_html=True)
 
     # -------------------------------
-    # TAB 2: Network Topology (Centered both vertically and horizontally)
+    # TAB 2: Network Topology (Centered both vertically and horizontally) - FIXED rendering
     # -------------------------------
     with tab2:
         sku_default = default_product
@@ -450,18 +451,21 @@ if s_file and d_file and lt_file:
         
         tmpfile = "net.html"; net.save_graph(tmpfile)
 
-        # Read generated html, extract body and re-wrap to ensure the network is centered vertically & horizontally
+        # Read generated html and inject lightweight CSS into head to center the pyvis container.
+        # This is less invasive than rewriting the body and avoids breaking pyvis scripts.
         html_text = open(tmpfile, 'r', encoding='utf-8').read()
-        m = re.search(r"(?s)<body.*?>(.*)</body>", html_text)
-        if m:
-            body = m.group(1)
-            wrapped_body = f'<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:12px;">{body}</div>'
-            # replace body content with wrapped version
-            full_html = re.sub(r"(?s)(<body.*?>).*?(</body>)", r"\1" + wrapped_body + r"\2", html_text)
-            components.html(full_html, height=750)
-        else:
-            # fallback: render raw file
-            components.html(html_text, height=750)
+        injection_css = """
+        <style>
+          /* Ensure the pyvis network container uses full available height and is centered */
+          html, body { height: 100%; margin: 0; padding: 0; }
+          #mynetwork { display:flex !important; align-items:center; justify-content:center; height:700px !important; width:100% !important; }
+          .vis-network { display:block !important; margin: 0 auto !important; }
+        </style>
+        """
+        if '</head>' in html_text:
+            html_text = html_text.replace('</head>', injection_css + '</head>', 1)
+        # Render the resulting HTML. Using height that matches the network div.
+        components.html(html_text, height=750)
 
     # -------------------------------
     # TAB 3: Full Plan (start filtered to defaults)
@@ -670,10 +674,16 @@ if s_file and d_file and lt_file:
             # ----------------------
             # Enhanced Scenario Simulation: allow 1..3 scenarios, compare
             # Default to 1 scenario on start and keep inputs collapsed
+            # FIX: ensure default is 1 (not 3) even across sessions
             # ----------------------
             st.markdown("---")
             st.subheader("3. Scenario Planning — compare up to 3 scenarios")
-            n_scen = st.selectbox("Number of Scenarios to compare", [1,2,3], index=0, key="n_scen")
+            # initialize session state default for scenarios to 1 if not present
+            if 'n_scen' not in st.session_state:
+                st.session_state['n_scen'] = 1
+            options = [1, 2, 3]
+            default_index = options.index(st.session_state.get('n_scen', 1)) if st.session_state.get('n_scen', 1) in options else 0
+            n_scen = st.selectbox("Number of Scenarios to compare", options, index=default_index, key="n_scen")
             # Base scenario (current): show as scenario 0 (read-only)
             scenarios = []
             # Build UI for scenarios (START COLLAPSED)
