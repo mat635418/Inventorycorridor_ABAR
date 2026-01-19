@@ -19,7 +19,7 @@ import re
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
-st.title("📊 MEIO for Raw Materials — v0.69 — Jan 2026")
+st.title("📊 MEIO for Raw Materials — v0.68 — Jan 2026")
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -1015,6 +1015,7 @@ if s_file and d_file and lt_file:
             </div>
             """
             st.markdown(summary_html, unsafe_allow_html=True)
+
         st.markdown("---")
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
@@ -1028,88 +1029,5 @@ if s_file and d_file and lt_file:
         else:
             st.write("No snapshot available to download for this selection.")
 
-
 else:
     st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
-    
-# -------------------------------
-# NEW TAB: Corridors - ALL Materials
-# -------------------------------
-# Add this tab to the tabs list when creating tabs:
-# ... , "📦 By Material", "🛣️ Corridors - ALL Materials"
-# and then include this handler block for the new tab.
-
-with tab8:  # use the variable name that corresponds to the new tab in your tabs() call
-    st.header("🛣️ Corridors - ALL Materials")
-    st.write("This view shows each material's aggregated total Safety Stock (bold) and the breakdown for ACTIVE nodes (nodes with network demand > 0).")
-    # Period selector for snapshot (keeps consistent with other tabs)
-    period_choices = all_periods if 'all_periods' in globals() else sorted(results['Period'].unique().tolist())
-    if period_choices:
-        try:
-            sel_index = period_choices.index(default_period) if 'default_period' in globals() and default_period in period_choices else len(period_choices) - 1
-        except Exception:
-            sel_index = len(period_choices) - 1
-        selected_period = st.selectbox("Select Period (snapshot)", period_choices, index=sel_index, key="corridors_all_period")
-    else:
-        selected_period = st.selectbox("Select Period (snapshot)", [CURRENT_MONTH_TS], index=0, key="corridors_all_period")
-
-    # Filter results to selected period
-    df_period = results[results['Period'] == selected_period].copy() if 'results' in globals() else pd.DataFrame()
-
-    if df_period.empty:
-        st.info("No data for the chosen period. Please select a different period or check your inputs.")
-    else:
-        # Aggregate totals per product
-        product_summary = df_period.groupby('Product', as_index=False).agg(
-            Total_SS=('Safety_Stock', 'sum'),
-            Total_Forecast=('Forecast', 'sum'),
-            Total_Net=('Agg_Future_Demand', 'sum'),
-            Active_Nodes_Count=('Agg_Future_Demand', lambda s: int((s > 0).sum()))
-        ).sort_values('Total_SS', ascending=False)
-
-        # Add a small search / filter box to quickly find a product
-        prod_filter = st.text_input("Filter products (substring search)", value="", key="corridors_prod_filter")
-        if prod_filter:
-            product_summary = product_summary[product_summary['Product'].str.contains(prod_filter, case=False, na=False)]
-
-        # Summary table of totals (compact)
-        st.markdown("### Materials — aggregated totals (snapshot)")
-        summary_display = product_summary.copy()
-        summary_display['Total_SS'] = summary_display['Total_SS'].apply(lambda v: euro_format(v, True))
-        summary_display['Total_Forecast'] = summary_display['Total_Forecast'].apply(lambda v: euro_format(v, True))
-        summary_display['Total_Net'] = summary_display['Total_Net'].apply(lambda v: euro_format(v, True))
-        st.dataframe(summary_display.rename(columns={
-            'Product': 'Material',
-            'Total_SS': 'Total Safety Stock',
-            'Total_Forecast': 'Total Forecast',
-            'Total_Net': 'Total Network Demand',
-            'Active_Nodes_Count': 'Active Nodes'
-        }), use_container_width=True, height=320)
-
-        st.markdown("---")
-        st.markdown("### Detailed breakdown — Total SS (bold) plus ACTIVE nodes (not bold)")
-        # For each product show bold total and then list active nodes
-        for _, r in product_summary.iterrows():
-            prod = r['Product']
-            total_ss_val = float(r['Total_SS'])
-            total_net_val = float(r['Total_Net'])
-            active_count = int(r['Active_Nodes_Count'])
-
-            # Bold header for product + total SS
-            header_html = f"<div style='margin-top:12px;'><strong style='font-size:15px'>{prod} — Total Safety Stock: {euro_format(total_ss_val, True)}</strong>"
-            header_html += f" &nbsp;&nbsp; <span style='color:#444'>(Net: {euro_format(total_net_val, True)} — Active nodes: {active_count})</span></div>"
-            st.markdown(header_html, unsafe_allow_html=True)
-
-            # Active nodes only
-            active_nodes = df_period[(df_period['Product'] == prod) & (df_period['Agg_Future_Demand'] > 0)].copy()
-            if active_nodes.empty:
-                st.markdown("_No active nodes for this material in the selected period._")
-            else:
-                # Select columns to show and format numeric columns
-                node_cols = ['Location', 'Forecast', 'Agg_Future_Demand', 'Safety_Stock', 'Adjustment_Status']
-                display_nodes = active_nodes[node_cols].sort_values('Safety_Stock', ascending=False).reset_index(drop=True)
-                # Format numeric columns for display
-                display_nodes = df_format_for_display(display_nodes.copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast'])
-                st.dataframe(display_nodes, use_container_width=True, height=min(300, 40 + 30 * len(display_nodes)))
-
-            st.markdown("<hr style='margin:12px 0;'>", unsafe_allow_html=True)
