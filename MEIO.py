@@ -19,7 +19,7 @@ import re
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
-st.title("📊 MEIO for Raw Materials — v0.68 — Jan 2026")
+st.title("📊 MEIO for Raw Materials — v0.69 — Jan 2026")
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -1030,5 +1030,4 @@ if s_file and d_file and lt_file:
             st.write("No snapshot available to download for this selection.")
 
 else:
-
     st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
