@@ -349,19 +349,19 @@ if s_file and d_file and lt_file:
     default_period = CURRENT_MONTH_TS if CURRENT_MONTH_TS in all_periods else (all_periods[-1] if all_periods else None)
 
     # TABS
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📈 Inventory Corridor",
         "🕸️ Network Topology",
         "📋 Full Plan",
         "⚖️ Efficiency Analysis",
         "📉 Forecast Accuracy",
         "🧮 Calculation Trace & Sim",
-        "📦 By Material"
+        "📦 By Material",
+        "🚪 Corridors All Materials"
     ])
 
     # -------------------------------
     # TAB 1: Inventory Corridor
-    # (ensure it starts with NOKANDO2 in BEEX)
     # -------------------------------
     with tab1:
         left, right = st.columns([3,1])
@@ -504,7 +504,6 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 3: Full Plan (apply standard pre-filtering for product only)
-    # - display hides rows that are zero across key numeric columns
     # -------------------------------
     with tab3:
         st.subheader("📋 Global Inventory Plan")
@@ -513,12 +512,53 @@ if s_file and d_file and lt_file:
         loc_choices = sorted(results['Location'].unique())
         period_choices = sorted(results['Period'].unique())
 
-        # Standard pre-filtering: preselect product only (if available), leave other filters empty
+        # Standard pre-filtering:
         default_prod_list = [default_product] if default_product in prod_choices else []
-        # Ensure current month is selected by default in Full Plan if available
-        default_period_list = [default_period] if (default_period in period_choices) else []
+
+        # Default location: DEW1 when meaningful (i.e., present and has non-zero values for default product)
+        default_loc_list = []
+        if default_product in prod_choices and 'DEW1' in loc_choices:
+            cond = (results['Product'] == default_product) & (results['Location'] == 'DEW1') & (
+                (results.get('Forecast', 0).abs() > 0) |
+                (results.get('Agg_Future_Demand', 0).abs() > 0) |
+                (results.get('Safety_Stock', 0).abs() > 0)
+            )
+            try:
+                if cond.any():
+                    default_loc_list = ['DEW1']
+            except Exception:
+                default_loc_list = []
+
+        # Default period: Current Month when meaningful (present & has non-zero)
+        default_period_list = []
+        if CURRENT_MONTH_TS in period_choices:
+            condp = (results['Period'] == CURRENT_MONTH_TS) & (
+                (results.get('Forecast', 0).abs() > 0) |
+                (results.get('Agg_Future_Demand', 0).abs() > 0) |
+                (results.get('Safety_Stock', 0).abs() > 0)
+            )
+            try:
+                if condp.any():
+                    default_period_list = [CURRENT_MONTH_TS]
+            except Exception:
+                default_period_list = []
+
+        # Ensure current month selected by default if meaningful else fallback to previously used default_period if present
+        if not default_period_list and default_period in period_choices:
+            # choose default_period only if it yields any meaningful rows for default_product
+            condp2 = (results['Period'] == default_period) & (
+                (results.get('Forecast', 0).abs() > 0) |
+                (results.get('Agg_Future_Demand', 0).abs() > 0) |
+                (results.get('Safety_Stock', 0).abs() > 0)
+            )
+            try:
+                if condp2.any():
+                    default_period_list = [default_period]
+            except Exception:
+                default_period_list = []
+
         f_prod = col1.multiselect("Filter Product", prod_choices, default=default_prod_list)
-        f_loc = col2.multiselect("Filter Location", loc_choices, default=[])
+        f_loc = col2.multiselect("Filter Location", loc_choices, default=default_loc_list)
         f_period = col3.multiselect("Filter Period", period_choices, default=default_period_list)
 
         filtered = results.copy()
@@ -647,8 +687,6 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 6: Calculation Trace & Simulation (restored & enhanced)
-    # - use LaTeX for formula rendering
-    # - add a shadowed bar between explanation and the two checks
     # -------------------------------
     with tab6:
         st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
@@ -836,7 +874,7 @@ if s_file and d_file and lt_file:
                     st.write("Capping logic disabled.")
 
     # -------------------------------
-    # TAB 7: By Material (pastel colors + bold grand totals, hide zero rows)
+    # TAB 7: By Material (pastel colors)
     # -------------------------------
     with tab7:
         st.header("📦 View by Material (Single Material Focus + 8 Reasons for Inventory)")
@@ -1028,6 +1066,73 @@ if s_file and d_file and lt_file:
             st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="text/csv")
         else:
             st.write("No snapshot available to download for this selection.")
+
+    # -------------------------------
+    # TAB 8: Corridors All Materials
+    # -------------------------------
+    with tab8:
+        st.header("🚪 Corridors — All Materials")
+        period_choices = all_periods
+        if period_choices:
+            # prefer CURRENT_MONTH_TS if meaningful, else default_period, else last
+            preferred = None
+            if CURRENT_MONTH_TS in period_choices:
+                cond_curr = (results['Period'] == CURRENT_MONTH_TS) & (
+                    (results.get('Safety_Stock', 0).abs() > 0) |
+                    (results.get('Agg_Future_Demand', 0).abs() > 0) |
+                    (results.get('Forecast', 0).abs() > 0)
+                )
+                try:
+                    if cond_curr.any():
+                        preferred = CURRENT_MONTH_TS
+                except Exception:
+                    preferred = None
+            if preferred is None and default_period in period_choices:
+                preferred = default_period
+            if preferred is None:
+                preferred = period_choices[-1]
+            try:
+                period_index = period_choices.index(preferred)
+            except Exception:
+                period_index = len(period_choices)-1
+            corr_period = st.selectbox("Select Period to Snapshot", period_choices, index=period_index, key="corr_snapshot_period")
+        else:
+            corr_period = st.selectbox("Select Period to Snapshot", [CURRENT_MONTH_TS], index=0, key="corr_snapshot_period")
+
+        st.markdown("This view shows the total applied Safety Stock per material for the chosen snapshot period. Expand a material to see the location-level split (only active nodes with SS > 0 are shown).")
+        per_prod = results[results['Period'] == corr_period].groupby('Product', as_index=False).agg(
+            Total_Safety_Stock=('Safety_Stock','sum'),
+            Total_Net_Demand=('Agg_Future_Demand','sum'),
+            Total_Forecast=('Forecast','sum'),
+            Nodes_with_SS=('Safety_Stock', lambda x: int((x>0).sum()))
+        ).sort_values('Total_Safety_Stock', ascending=False)
+
+        # Format for display
+        per_prod_display = per_prod.copy()
+        per_prod_display = df_format_for_display(per_prod_display, cols=['Total_Safety_Stock','Total_Net_Demand','Total_Forecast'], two_decimals_cols=['Total_Safety_Stock'])
+        st.dataframe(per_prod_display, use_container_width=True, height=350)
+
+        # Download aggregated snapshot for period
+        full_snapshot = results[results['Period'] == corr_period].copy()
+        if not full_snapshot.empty:
+            st.download_button("📥 Download Corridors Snapshot (CSV)", data=full_snapshot.to_csv(index=False), file_name=f"corridors_snapshot_{corr_period.strftime('%Y-%m')}.csv", mime="text/csv")
+
+        st.markdown("---")
+        st.markdown("Expand a material below to see location breakdown (only nodes with Safety Stock > 0 are shown).")
+        for _, r in per_prod.sort_values('Total_Safety_Stock', ascending=False).iterrows():
+            prod = r['Product']
+            total_ss = r['Total_Safety_Stock']
+            with st.expander(f"{prod} — Total SS: {euro_format(total_ss, True)}", expanded=False):
+                loc_df = results[(results['Product'] == prod) & (results['Period'] == corr_period)].copy()
+                # only active nodes (SS > 0)
+                loc_active = loc_df[loc_df['Safety_Stock'] > 0].copy()
+                if loc_active.empty:
+                    st.write("No active nodes (no Safety Stock) for this material in the chosen period.")
+                else:
+                    display_cols_loc = ['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']
+                    st.dataframe(df_format_for_display(loc_active[display_cols_loc].copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
+                    # allow download of per-product split
+                    st.download_button(f"📥 Download {prod} breakdown (CSV)", data=loc_active[display_cols_loc].to_csv(index=False), file_name=f"{prod}_breakdown_{corr_period.strftime('%Y-%m')}.csv", mime="text/csv")
 
 else:
     st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
