@@ -2,6 +2,7 @@
 # Enhanced by Copilot for mat635418 — 2026-01-15 (with UI/UX updates)
 # Modified: 2026-01-17 — fixes: badge robustness, Forecast Accuracy, defaults, current month default,
 # restored & enhanced scenario simulation (multi-scenario compare) and ensured By Material SS Attribution (Part B) present.
+# Modified: 2026-01-19 — v0.60 UI/UX: badge sizing, network centering, full-plan defaults, scenario defaults, waterfall for SS attribution
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -14,12 +15,13 @@ import os
 import math
 from io import StringIO
 from datetime import datetime
+import re
 
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
-st.title("📊 MEIO for Raw Materials — v0.55 — Jan 2026")
+st.title("📊 MEIO for Raw Materials — v0.60 — Jan 2026")
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -128,6 +130,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 def render_selection_badge(product=None, location=None, df_context=None, small=False):
     """
     Renders selection badge. Defensive to accept either 'Forecast' or 'Forecast_Hist' and missing columns.
+    Improved: flexible layout (wrap) and larger inner boxes to avoid cropping on small containers.
     """
     if product is None or product == "":
         return
@@ -147,20 +150,21 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     total_net = _sum_candidates(df_context, ['Agg_Future_Demand'])
     total_ss = _sum_candidates(df_context, ['Safety_Stock'])
 
+    # make badge inner boxes slightly larger and allow wrapping to avoid overflow
     badge_html = f"""
-    <div style="background:#0b3d91;padding:14px;border-radius:8px;color:white;">
-      <div style="font-size:12px;opacity:0.85">Selected</div>
-      <div style="font-size:16px;font-weight:700;margin-bottom:6px">{product}{(' — ' + location) if location else ''}</div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <div style="background:#ffffff22;padding:8px;border-radius:6px;min-width:140px;">
+    <div style="background:#0b3d91;padding:18px;border-radius:8px;color:white;max-width:100%;">
+      <div style="font-size:12px;opacity:0.95">Selected</div>
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{product}{(' — ' + location) if location else ''}</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <div style="background:#ffffff22;padding:10px;border-radius:6px;min-width:160px;">
           <div style="font-size:11px;opacity:0.85">Fcst (Local)</div>
           <div style="font-size:13px;font-weight:700">{euro_format(total_fcst, True)}</div>
         </div>
-        <div style="background:#ffffff22;padding:8px;border-radius:6px;min-width:140px;">
+        <div style="background:#ffffff22;padding:10px;border-radius:6px;min-width:160px;">
           <div style="font-size:11px;opacity:0.85">Net Demand</div>
           <div style="font-size:13px;font-weight:700">{euro_format(total_net, True)}</div>
         </div>
-        <div style="background:#00b0f622;padding:8px;border-radius:6px;min-width:140px;">
+        <div style="background:#00b0f622;padding:10px;border-radius:6px;min-width:160px;">
           <div style="font-size:11px;opacity:0.85">SS (Current)</div>
           <div style="font-size:13px;font-weight:700">{euro_format(total_ss, True)}</div>
         </div>
@@ -342,15 +346,16 @@ if s_file and d_file and lt_file:
             render_selection_badge(product=sku, location=loc if loc != "(no location)" else None, df_context=plot_df)
             ssum = float(plot_df['Safety_Stock'].sum()) if not plot_df.empty else 0.0
             ndsum = float(plot_df['Agg_Future_Demand'].sum()) if not plot_df.empty else 0.0
+            # enlarge quick totals boxes so they no longer clip values
             extra_html = f"""
-            <div style="padding-top:8px;">
+            <div style="padding-top:10px;">
               <div style="font-size:12px;color:#333">Quick Totals</div>
-              <div style="display:flex;gap:8px;margin-top:6px;">
-                <div style="background:#f7f9fc;padding:8px;border-radius:6px;min-width:120px;">
+              <div style="display:flex;gap:10px;margin-top:6px;flex-wrap:wrap;">
+                <div style="background:#f7f9fc;padding:12px;border-radius:6px;min-width:160px;">
                   <div style="font-size:11px;color:#666">Total SS (sku/loc)</div>
                   <div style="font-size:13px;font-weight:600;color:#0b3d91">{euro_format(ssum, True)}</div>
                 </div>
-                <div style="background:#f7f9fc;padding:8px;border-radius:6px;min-width:120px;">
+                <div style="background:#f7f9fc;padding:12px;border-radius:6px;min-width:160px;">
                   <div style="font-size:11px;color:#666">Total Net Demand</div>
                   <div style="font-size:13px;font-weight:600;color:#0b3d91">{euro_format(ndsum, True)}</div>
                 </div>
@@ -360,7 +365,7 @@ if s_file and d_file and lt_file:
             st.markdown(extra_html, unsafe_allow_html=True)
 
     # -------------------------------
-    # TAB 2: Network Topology (Restored Colors + Horizontal Centering)
+    # TAB 2: Network Topology (Centered both vertically and horizontally)
     # -------------------------------
     with tab2:
         sku_default = default_product
@@ -377,7 +382,7 @@ if s_file and d_file and lt_file:
         else:
             chosen_period = st.selectbox("Period", [CURRENT_MONTH_TS], index=0, key="network_period")
 
-        # CSS to force horizontal centering of the iframe container
+        # CSS to force horizontal centering of the iframe container (kept)
         st.markdown("""
             <style>
                 iframe {
@@ -444,17 +449,40 @@ if s_file and d_file and lt_file:
         """)
         
         tmpfile = "net.html"; net.save_graph(tmpfile)
-        components.html(open(tmpfile, 'r', encoding='utf-8').read(), height=750)
+
+        # Read generated html, extract body and re-wrap to ensure the network is centered vertically & horizontally
+        html_text = open(tmpfile, 'r', encoding='utf-8').read()
+        m = re.search(r"(?s)<body.*?>(.*)</body>", html_text)
+        if m:
+            body = m.group(1)
+            wrapped_body = f'<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:12px;">{body}</div>'
+            # replace body content with wrapped version
+            full_html = re.sub(r"(?s)(<body.*?>).*?(</body>)", r"\1" + wrapped_body + r"\2", html_text)
+            components.html(full_html, height=750)
+        else:
+            # fallback: render raw file
+            components.html(html_text, height=750)
 
     # -------------------------------
-    # TAB 3: Full Plan
+    # TAB 3: Full Plan (start filtered to defaults)
     # -------------------------------
     with tab3:
         st.subheader("📋 Global Inventory Plan")
         col1, col2, col3 = st.columns(3)
-        f_prod = col1.multiselect("Filter Product", sorted(results['Product'].unique()))
-        f_loc = col2.multiselect("Filter Location", sorted(results['Location'].unique()))
-        f_period = col3.multiselect("Filter Period", sorted(results['Period'].unique()))
+        prod_choices = sorted(results['Product'].unique())
+        loc_choices = sorted(results['Location'].unique())
+        period_choices = sorted(results['Period'].unique())
+
+        # sensible defaults: start filtered to the default product / its default location / default period (when available)
+        default_prod_list = [default_product] if default_product in prod_choices else []
+        default_loc_for_default = default_location_for(default_product)
+        default_loc_list = [default_loc_for_default] if default_loc_for_default in loc_choices else []
+        default_period_list = [default_period] if (default_period is not None and default_period in period_choices) else []
+
+        f_prod = col1.multiselect("Filter Product", prod_choices, default=default_prod_list)
+        f_loc = col2.multiselect("Filter Location", loc_choices, default=default_loc_list)
+        f_period = col3.multiselect("Filter Period", period_choices, default=default_period_list)
+
         filtered = results.copy()
         if f_prod: filtered = filtered[filtered['Product'].isin(f_prod)]
         if f_loc: filtered = filtered[filtered['Location'].isin(f_loc)]
@@ -507,7 +535,7 @@ if s_file and d_file and lt_file:
             st.markdown("**Status Breakdown**"); st.table(eff['Adjustment_Status'].value_counts())
             st.markdown("**Top Nodes by Safety Stock (snapshot)**")
             eff_top = eff.sort_values('Safety_Stock', ascending=False)
-            st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True)
+            st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True, height=300)
 
     # -------------------------------
     # TAB 5: Forecast Accuracy (robust)
@@ -566,7 +594,7 @@ if s_file and d_file and lt_file:
             c_net1, c_net2 = st.columns([3,1])
             with c_net1:
                 if not net_table.empty:
-                    st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(), cols=['Network_Consumption','Network_Forecast_Hist'], two_decimals_cols=['Network_Consumption']), use_container_width=True, height=500)
+                    st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(), cols=['Network_Consumption','Network_Forecast_Hist'], two_decimals_cols=['Network_Consumption']), use_container_width=True, height=300)
                 else:
                     st.write("No aggregated network history available for the chosen selection.")
             with c_net2:
@@ -641,15 +669,16 @@ if s_file and d_file and lt_file:
 
             # ----------------------
             # Enhanced Scenario Simulation: allow 1..3 scenarios, compare
+            # Default to 1 scenario on start and keep inputs collapsed
             # ----------------------
             st.markdown("---")
             st.subheader("3. Scenario Planning — compare up to 3 scenarios")
-            n_scen = st.selectbox("Number of Scenarios to compare", [1,2,3], index=2 if 3<=3 else 0, key="n_scen")
+            n_scen = st.selectbox("Number of Scenarios to compare", [1,2,3], index=0, key="n_scen")
             # Base scenario (current): show as scenario 0 (read-only)
             scenarios = []
-            # Build UI for scenarios
+            # Build UI for scenarios (START COLLAPSED)
             for s in range(n_scen):
-                with st.expander(f"Scenario {s+1} inputs", expanded=(s==0)):
+                with st.expander(f"Scenario {s+1} inputs", expanded=False):
                     sc_sl = st.slider(f"Scenario {s+1} Service Level (%)", 50.0, 99.9, float(service_level*100 if s==0 else min(99.9, service_level*100 + 0.5*(s)) ), key=f"sc_sl_{s}")
                     sc_lt = st.slider(f"Scenario {s+1} Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2 or 30.0), value=float(row['LT_Mean'] if s==0 else row['LT_Mean']), key=f"sc_lt_{s}")
                     sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2 or 10.0), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_lt_std_{s}")
@@ -680,7 +709,7 @@ if s_file and d_file and lt_file:
             display_comp = compare_df.copy()
             display_comp['Simulated_SS'] = display_comp['Simulated_SS'].astype(float)
             st.markdown("Scenario comparison (Simulated SS). 'Implemented' shows the final Safety_Stock after rules.")
-            st.dataframe(df_format_for_display(display_comp[['Scenario','Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']].copy(), cols=['Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS'], two_decimals_cols=['Simulated_SS']), use_container_width=True, height=300)
+            st.dataframe(df_format_for_display(display_comp[['Scenario','Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']].copy(), cols=['Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS'], two_decimals_cols=['Simulated_SS']), use_container_width=True, height=250)
 
             # Bar chart: compare Simulated SS across scenarios + implemented
             fig_bar = go.Figure()
@@ -820,10 +849,11 @@ if s_file and d_file and lt_file:
             fig_drv_raw.update_layout(title=f"{selected_product} — Raw Drivers (not SS-attribution)", xaxis_title="Driver", yaxis_title="Units", annotations=annotations_raw, height=420)
             st.plotly_chart(fig_drv_raw, use_container_width=True)
             st.markdown("Driver table (raw numbers and % of raw-sum)")
-            st.dataframe(df_format_for_display(drv_df.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2), cols=['Units','Pct_of_raw_sum']), use_container_width=True, height=260)
+            st.dataframe(df_format_for_display(drv_df.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2), cols=['Units','Pct_of_raw_sum']), use_container_width=True, height=220)
 
             # -------------------------------
             # B. SS Attribution — mutually exclusive components that sum to total SS
+            # (Now rendered as a cascade/waterfall chart instead of columns)
             # -------------------------------
             st.markdown("---")
             st.markdown("#### B. SS Attribution — Mutually exclusive components that SUM EXACTLY to Total Safety Stock")
@@ -875,13 +905,22 @@ if s_file and d_file and lt_file:
             denom = denom if denom > 0 else 1.0
             ss_drv_df['pct_of_total_ss'] = ss_drv_df['amount'] / denom * 100
 
-            fig_drv = go.Figure()
-            fig_drv.add_trace(go.Bar(x=ss_drv_df['driver'], y=ss_drv_df['amount'], marker_color=px.colors.qualitative.Pastel))
-            annotations = []
-            for idx, rowd in ss_drv_df.iterrows():
-                annotations.append(dict(x=rowd['driver'], y=rowd['amount'], text=f"{rowd['pct_of_total_ss']:.1f}%", showarrow=False, yshift=8))
-            fig_drv.update_layout(title=f"{selected_product} — SS Attribution (adds to {euro_format(total_ss, True)})", xaxis_title="Driver", yaxis_title="Units", annotations=annotations, height=420)
+            # Create waterfall (cascade) chart so users can see how components build to total safety stock
+            labels = ss_drv_df['driver'].tolist() + ['Total SS']
+            values = ss_drv_df['amount'].tolist() + [total_ss]
+            measures = ["relative"] * len(ss_drv_df) + ["total"]
+            fig_drv = go.Figure(go.Waterfall(
+                name="SS Attribution",
+                orientation="v",
+                measure=measures,
+                x=labels,
+                y=values,
+                text=[f"{v:,.0f}" for v in ss_drv_df['amount'].tolist()] + [f"{total_ss:,.0f}"],
+                connector={"line":{"color":"rgb(63, 63, 63)"}}
+            ))
+            fig_drv.update_layout(title=f"{selected_product} — SS Attribution Waterfall (adds to {euro_format(total_ss, True)})", xaxis_title="Driver", yaxis_title="Units", height=420)
             st.plotly_chart(fig_drv, use_container_width=True)
+
             st.markdown("SS Attribution table (numbers and % of total SS)")
             st.dataframe(df_format_for_display(ss_drv_df.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS']), use_container_width=True, height=260)
 
