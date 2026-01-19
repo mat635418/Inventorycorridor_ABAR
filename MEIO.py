@@ -1028,6 +1028,10 @@ if s_file and d_file and lt_file:
         else:
             st.write("No snapshot available to download for this selection.")
 
+
+else:
+    st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
+    
 # -------------------------------
 # NEW TAB: Corridors - ALL Materials
 # -------------------------------
@@ -1109,7 +1113,3 @@ with tab8:  # use the variable name that corresponds to the new tab in your tabs
                 st.dataframe(display_nodes, use_container_width=True, height=min(300, 40 + 30 * len(display_nodes)))
 
             st.markdown("<hr style='margin:12px 0;'>", unsafe_allow_html=True)
-        
-
-else:
-    st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
