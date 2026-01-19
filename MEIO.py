@@ -1,16 +1,6 @@
-# Multi-Echelon Inventory Optimizer — Enhanced Version (Reviewed & Improved)
-# Enhanced by Copilot for mat635418 — 2026-01-15 (with UI/UX updates)
-# Modified: 2026-01-17 — fixes: badge robustness, Forecast Accuracy, defaults, current month default,
-# restored & enhanced scenario simulation (multi-scenario compare) and ensured By Material SS Attribution (Part B) present
-# Modified: 2026-01-19 — v0.60 UI/UX: badge sizing, network centering, full-plan defaults, scenario defaults, waterfall for SS attribution
-# Modified: 2026-01-19 — v0.61 fixes: restore network rendering, enforce 1-scenario default
-# Modified: 2026-01-21 — v0.62 changes:
-#  - Full Plan: do not preselect filters by default (empty selections)
-#  - By Material: pastel, light colors while keeping existing color coding
-#  - Network demand: changed aggregation to ONE-LEVEL downstream only (prevents recursive double-counting)
-# Modified: 2026-01-22 — v0.63: re-add Efficiency Analysis, Forecast Accuracy and Calculation Trace & Sim tabs
-# Modified: 2026-01-23 — v0.67: zero-suppression, Full Plan pre-filter for product, scenario planning collapsible, calc-step explanations,
-#                        By Material bold grand totals
+# Multi-Echelon Inventory Optimizer — Raw Materials
+# Author mat635418 — Jan 2026
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -29,7 +19,7 @@ import re
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
-st.title("📊 MEIO for Raw Materials — v0.67 — Jan 2026")
+st.title("📊 MEIO for Raw Materials — v0.65 — Jan 2026")
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -91,6 +81,25 @@ def df_format_for_display(df, cols=None, two_decimals_cols=None):
             else:
                 d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=False))
     return d
+
+def hide_zero_rows(df, check_cols=None):
+    """
+    Remove rows that are zero across all check_cols.
+    If check_cols is None, default to numeric columns commonly used: Safety_Stock, Forecast, Agg_Future_Demand.
+    Returns filtered dataframe for display only (does not modify source).
+    """
+    if df is None or df.empty:
+        return df
+    if check_cols is None:
+        check_cols = ['Safety_Stock', 'Forecast', 'Agg_Future_Demand']
+    existing = [c for c in check_cols if c in df.columns]
+    if not existing:
+        return df
+    try:
+        mask = (df[existing].abs().sum(axis=1) != 0)
+        return df[mask].copy()
+    except Exception:
+        return df
 
 def aggregate_network_stats(df_forecast, df_stats, df_lt):
     """
@@ -167,7 +176,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 def render_selection_badge(product=None, location=None, df_context=None, small=False):
     """
     Renders selection badge. Defensive to accept either 'Forecast' or 'Forecast_Hist' and missing columns.
-    Uses euro_format for zero-suppression.
+    NOTE: Per user request removed Fcst (Local) from this badge to keep filters consistent and avoid confusion.
     """
     if product is None or product == "":
         return
@@ -183,7 +192,6 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
                     return 0.0
         return 0.0
 
-    total_fcst = _sum_candidates(df_context, ['Forecast', 'Forecast_Hist'])
     total_net = _sum_candidates(df_context, ['Agg_Future_Demand'])
     total_ss = _sum_candidates(df_context, ['Safety_Stock'])
 
@@ -192,15 +200,11 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
       <div style="font-size:12px;opacity:0.95">Selected</div>
       <div style="font-size:15px;font-weight:700;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{product}{(' — ' + location) if location else ''}</div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <div style="background:#ffffff22;padding:10px;border-radius:6px;min-width:160px;">
-          <div style="font-size:11px;opacity:0.85">Fcst (Local)</div>
-          <div style="font-size:13px;font-weight:700">{euro_format(total_fcst, True)}</div>
-        </div>
-        <div style="background:#ffffff22;padding:10px;border-radius:6px;min-width:160px;">
-          <div style="font-size:11px;opacity:0.85">Net Demand (1-level)</div>
+        <div style="background:#ffffff22;padding:10px;border-radius:6px;min-width:200px;">
+          <div style="font-size:11px;opacity:0.85">Net Demand</div>
           <div style="font-size:13px;font-weight:700">{euro_format(total_net, True)}</div>
         </div>
-        <div style="background:#00b0f622;padding:10px;border-radius:6px;min-width:160px;">
+        <div style="background:#00b0f622;padding:10px;border-radius:6px;min-width:200px;">
           <div style="font-size:11px;opacity:0.85">SS (Current)</div>
           <div style="font-size:13px;font-weight:700">{euro_format(total_ss, True)}</div>
         </div>
@@ -287,7 +291,7 @@ if s_file and d_file and lt_file:
         return pm if not pd.isna(pm) else global_median_std
     stats['Local_Std'] = stats.apply(fill_local_std, axis=1)
 
-    # Use ONE-LEVEL aggregation (prevents recursive double-counting)
+    # ONE-LEVEL aggregation to prevent recursive double-counting
     network_stats = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt)
     node_lt = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
     node_lt.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
@@ -320,6 +324,8 @@ if s_file and d_file and lt_file:
         results.loc[low_mask, 'Adjustment_Status'] = 'Capped (Low)'
         results['Safety_Stock'] = results['Safety_Stock'].clip(lower=l_lim, upper=u_lim)
     results['Safety_Stock'] = results['Safety_Stock'].round(0)
+
+    # B616 override per previous behaviour
     results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0
     results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast']
 
@@ -355,6 +361,7 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 1: Inventory Corridor
+    # (ensure it starts with NOKANDO2 in BEEX)
     # -------------------------------
     with tab1:
         left, right = st.columns([3,1])
@@ -363,7 +370,8 @@ if s_file and d_file and lt_file:
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("Product", all_products, index=sku_index, key='tab1_sku')
             loc_opts = sorted(results[results['Product'] == sku]['Location'].unique().tolist())
-            loc_default = default_location_for(sku)
+            # force BEEX default when available
+            loc_default = DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in loc_opts else (loc_opts[0] if loc_opts else "(no location)")
             loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
             if loc_opts:
                 loc = st.selectbox("Location", loc_opts, index=loc_index, key='tab1_loc')
@@ -371,11 +379,12 @@ if s_file and d_file and lt_file:
                 loc = st.selectbox("Location", ["(no location)"], index=0, key='tab1_loc')
             st.markdown(f"**Selected**: {sku} — {loc}")
             plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
+
             fig = go.Figure([
                 go.Scatter(x=plot_df['Period'], y=plot_df['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=1, color='rgba(0,0,0,0.1)')),
                 go.Scatter(x=plot_df['Period'], y=plot_df['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
                 go.Scatter(x=plot_df['Period'], y=plot_df['Forecast'], name='Local Direct Forecast', line=dict(color='black', dash='dot')),
-                go.Scatter(x=plot_df['Period'], y=plot_df['Agg_Future_Demand'], name='Total Network Demand (1-level)', line=dict(color='blue', dash='dash'))
+                go.Scatter(x=plot_df['Period'], y=plot_df['Agg_Future_Demand'], name='Total Network Demand', line=dict(color='blue', dash='dash'))
             ])
             fig.update_layout(legend=dict(orientation="h"), xaxis_title='Period', yaxis_title='Units')
             st.plotly_chart(fig, use_container_width=True)
@@ -392,7 +401,7 @@ if s_file and d_file and lt_file:
                   <div style="font-size:13px;font-weight:600;color:#0b3d91">{euro_format(ssum, True)}</div>
                 </div>
                 <div style="background:#f7f9fc;padding:12px;border-radius:6px;min-width:160px;">
-                  <div style="font-size:11px;color:#666">Total Net Demand (1-level)</div>
+                  <div style="font-size:11px;color:#666">Total Net Demand</div>
                   <div style="font-size:13px;font-weight:600;color:#0b3d91">{euro_format(ndsum, True)}</div>
                 </div>
               </div>
@@ -401,7 +410,7 @@ if s_file and d_file and lt_file:
             st.markdown(extra_html, unsafe_allow_html=True)
 
     # -------------------------------
-    # TAB 2: Network Topology (Centered both vertically and horizontally)
+    # TAB 2: Network Topology
     # -------------------------------
     with tab2:
         sku_default = default_product
@@ -458,7 +467,7 @@ if s_file and d_file and lt_file:
                 else:
                     bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
             
-            lbl = f"{n}\nFcst: {euro_format(m['Forecast'])}\nNet(1-level): {euro_format(m['Agg_Future_Demand'])}\nSS: {euro_format(m['Safety_Stock'], True)}"
+            lbl = f"{n}\nFcst: {euro_format(m['Forecast'])}\nNet: {euro_format(m['Agg_Future_Demand'])}\nSS: {euro_format(m['Safety_Stock'], True)}"
             net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
         
         for _, r in sku_lt.iterrows():
@@ -495,6 +504,7 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 3: Full Plan (apply standard pre-filtering for product only)
+    # - display hides rows that are zero across key numeric columns
     # -------------------------------
     with tab3:
         st.subheader("📋 Global Inventory Plan")
@@ -515,17 +525,20 @@ if s_file and d_file and lt_file:
         if f_period: filtered = filtered[filtered['Period'].isin(f_period)]
         filtered = filtered.sort_values('Safety_Stock', ascending=False)
 
-        if (filtered['Product'].nunique() == 1) and (filtered['Location'].nunique() == 1) and not filtered.empty:
-            badge_prod = filtered['Product'].iloc[0]; badge_loc = filtered['Location'].iloc[0]; badge_df = filtered
+        # For display purposes, hide rows where Forecast, Agg_Future_Demand and Safety_Stock are all zero
+        filtered_display = hide_zero_rows(filtered)
+
+        if (filtered_display['Product'].nunique() == 1) and (filtered_display['Location'].nunique() == 1) and not filtered_display.empty:
+            badge_prod = filtered_display['Product'].iloc[0]; badge_loc = filtered_display['Location'].iloc[0]; badge_df = filtered_display
             render_selection_badge(product=badge_prod, location=badge_loc, df_context=badge_df)
-        elif not filtered.empty:
-            badge_prod = filtered['Product'].iloc[0]; badge_df = filtered[filtered['Product'] == badge_prod]
+        elif not filtered_display.empty:
+            badge_prod = filtered_display['Product'].iloc[0]; badge_df = filtered_display[filtered_display['Product'] == badge_prod]
             render_selection_badge(product=badge_prod, location=None, df_context=badge_df)
 
         display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
-        disp = df_format_for_display(filtered[display_cols].copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock','Max_Corridor'], two_decimals_cols=['Forecast'])
+        disp = df_format_for_display(filtered_display[display_cols].copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock','Max_Corridor'], two_decimals_cols=['Forecast'])
         st.dataframe(disp, use_container_width=True, height=700)
-        csv_buf = filtered[display_cols].to_csv(index=False)
+        csv_buf = filtered[display_cols].to_csv(index=False)  # full csv still contains zeros
         st.download_button("📥 Download Filtered Plan (CSV)", data=csv_buf, file_name="filtered_plan.csv", mime="text/csv")
 
     # -------------------------------
@@ -543,6 +556,8 @@ if s_file and d_file and lt_file:
         else:
             eff = results[(results['Product'] == sku) & (results['Period'] == snapshot_period)].copy()
         eff['SS_to_FCST_Ratio'] = (eff['Safety_Stock'] / eff['Agg_Future_Demand'].replace(0, np.nan)).fillna(0)
+        # hide rows with no relevant values for display
+        eff_display = hide_zero_rows(eff)
         total_ss_sku = eff['Safety_Stock'].sum(); total_net_demand_sku = eff['Agg_Future_Demand'].sum()
         sku_ratio = total_ss_sku / total_net_demand_sku if total_net_demand_sku > 0 else 0
         all_res = results[results['Period'] == snapshot_period] if snapshot_period is not None else results
@@ -554,15 +569,15 @@ if s_file and d_file and lt_file:
         st.markdown("---")
         c1, c2 = st.columns([2,1])
         with c1:
-            fig_eff = px.scatter(eff, x="Agg_Future_Demand", y="Safety_Stock", color="Adjustment_Status",
+            fig_eff = px.scatter(eff_display, x="Agg_Future_Demand", y="Safety_Stock", color="Adjustment_Status",
                                  size="SS_to_FCST_Ratio", hover_name="Location",
                                  color_discrete_map={'Optimal (Statistical)': '#00CC96', 'Capped (High)': '#EF553B','Capped (Low)': '#636EFA', 'Forced to Zero': '#AB63FA'},
                                  title="Policy Impact & Efficiency Ratio (Bubble Size = SS_to_FCST_Ratio)")
             st.plotly_chart(fig_eff, use_container_width=True)
         with c2:
-            st.markdown("**Status Breakdown**"); st.table(eff['Adjustment_Status'].value_counts())
+            st.markdown("**Status Breakdown**"); st.table(eff_display['Adjustment_Status'].value_counts())
             st.markdown("**Top Nodes by Safety Stock (snapshot)**")
-            eff_top = eff.sort_values('Safety_Stock', ascending=False)
+            eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
             st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True, height=300)
 
     # -------------------------------
@@ -630,10 +645,12 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 6: Calculation Trace & Simulation (restored & enhanced)
+    # - use LaTeX for formula rendering
+    # - add a shadowed bar between explanation and the two checks
     # -------------------------------
     with tab6:
         st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
-        st.write("See how changing service level or lead-time assumptions affects Method 5 safety stock. The entire scenario planning area below is collapsible and is initially collapsed to keep the page tidy.")
+        st.write("See how changing service level or lead-time assumptions affects Method 5 safety stock. The scenario planning area below is collapsed by default.")
 
         c1, c2, c3 = st.columns(3)
         calc_sku_default = default_product
@@ -674,7 +691,7 @@ if s_file and d_file and lt_file:
             term2_supply_var = (row['LT_Std']**2) * ((row['Agg_Future_Demand'] / float(days_per_month))**2)
             combined_sd = np.sqrt(term1_demand_var + term2_supply_var)
             raw_ss_calc = z * combined_sd
-            st.markdown("Using Safety Stock Method 5 (daily form):")
+
             st.latex(r"SS_{\text{raw}} = Z \times \sqrt{\,\sigma_D^2 \times L \;+\; \sigma_L^2 \times D^2\,}")
             st.markdown("Where σ_D and D are daily values (converted from monthly inputs in the dataset).")
             st.markdown("**Step-by-Step Substitution (values used):**")
@@ -728,7 +745,6 @@ if s_file and d_file and lt_file:
                 impl_row = {'Scenario': 'Implemented', 'Service_Level_%': np.nan, 'LT_mean_days': np.nan, 'LT_std_days': np.nan, 'Simulated_SS': row['Safety_Stock']}
                 compare_df = pd.concat([pd.DataFrame([base_row, impl_row]), scen_df], ignore_index=True, sort=False)
                 display_comp = compare_df.copy()
-                # show table with zero-suppression
                 display_comp['Simulated_SS'] = display_comp['Simulated_SS'].astype(float)
                 st.markdown("Scenario comparison (Simulated SS). 'Implemented' shows the final Safety_Stock after rules.")
                 st.dataframe(df_format_for_display(display_comp[['Scenario','Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']].copy(), cols=['Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS'], two_decimals_cols=['Simulated_SS']), use_container_width=True, height=250)
@@ -757,42 +773,39 @@ if s_file and d_file and lt_file:
                 fig_curve.update_layout(title="SS Sensitivity to Service Level (Scenario 1 LT assumptions)", xaxis_title="Service Level (%)", yaxis_title="Simulated SS (units)")
                 st.plotly_chart(fig_curve, use_container_width=True)
 
+            # Shadowed separator
+            st.markdown("""<div style="height:12px;background:#f0f0f2;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.07);margin:12px 0;"></div>""", unsafe_allow_html=True)
+
             # ----------------------
             # Business rules & Diagnostics with explanation (point 4)
+            # - include LaTeX math for clarity
             # ----------------------
-            st.markdown("---")
             st.subheader("4. Business Rules & Diagnostics — explanation & diagnostics")
-            st.markdown("""
-            Background & explanation of the calculation steps and business-rule adjustments:
+            st.markdown(r"""
+            Background & explanation of the calculation steps and business-rule adjustments.
 
-            - Statistical SS (Pre_Rule_SS) is computed using Method 5:
-              SS_raw = Z * sqrt( σ_D^2 * L + σ_L^2 * D^2 )
-              where:
-                - σ_D is the aggregated demand standard deviation (daily),
-                - L is average lead time (days),
-                - σ_L is lead-time standard deviation (days),
-                - D is aggregated network demand (daily).
-
-            - Demand term (σ_D^2 * L) represents uncertainty from demand over lead time.
-            - Supply term (σ_L^2 * D^2) captures lead-time variability scaled by demand (note the D^2 dependence).
-
-            - Max/Min Capping (policy):
-              If capping is enabled, we compute:
-                lower_limit = Agg_Future_Demand * (cap_range_min / 100)
-                upper_limit = Agg_Future_Demand * (cap_range_max / 100)
-              These limits are expressed as a percentage of the aggregated ONE-LEVEL network demand for the node.
-              After computing the raw statistical SS (Pre_Rule_SS), the implemented Safety_Stock is:
-                Safety_Stock = clip(Pre_Rule_SS, lower_limit, upper_limit)
-              Exceptions:
-                - If Agg_Future_Demand == 0 and zero-suppression rule is enabled, Safety_Stock is forced to zero.
-                - Specific location overrides (e.g., B616) may force Safety_Stock = 0.
-
-            - Max_Corridor is a presentation metric used in the Inventory Corridor:
-                Max_Corridor = Safety_Stock + Forecast (local forecast)
-              It helps visualize the upper bound of inventory needed to cover SS + expected local demand.
-
-            The UI below surfaces diagnostics and warns when raw SS is outside caps or hits overrides.
+            Mathematical formulation (Method 5):
             """)
+            st.latex(r"SS_{\text{raw}} = Z \cdot \sqrt{\sigma_D^2 \cdot L \;+\; \sigma_L^2 \cdot D^2}")
+            st.markdown(r"""
+            where:
+            - \sigma_D : aggregated demand standard deviation (daily)
+            - L : average lead time (days)
+            - \sigma_L : lead-time standard deviation (days)
+            - D : aggregated network demand (daily)
+            """)
+            st.markdown(r"""
+            Capping policy (if enabled):
+            """)
+            st.latex(r"\text{lower\_limit} = D \times \text{cap\_min\_pct}")
+            st.latex(r"\text{upper\_limit} = D \times \text{cap\_max\_pct}")
+            st.markdown(r"""
+            Then: Safety_Stock = clip(SS_{raw}, lower_limit, upper_limit)
+            with exceptions:
+            - If D == 0 and zero suppression rule is enabled -> Safety_Stock = 0
+            - Explicit overrides (e.g., specific locations such as B616) may force 0
+            """)
+
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**Zero Demand Rule**")
@@ -818,7 +831,7 @@ if s_file and d_file and lt_file:
                     st.write("Capping logic disabled.")
 
     # -------------------------------
-    # TAB 7: By Material (pastel colors + bold grand totals)
+    # TAB 7: By Material (pastel colors + bold grand totals, hide zero rows)
     # -------------------------------
     with tab7:
         st.header("📦 View by Material (Single Material Focus + 8 Reasons for Inventory)")
@@ -836,6 +849,8 @@ if s_file and d_file and lt_file:
             selected_period = st.selectbox("Select Period to Snapshot", [CURRENT_MONTH_TS], index=0, key="mat_period")
 
         mat_period_df = results[(results['Product'] == selected_product) & (results['Period'] == selected_period)].copy()
+        # hide zero rows for dashboard presentation
+        mat_period_df_display = hide_zero_rows(mat_period_df)
         total_forecast = mat_period_df['Forecast'].sum(); total_net = mat_period_df['Agg_Future_Demand'].sum()
         total_ss = mat_period_df['Safety_Stock'].sum(); nodes_count = mat_period_df['Location'].nunique()
         avg_ss_per_node = (mat_period_df['Safety_Stock'].mean() if nodes_count > 0 else 0)
@@ -845,8 +860,8 @@ if s_file and d_file and lt_file:
         k3.metric("Total Safety Stock (sum nodes)", euro_format(total_ss, True)); k4.metric("Nodes", f"{nodes_count}"); k5.metric("Avg SS per Node", euro_format(avg_ss_per_node, True))
 
         st.markdown("### Why do we carry this SS? — 8 Reasons breakdown (aggregated for selected material)")
-        if mat_period_df.empty:
-            st.warning("No data for this material/period.")
+        if mat_period_df_display.empty:
+            st.warning("No data for this material/period (non-zero rows filtered).")
         else:
             mat = mat_period_df.copy()
             mat['LT_Mean'] = mat['LT_Mean'].fillna(0); mat['LT_Std'] = mat['LT_Std'].fillna(0)
@@ -876,20 +891,23 @@ if s_file and d_file and lt_file:
             }
 
             drv_df = pd.DataFrame({'driver': list(raw_drivers.keys()), 'amount': [float(v) for v in raw_drivers.values()]})
+            # hide drivers with zero amount for table and chart readability
+            drv_df_display = drv_df[drv_df['amount'] != 0].copy()
             drv_denom = drv_df['amount'].sum()
-            drv_df['pct_of_total_ss'] = drv_df['amount'] / (drv_denom if drv_denom > 0 else 1.0) * 100
+            drv_df_display['pct_of_total_ss'] = drv_df_display['amount'] / (drv_denom if drv_denom > 0 else 1.0) * 100
 
             st.markdown("#### A. Original — Raw driver values (interpretation view)")
             pastel_colors = px.colors.qualitative.Pastel
             fig_drv_raw = go.Figure()
-            fig_drv_raw.add_trace(go.Bar(x=drv_df['driver'], y=drv_df['amount'], marker_color=pastel_colors))
+            color_slice = pastel_colors[:len(drv_df_display)] if len(drv_df_display)>0 else pastel_colors
+            fig_drv_raw.add_trace(go.Bar(x=drv_df_display['driver'], y=drv_df_display['amount'], marker_color=color_slice))
             annotations_raw = []
-            for idx, rowd in drv_df.iterrows():
+            for idx, rowd in drv_df_display.iterrows():
                 annotations_raw.append(dict(x=rowd['driver'], y=rowd['amount'], text=f"{rowd['pct_of_total_ss']:.1f}%", showarrow=False, yshift=8))
             fig_drv_raw.update_layout(title=f"{selected_product} — Raw Drivers (not SS-attribution)", xaxis_title="Driver", yaxis_title="Units", annotations=annotations_raw, height=420)
             st.plotly_chart(fig_drv_raw, use_container_width=True)
             st.markdown("Driver table (raw numbers and % of raw-sum)")
-            st.dataframe(df_format_for_display(drv_df.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2), cols=['Units','Pct_of_raw_sum']), use_container_width=True, height=220)
+            st.dataframe(df_format_for_display(drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2), cols=['Units','Pct_of_raw_sum']), use_container_width=True, height=220)
 
             # -------------------------------
             # B. SS Attribution — waterfall with pastel colors
@@ -940,13 +958,14 @@ if s_file and d_file and lt_file:
                 ss_sum = sum(ss_attrib.values())
 
             ss_drv_df = pd.DataFrame({'driver': list(ss_attrib.keys()), 'amount': [float(v) for v in ss_attrib.values()]})
+            ss_drv_df_display = ss_drv_df[ss_drv_df['amount'] != 0].copy()
             denom = total_ss if total_ss > 0 else ss_drv_df['amount'].sum()
             denom = denom if denom > 0 else 1.0
-            ss_drv_df['pct_of_total_ss'] = ss_drv_df['amount'] / denom * 100
+            ss_drv_df_display['pct_of_total_ss'] = ss_drv_df_display['amount'] / denom * 100
 
-            labels = ss_drv_df['driver'].tolist() + ['Total SS']
-            values = ss_drv_df['amount'].tolist() + [total_ss]
-            measures = ["relative"] * len(ss_drv_df) + ["total"]
+            labels = ss_drv_df_display['driver'].tolist() + ['Total SS']
+            values = ss_drv_df_display['amount'].tolist() + [total_ss]
+            measures = ["relative"] * len(ss_drv_df_display) + ["total"]
             pastel_inc = pastel_colors[0] if len(pastel_colors) > 0 else '#A3C1DA'
             pastel_dec = pastel_colors[1] if len(pastel_colors) > 1 else '#F6C3A0'
             pastel_tot = pastel_colors[2] if len(pastel_colors) > 2 else '#CFCFCF'
@@ -956,7 +975,7 @@ if s_file and d_file and lt_file:
                 measure=measures,
                 x=labels,
                 y=values,
-                text=[f"{v:,.0f}" for v in ss_drv_df['amount'].tolist()] + [f"{total_ss:,.0f}"],
+                text=[f"{v:,.0f}" for v in ss_drv_df_display['amount'].tolist()] + [f"{total_ss:,.0f}"],
                 connector={"line":{"color":"rgba(63,63,63,0.25)"}},
                 decreasing=dict(marker=dict(color=pastel_dec)),
                 increasing=dict(marker=dict(color=pastel_inc)),
@@ -966,7 +985,7 @@ if s_file and d_file and lt_file:
             st.plotly_chart(fig_drv, use_container_width=True)
 
             st.markdown("SS Attribution table (numbers and % of total SS)")
-            st.dataframe(df_format_for_display(ss_drv_df.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS']), use_container_width=True, height=260)
+            st.dataframe(df_format_for_display(ss_drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS']), use_container_width=True, height=260)
 
             # Bold grand totals summary for the displayed columns
             grand_forecast = mat_period_df['Forecast'].sum()
@@ -995,7 +1014,8 @@ if s_file and d_file and lt_file:
         st.markdown("---")
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
-        st.dataframe(df_format_for_display(top_nodes.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
+        top_nodes_display = hide_zero_rows(top_nodes)
+        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
 
         st.markdown("---")
         st.subheader("Export — Material Snapshot")
