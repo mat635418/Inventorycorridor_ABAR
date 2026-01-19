@@ -1,5 +1,5 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
-# Developed by mat635418 — JNA 2026
+# Developed by mat635418 — JAN 2026
 
 import streamlit as st
 import pandas as pd
@@ -19,7 +19,7 @@ import re
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
-st.title("📊 MEIO for Raw Materials — v0.65 — Jan 2026")
+st.title("📊 MEIO for Raw Materials — v0.68 — Jan 2026")
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -515,9 +515,11 @@ if s_file and d_file and lt_file:
 
         # Standard pre-filtering: preselect product only (if available), leave other filters empty
         default_prod_list = [default_product] if default_product in prod_choices else []
+        # Ensure current month is selected by default in Full Plan if available
+        default_period_list = [default_period] if (default_period in period_choices) else []
         f_prod = col1.multiselect("Filter Product", prod_choices, default=default_prod_list)
         f_loc = col2.multiselect("Filter Location", loc_choices, default=[])
-        f_period = col3.multiselect("Filter Period", period_choices, default=[])
+        f_period = col3.multiselect("Filter Period", period_choices, default=default_period_list)
 
         filtered = results.copy()
         if f_prod: filtered = filtered[filtered['Product'].isin(f_prod)]
@@ -805,6 +807,9 @@ if s_file and d_file and lt_file:
             - If D == 0 and zero suppression rule is enabled -> Safety_Stock = 0
             - Explicit overrides (e.g., specific locations such as B616) may force 0
             """)
+
+            # add some vertical space for clarity before the checks
+            st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
             c1, c2 = st.columns(2)
             with c1:
