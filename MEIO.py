@@ -1015,6 +1015,18 @@ if s_file and d_file and lt_file:
             </div>
             """
             st.markdown(summary_html, unsafe_allow_html=True)
+        st.markdown("---")
+        st.subheader("Top Locations by Safety Stock (snapshot)")
+        top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
+        top_nodes_display = hide_zero_rows(top_nodes)
+        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
+
+        st.markdown("---")
+        st.subheader("Export — Material Snapshot")
+        if not mat_period_df.empty:
+            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="text/csv")
+        else:
+            st.write("No snapshot available to download for this selection.")
 
 # -------------------------------
 # NEW TAB: Corridors - ALL Materials
@@ -1098,18 +1110,6 @@ with tab8:  # use the variable name that corresponds to the new tab in your tabs
 
             st.markdown("<hr style='margin:12px 0;'>", unsafe_allow_html=True)
         
-        st.markdown("---")
-        st.subheader("Top Locations by Safety Stock (snapshot)")
-        top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
-        top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
-
-        st.markdown("---")
-        st.subheader("Export — Material Snapshot")
-        if not mat_period_df.empty:
-            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="text/csv")
-        else:
-            st.write("No snapshot available to download for this selection.")
 
 else:
     st.info("No data found. Please place 'sales.csv', 'demand.csv', and 'leadtime.csv' in the script folder OR upload them via the sidebar.")
