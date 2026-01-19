@@ -1,5 +1,6 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — JAN 2026
+# Updated: v0.7 - Jan 2026 — policy CSV/editor, zero-threshold, caching, temp file for network HTML, validation & policy log
 
 import streamlit as st
 import pandas as pd
@@ -14,12 +15,15 @@ import math
 from io import StringIO
 from datetime import datetime
 import re
+import tempfile
+import hashlib
+import json
 
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
-st.title("📊 MEIO for Raw Materials — v0.68 — Jan 2026")
+st.title("📊 MEIO for Raw Materials — v0.70 — Jan 2026 (policy+cache+validation)")
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -35,14 +39,9 @@ def clean_numeric(series):
     return out
 
 def euro_format(x, always_two_decimals=True):
-    """
-    Formatting helper. Zero-suppression: return empty string when value is (near) zero to keep UI clean.
-    Still returns empty string for NaN/None.
-    """
     try:
         if x is None:
             return ""
-        # convert possible pandas types
         if isinstance(x, (np.floating, float, np.integer, int)):
             xv = float(x)
         else:
@@ -52,7 +51,6 @@ def euro_format(x, always_two_decimals=True):
                 return str(x)
         if math.isnan(xv):
             return ""
-        # Zero suppression: treat very small absolute values as zero
         if math.isclose(xv, 0.0, abs_tol=1e-9):
             return ""
         neg = xv < 0
@@ -64,7 +62,6 @@ def euro_format(x, always_two_decimals=True):
                 s = f"{x_abs:,.0f}"
             else:
                 s = f"{x_abs:,.2f}"
-        # European formatting (swap decimal/comma)
         s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
         return f"-{s}" if neg else s
     except Exception:
@@ -83,11 +80,6 @@ def df_format_for_display(df, cols=None, two_decimals_cols=None):
     return d
 
 def hide_zero_rows(df, check_cols=None):
-    """
-    Remove rows that are zero across all check_cols.
-    If check_cols is None, default to numeric columns commonly used: Safety_Stock, Forecast, Agg_Future_Demand.
-    Returns filtered dataframe for display only (does not modify source).
-    """
     if df is None or df.empty:
         return df
     if check_cols is None:
@@ -101,18 +93,46 @@ def hide_zero_rows(df, check_cols=None):
     except Exception:
         return df
 
+def validate_columns(df, required_cols, name="file"):
+    missing = set(required_cols) - set(df.columns)
+    if missing:
+        example = ", ".join(required_cols)
+        st.error(f"Validation error: {name} missing columns: {missing}. Expected columns (example): {example}")
+        st.stop()
+
+def log_policy_change(entry):
+    if 'policy_log' not in st.session_state:
+        st.session_state['policy_log'] = []
+    st.session_state['policy_log'].append(entry)
+
+# -------------------------------
+# CACHING & CSV LOADING
+# -------------------------------
+@st.cache_data
+def read_csv_from_bytes(content_bytes):
+    # content_bytes is bytes/bytearray or str path
+    if isinstance(content_bytes, (bytes, bytearray)):
+        s = StringIO(content_bytes.decode('utf-8'))
+        return pd.read_csv(s)
+    elif isinstance(content_bytes, str):
+        return pd.read_csv(content_bytes)
+    else:
+        raise ValueError("Unsupported cached content type for CSV reader.")
+
+@st.cache_data
+def aggregate_network_stats_cached(forecast_csv, stats_csv, lt_csv):
+    # inputs are CSV strings (text). Reconstruct dataframes internally.
+    df_forecast = pd.read_csv(StringIO(forecast_csv))
+    df_stats = pd.read_csv(StringIO(stats_csv))
+    df_lt = pd.read_csv(StringIO(lt_csv))
+    return aggregate_network_stats(df_forecast, df_stats, df_lt)
+
+# original aggregate_network_stats preserved for internal use by cached wrapper
 def aggregate_network_stats(df_forecast, df_stats, df_lt):
-    """
-    ONE-LEVEL aggregation to match Excel logic:
-    - Agg_Future_Demand = local_forecast + sum(local_forecast of direct children (one-level only))
-    - Agg_Std_Hist = sqrt(local_var + sum(child_local_var))  (child local variance included once)
-    No recursive propagation beyond direct children. This prevents double-counting at hubs.
-    """
     results = []
     months = df_forecast['Period'].unique()
     products = df_forecast['Product'].unique()
 
-    # Build lookup of routes per product
     routes_by_product = {}
     if 'Product' in df_lt.columns:
         for prod in df_lt['Product'].unique():
@@ -127,7 +147,6 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
             p_fore = df_month[df_month['Product'] == prod].set_index('Location').to_dict('index')
             p_lt = routes_by_product.get(prod, pd.DataFrame(columns=df_lt.columns))
 
-            # Nodes are union of forecast locations and any from/to in routes
             nodes = set(df_month[df_month['Product'] == prod]['Location'])
             if not p_lt.empty:
                 nodes = nodes.union(set(p_lt.get('From_Location', pd.Series([])))).union(set(p_lt.get('To_Location', pd.Series([]))))
@@ -135,16 +154,13 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
             if not nodes:
                 continue
 
-            # Map direct children (one-level)
             children = {}
             if not p_lt.empty:
                 for _, r in p_lt.iterrows():
                     children.setdefault(r['From_Location'], []).append(r['To_Location'])
 
             for n in nodes:
-                # local forecast
                 local_fcst = float(p_fore.get(n, {'Forecast': 0})['Forecast']) if n in p_fore else 0.0
-                # direct children forecasts (one-level only)
                 direct_children = children.get(n, [])
                 child_fcst_sum = 0.0
                 child_var_sum = 0.0
@@ -157,7 +173,6 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 
                 agg_demand = local_fcst + child_fcst_sum
 
-                # local variance + sum(child variances) -> agg std
                 local_std = p_stats.get(n, {}).get('Local_Std', np.nan)
                 local_var = 0.0 if pd.isna(local_std) else float(local_std)**2
                 total_var = local_var + child_var_sum
@@ -173,48 +188,8 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 
     return pd.DataFrame(results)
 
-def render_selection_badge(product=None, location=None, df_context=None, small=False):
-    """
-    Renders selection badge. Defensive to accept either 'Forecast' or 'Forecast_Hist' and missing columns.
-    NOTE: Per user request removed Fcst (Local) from this badge to keep filters consistent and avoid confusion.
-    """
-    if product is None or product == "":
-        return
-
-    def _sum_candidates(df, candidates):
-        if df is None or df.empty:
-            return 0.0
-        for c in candidates:
-            if c in df.columns:
-                try:
-                    return float(df[c].sum())
-                except Exception:
-                    return 0.0
-        return 0.0
-
-    total_net = _sum_candidates(df_context, ['Agg_Future_Demand'])
-    total_ss = _sum_candidates(df_context, ['Safety_Stock'])
-
-    badge_html = f"""
-    <div style="background:#0b3d91;padding:18px;border-radius:8px;color:white;max-width:100%;">
-      <div style="font-size:12px;opacity:0.95">Selected</div>
-      <div style="font-size:15px;font-weight:700;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{product}{(' — ' + location) if location else ''}</div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <div style="background:#ffffff22;padding:10px;border-radius:6px;min-width:200px;">
-          <div style="font-size:11px;opacity:0.85">Net Demand</div>
-          <div style="font-size:13px;font-weight:700">{euro_format(total_net, True)}</div>
-        </div>
-        <div style="background:#00b0f622;padding:10px;border-radius:6px;min-width:200px;">
-          <div style="font-size:11px;opacity:0.85">SS (Current)</div>
-          <div style="font-size:13px;font-weight:700">{euro_format(total_ss, True)}</div>
-        </div>
-      </div>
-    </div>
-    """
-    st.markdown(badge_html, unsafe_allow_html=True)
-
 # -------------------------------
-# SIDEBAR & FILES
+# SIDEBAR & POLICY (CSV or editor)
 # -------------------------------
 st.sidebar.header("⚙️ Parameters")
 service_level = st.sidebar.slider("Service Level (%)", 50.0, 99.9, 99.0) / 100
@@ -225,10 +200,9 @@ st.sidebar.subheader("📐 Calculation Settings")
 days_per_month = st.sidebar.number_input("Days per month (used to convert monthly->daily)", value=30, min_value=1)
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛡️ Safety Stock Rules")
-zero_if_no_net_fcst = st.sidebar.checkbox("Force Zero SS if No Network Demand", value=True)
-apply_cap = st.sidebar.checkbox("Enable SS Capping (% of Network Demand)", value=True)
-cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200),
-                              help="Ensures SS stays between these % of total network demand for that node.")
+zero_if_no_net_fcst = st.sidebar.checkbox("Force Zero SS if No Network Demand (uses threshold)", value=True)
+zero_threshold = st.sidebar.number_input("Zero suppression threshold (monthly units)", value=0.5, min_value=0.0, step=0.1,
+                                         help="If Agg_Future_Demand <= this threshold, SS may be forced to zero (per policy).")
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Sources (CSV)")
 DEFAULT_FILES = {"sales": "sales.csv", "demand": "demand.csv", "lt": "leadtime.csv"}
@@ -242,6 +216,62 @@ if s_file: st.sidebar.success(f"✅ Sales Loaded: {getattr(s_file,'name', s_file
 if d_file: st.sidebar.success(f"✅ Demand Loaded: {getattr(d_file,'name', d_file)}")
 if lt_file: st.sidebar.success(f"✅ Lead Time Loaded: {getattr(lt_file,'name', lt_file)}")
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("📋 Policy Overrides (CSV or Edit)")
+st.sidebar.markdown("Upload a policy CSV with columns: Product (optional), Location (optional), Override_SS (numeric, optional), Cap_Min_Pct (min cap % optional), Cap_Max_Pct (max cap % optional). Rows with blanks act as wildcards. Example row: ,B616,,,")
+
+policy_upload = st.sidebar.file_uploader("Policy CSV (optional)", type="csv", key="policy_upload")
+policy_df_default = pd.DataFrame([
+    # default example entry for historical behaviour; editable
+    {"Product": "", "Location": "B616", "Override_SS": 0.0, "Cap_Min_Pct": None, "Cap_Max_Pct": None}
+])
+policy_df = policy_df_default.copy()
+
+# If uploaded, read via cached reader
+if policy_upload is not None:
+    try:
+        content_bytes = policy_upload.getvalue()
+        policy_df = read_csv_from_bytes(content_bytes)
+        # sanitize columns
+        for c in ['Product', 'Location', 'Override_SS', 'Cap_Min_Pct', 'Cap_Max_Pct']:
+            if c not in policy_df.columns:
+                policy_df[c] = None
+        policy_df = policy_df[['Product', 'Location', 'Override_SS', 'Cap_Min_Pct', 'Cap_Max_Pct']]
+        log_policy_change({"time": datetime.utcnow().isoformat() + "Z", "action": "uploaded", "rows": len(policy_df)})
+        st.sidebar.success(f"Policy uploaded ({len(policy_df)} rows)")
+    except Exception as e:
+        st.sidebar.error(f"Error reading policy CSV: {e}")
+        policy_df = policy_df_default.copy()
+else:
+    # allow editing in the sidebar (if Streamlit supports data_editor)
+    try:
+        edited = st.sidebar.data_editor(policy_df_default, key="policy_editor", num_rows="dynamic")
+    except Exception:
+        edited = st.sidebar.experimental_data_editor(policy_df_default, key="policy_editor", num_rows="dynamic")
+    # If user edited, capture and log changes
+    if 'policy_editor' in st.session_state:
+        new_policy = st.session_state['policy_editor']
+        # new_policy can be DataFrame-like or dict; try to normalize
+        try:
+            new_df = pd.DataFrame(new_policy)
+            policy_df = new_df[['Product', 'Location', 'Override_SS', 'Cap_Min_Pct', 'Cap_Max_Pct']].copy()
+        except Exception:
+            policy_df = policy_df_default.copy()
+        log_policy_change({"time": datetime.utcnow().isoformat() + "Z", "action": "edited", "rows": len(policy_df)})
+
+# global cap fallback if per-row policy missing
+st.sidebar.markdown("---")
+st.sidebar.subheader("Fallback Global Cap Limits (used if policy missing)")
+cap_min_global = st.sidebar.number_input("Global Cap Min (%)", value=0, min_value=0, max_value=1000)
+cap_max_global = st.sidebar.number_input("Global Cap Max (%)", value=200, min_value=0, max_value=1000)
+st.sidebar.markdown("---")
+st.sidebar.subheader("Policy Change Log")
+if 'policy_log' in st.session_state and st.session_state['policy_log']:
+    for idx, entry in enumerate(reversed(st.session_state['policy_log'][-10:])):
+        st.sidebar.markdown(f"- {entry['time']} — {entry['action']} ({entry.get('rows','?')} rows)")
+else:
+    st.sidebar.markdown("_No policy changes logged in this session._")
+
 # -------------------------------
 # MAIN LOGIC
 # -------------------------------
@@ -250,26 +280,40 @@ DEFAULT_LOCATION_CHOICE = "BEEX"
 CURRENT_MONTH_TS = pd.Timestamp.now().to_period('M').to_timestamp()
 
 if s_file and d_file and lt_file:
+    # --- read CSVs via cached reader
     try:
-        df_s = pd.read_csv(s_file)
-        df_d = pd.read_csv(d_file)
-        df_lt = pd.read_csv(lt_file)
+        # For uploaded files, read bytes and pass to cached reader; for file paths, pass path string
+        if hasattr(s_file, "getvalue"):
+            s_bytes = s_file.getvalue()
+            df_s = read_csv_from_bytes(s_bytes)
+        else:
+            df_s = read_csv_from_bytes(str(s_file))
+
+        if hasattr(d_file, "getvalue"):
+            d_bytes = d_file.getvalue()
+            df_d = read_csv_from_bytes(d_bytes)
+        else:
+            df_d = read_csv_from_bytes(str(d_file))
+
+        if hasattr(lt_file, "getvalue"):
+            lt_bytes = lt_file.getvalue()
+            df_lt = read_csv_from_bytes(lt_bytes)
+        else:
+            df_lt = read_csv_from_bytes(str(lt_file))
     except Exception as e:
         st.error(f"Error reading uploaded files: {e}")
         st.stop()
 
+    # sanitize column names
     for df in [df_s, df_d, df_lt]:
         df.columns = [c.strip() for c in df.columns]
 
     needed_sales_cols = {'Product', 'Location', 'Period', 'Consumption', 'Forecast'}
     needed_demand_cols = {'Product', 'Location', 'Period', 'Forecast'}
     needed_lt_cols = {'Product', 'From_Location', 'To_Location', 'Lead_Time_Days', 'Lead_Time_Std_Dev'}
-    if not needed_sales_cols.issubset(set(df_s.columns)):
-        st.error(f"sales.csv missing columns: {needed_sales_cols - set(df_s.columns)}"); st.stop()
-    if not needed_demand_cols.issubset(set(df_d.columns)):
-        st.error(f"demand.csv missing columns: {needed_demand_cols - set(df_d.columns)}"); st.stop()
-    if not needed_lt_cols.issubset(set(df_lt.columns)):
-        st.error(f"leadtime.csv missing columns: {needed_lt_cols - set(df_lt.columns)}"); st.stop()
+    validate_columns(df_s, needed_sales_cols, name="sales.csv")
+    validate_columns(df_d, needed_demand_cols, name="demand.csv")
+    validate_columns(df_lt, needed_lt_cols, name="leadtime.csv")
 
     # Normalize Period to month start timestamps
     df_s['Period'] = pd.to_datetime(df_s['Period'], errors='coerce'); df_d['Period'] = pd.to_datetime(df_d['Period'], errors='coerce')
@@ -279,8 +323,16 @@ if s_file and d_file and lt_file:
     df_d['Forecast'] = clean_numeric(df_d['Forecast'])
     df_lt['Lead_Time_Days'] = clean_numeric(df_lt['Lead_Time_Days']); df_lt['Lead_Time_Std_Dev'] = clean_numeric(df_lt['Lead_Time_Std_Dev'])
 
-    stats = df_s.groupby(['Product', 'Location'])['Consumption'].agg(['mean', 'std']).reset_index()
-    stats.columns = ['Product', 'Location', 'Local_Mean', 'Local_Std']
+    # --- compute stats (cached by CSV content) ---
+    sales_csv_text = df_s.to_csv(index=False)
+    @st.cache_data
+    def compute_stats_cached(sales_csv_text):
+        df = pd.read_csv(StringIO(sales_csv_text))
+        stats_local = df.groupby(['Product', 'Location'])['Consumption'].agg(['mean', 'std']).reset_index()
+        stats_local.columns = ['Product', 'Location', 'Local_Mean', 'Local_Std']
+        return stats_local
+    stats = compute_stats_cached(sales_csv_text)
+
     global_median_std = stats['Local_Std'].median(skipna=True)
     if pd.isna(global_median_std) or global_median_std == 0: global_median_std = 1.0
     prod_medians = stats.groupby('Product')['Local_Std'].median().to_dict()
@@ -291,8 +343,13 @@ if s_file and d_file and lt_file:
         return pm if not pd.isna(pm) else global_median_std
     stats['Local_Std'] = stats.apply(fill_local_std, axis=1)
 
-    # ONE-LEVEL aggregation to prevent recursive double-counting
-    network_stats = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt)
+    # --- aggregate network stats (cached) ---
+    # pass CSV strings to cached wrapper
+    forecast_csv_text = df_d.to_csv(index=False)
+    stats_csv_text = stats.to_csv(index=False)
+    lt_csv_text = df_lt.to_csv(index=False)
+    network_stats = aggregate_network_stats_cached(forecast_csv_text, stats_csv_text, lt_csv_text)
+
     node_lt = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
     node_lt.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
 
@@ -310,23 +367,87 @@ if s_file and d_file and lt_file:
     results['Adjustment_Status'] = 'Optimal (Statistical)'
     results['Safety_Stock'] = results['Pre_Rule_SS']
     results['Pre_Zero_SS'] = results['Safety_Stock']
+
+    # --- improved zero suppression using threshold (absolute monthly units) ---
     if zero_if_no_net_fcst:
-        zero_mask = (results['Agg_Future_Demand'] <= 0)
+        zero_mask = (results['Agg_Future_Demand'] <= float(zero_threshold))
         results.loc[zero_mask, 'Adjustment_Status'] = 'Forced to Zero'
         results.loc[zero_mask, 'Safety_Stock'] = 0
+
     results['Pre_Cap_SS'] = results['Safety_Stock']
-    if apply_cap:
-        l_cap, u_cap = cap_range[0]/100.0, cap_range[1]/100.0
-        l_lim = results['Agg_Future_Demand'] * l_cap; u_lim = results['Agg_Future_Demand'] * u_cap
-        high_mask = (results['Safety_Stock'] > u_lim) & (results['Adjustment_Status'] == 'Optimal (Statistical)')
-        low_mask = (results['Safety_Stock'] < l_lim) & (results['Adjustment_Status'] == 'Optimal (Statistical)') & (results['Agg_Future_Demand'] > 0)
-        results.loc[high_mask, 'Adjustment_Status'] = 'Capped (High)'
-        results.loc[low_mask, 'Adjustment_Status'] = 'Capped (Low)'
-        results['Safety_Stock'] = results['Safety_Stock'].clip(lower=l_lim, upper=u_lim)
+
+    # --- apply caps and overrides based on policy_df (per-row) ---
+    # normalize policy dataframe for matching
+    def find_policy_for_row(prod, loc, policy_df):
+        # matching priority: exact Product+Location -> Location only -> Product only -> None
+        if policy_df is None or policy_df.empty:
+            return {}
+        # normalize blanks
+        p = policy_df.copy()
+        p['Product'] = p['Product'].fillna("").astype(str)
+        p['Location'] = p['Location'].fillna("").astype(str)
+        # exact
+        mask_exact = (p['Product'] == str(prod)) & (p['Location'] == str(loc))
+        if mask_exact.any():
+            r = p[mask_exact].iloc[0].to_dict(); return r
+        mask_loc = (p['Product'] == "") & (p['Location'] == str(loc))
+        if mask_loc.any():
+            r = p[mask_loc].iloc[0].to_dict(); return r
+        mask_prod = (p['Product'] == str(prod)) & (p['Location'] == "")
+        if mask_prod.any():
+            r = p[mask_prod].iloc[0].to_dict(); return r
+        # global wildcard row: both blank
+        mask_glob = (p['Product'] == "") & (p['Location'] == "")
+        if mask_glob.any():
+            r = p[mask_glob].iloc[0].to_dict(); return r
+        return {}
+
+    # prepare policy map cache (small)
+    policy_list = []
+    for _, r in policy_df.iterrows():
+        policy_list.append({
+            'Product': "" if pd.isna(r.get('Product')) else str(r.get('Product')),
+            'Location': "" if pd.isna(r.get('Location')) else str(r.get('Location')),
+            'Override_SS': None if pd.isna(r.get('Override_SS')) else float(r.get('Override_SS')),
+            'Cap_Min_Pct': None if pd.isna(r.get('Cap_Min_Pct')) else float(r.get('Cap_Min_Pct')),
+            'Cap_Max_Pct': None if pd.isna(r.get('Cap_Max_Pct')) else float(r.get('Cap_Max_Pct'))
+        })
+    policy_df_clean = pd.DataFrame(policy_list)
+
+    # apply overrides and caps row-wise
+    def apply_policy_rowwise(row):
+        prod = row['Product']; loc = row['Location']
+        policy = find_policy_for_row(prod, loc, policy_df_clean)
+        # override SS
+        if policy.get('Override_SS') is not None:
+            row['Safety_Stock'] = float(policy.get('Override_SS'))
+            row['Adjustment_Status'] = 'Override (Policy)'
+            return row
+        # determine cap min/max percent (fallback to global)
+        l_cap_pct = policy.get('Cap_Min_Pct') if policy.get('Cap_Min_Pct') is not None else float(cap_min_global)
+        u_cap_pct = policy.get('Cap_Max_Pct') if policy.get('Cap_Max_Pct') is not None else float(cap_max_global)
+        l_cap = float(l_cap_pct) / 100.0
+        u_cap = float(u_cap_pct) / 100.0
+        l_lim = row['Agg_Future_Demand'] * l_cap
+        u_lim = row['Agg_Future_Demand'] * u_cap
+        # Only apply capping if status is 'Optimal (Statistical)' (preserve overrides)
+        if row['Adjustment_Status'] == 'Optimal (Statistical)':
+            if row['Safety_Stock'] > u_lim:
+                row['Adjustment_Status'] = 'Capped (High)'
+            elif (row['Safety_Stock'] < l_lim) and (row['Agg_Future_Demand'] > 0):
+                row['Adjustment_Status'] = 'Capped (Low)'
+            row['Safety_Stock'] = float(np.clip(row['Safety_Stock'], l_lim, u_lim))
+        return row
+
+    # vectorized apply (row-wise)
+    results = results.apply(apply_policy_rowwise, axis=1)
+
+    # round and final touches
     results['Safety_Stock'] = results['Safety_Stock'].round(0)
 
-    # B616 override per previous behaviour
-    results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0
+    # remove old hard-coded B616 behaviour (now via policy_df)
+    # results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0  # removed - use policy
+
     results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast']
 
     # Historical accuracy
@@ -361,7 +482,6 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 1: Inventory Corridor
-    # (ensure it starts with NOKANDO2 in BEEX)
     # -------------------------------
     with tab1:
         left, right = st.columns([3,1])
@@ -370,7 +490,6 @@ if s_file and d_file and lt_file:
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("Product", all_products, index=sku_index, key='tab1_sku')
             loc_opts = sorted(results[results['Product'] == sku]['Location'].unique().tolist())
-            # force BEEX default when available
             loc_default = DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in loc_opts else (loc_opts[0] if loc_opts else "(no location)")
             loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
             if loc_opts:
@@ -389,7 +508,9 @@ if s_file and d_file and lt_file:
             fig.update_layout(legend=dict(orientation="h"), xaxis_title='Period', yaxis_title='Units')
             st.plotly_chart(fig, use_container_width=True)
         with right:
-            render_selection_badge(product=sku, location=loc if loc != "(no location)" else None, df_context=plot_df)
+            render_selection_badge = globals().get('render_selection_badge', None)
+            if render_selection_badge:
+                render_selection_badge(product=sku, location=loc if loc != "(no location)" else None, df_context=plot_df)
             ssum = float(plot_df['Safety_Stock'].sum()) if not plot_df.empty else 0.0
             ndsum = float(plot_df['Agg_Future_Demand'].sum()) if not plot_df.empty else 0.0
             extra_html = f"""
@@ -410,7 +531,7 @@ if s_file and d_file and lt_file:
             st.markdown(extra_html, unsafe_allow_html=True)
 
     # -------------------------------
-    # TAB 2: Network Topology
+    # TAB 2: Network Topology (use temp file, do not write to cwd)
     # -------------------------------
     with tab2:
         sku_default = default_product
@@ -488,23 +609,31 @@ if s_file and d_file and lt_file:
           "layout": { "improvedLayout": true }
         }
         """)
-        
-        tmpfile = "net.html"; net.save_graph(tmpfile)
-        html_text = open(tmpfile, 'r', encoding='utf-8').read()
-        injection_css = """
-        <style>
-          html, body { height: 100%; margin: 0; padding: 0; }
-          #mynetwork { display:flex !important; align-items:center; justify-content:center; height:700px !important; width:100% !important; }
-          .vis-network { display:block !important; margin: 0 auto !important; }
-        </style>
-        """
-        if '</head>' in html_text:
-            html_text = html_text.replace('</head>', injection_css + '</head>', 1)
-        components.html(html_text, height=750)
+
+        # use tempfile to avoid writing to repo cwd
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as tmp:
+            tmp_name = tmp.name
+        try:
+            net.save_graph(tmp_name)
+            html_text = open(tmp_name, 'r', encoding='utf-8').read()
+            injection_css = """
+            <style>
+              html, body { height: 100%; margin: 0; padding: 0; }
+              #mynetwork { display:flex !important; align-items:center; justify-content:center; height:700px !important; width:100% !important; }
+              .vis-network { display:block !important; margin: 0 auto !important; }
+            </style>
+            """
+            if '</head>' in html_text:
+                html_text = html_text.replace('</head>', injection_css + '</head>', 1)
+            components.html(html_text, height=750)
+        finally:
+            try:
+                os.unlink(tmp_name)
+            except Exception:
+                pass
 
     # -------------------------------
     # TAB 3: Full Plan (apply standard pre-filtering for product only)
-    # - display hides rows that are zero across key numeric columns
     # -------------------------------
     with tab3:
         st.subheader("📋 Global Inventory Plan")
@@ -513,9 +642,7 @@ if s_file and d_file and lt_file:
         loc_choices = sorted(results['Location'].unique())
         period_choices = sorted(results['Period'].unique())
 
-        # Standard pre-filtering: preselect product only (if available), leave other filters empty
         default_prod_list = [default_product] if default_product in prod_choices else []
-        # Ensure current month is selected by default in Full Plan if available
         default_period_list = [default_period] if (default_period in period_choices) else []
         f_prod = col1.multiselect("Filter Product", prod_choices, default=default_prod_list)
         f_loc = col2.multiselect("Filter Location", loc_choices, default=[])
@@ -527,7 +654,6 @@ if s_file and d_file and lt_file:
         if f_period: filtered = filtered[filtered['Period'].isin(f_period)]
         filtered = filtered.sort_values('Safety_Stock', ascending=False)
 
-        # For display purposes, hide rows where Forecast, Agg_Future_Demand and Safety_Stock are all zero
         filtered_display = hide_zero_rows(filtered)
 
         if (filtered_display['Product'].nunique() == 1) and (filtered_display['Location'].nunique() == 1) and not filtered_display.empty:
@@ -540,7 +666,7 @@ if s_file and d_file and lt_file:
         display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
         disp = df_format_for_display(filtered_display[display_cols].copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock','Max_Corridor'], two_decimals_cols=['Forecast'])
         st.dataframe(disp, use_container_width=True, height=700)
-        csv_buf = filtered[display_cols].to_csv(index=False)  # full csv still contains zeros
+        csv_buf = filtered[display_cols].to_csv(index=False)
         st.download_button("📥 Download Filtered Plan (CSV)", data=csv_buf, file_name="filtered_plan.csv", mime="text/csv")
 
     # -------------------------------
@@ -558,7 +684,6 @@ if s_file and d_file and lt_file:
         else:
             eff = results[(results['Product'] == sku) & (results['Period'] == snapshot_period)].copy()
         eff['SS_to_FCST_Ratio'] = (eff['Safety_Stock'] / eff['Agg_Future_Demand'].replace(0, np.nan)).fillna(0)
-        # hide rows with no relevant values for display
         eff_display = hide_zero_rows(eff)
         total_ss_sku = eff['Safety_Stock'].sum(); total_net_demand_sku = eff['Agg_Future_Demand'].sum()
         sku_ratio = total_ss_sku / total_net_demand_sku if total_net_demand_sku > 0 else 0
@@ -573,7 +698,7 @@ if s_file and d_file and lt_file:
         with c1:
             fig_eff = px.scatter(eff_display, x="Agg_Future_Demand", y="Safety_Stock", color="Adjustment_Status",
                                  size="SS_to_FCST_Ratio", hover_name="Location",
-                                 color_discrete_map={'Optimal (Statistical)': '#00CC96', 'Capped (High)': '#EF553B','Capped (Low)': '#636EFA', 'Forced to Zero': '#AB63FA'},
+                                 color_discrete_map={'Optimal (Statistical)': '#00CC96', 'Capped (High)': '#EF553B','Capped (Low)': '#636EFA', 'Forced to Zero': '#AB63FA','Override (Policy)':'#888888'},
                                  title="Policy Impact & Efficiency Ratio (Bubble Size = SS_to_FCST_Ratio)")
             st.plotly_chart(fig_eff, use_container_width=True)
         with c2:
@@ -647,8 +772,6 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 6: Calculation Trace & Simulation (restored & enhanced)
-    # - use LaTeX for formula rendering
-    # - add a shadowed bar between explanation and the two checks
     # -------------------------------
     with tab6:
         st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
@@ -711,7 +834,6 @@ if s_file and d_file and lt_file:
 """)
             st.info(f"🧮 **Resulting Statistical SS (Method 5):** {euro_format(raw_ss_calc, True)} units")
 
-            # Entire scenario planning collapsible
             with st.expander("Scenario Planning (expand to configure scenarios)", expanded=False):
                 st.write("Use scenarios to test sensitivity to Service Level or Lead Time. Scenarios do not change implemented policy — they are analysis-only.")
                 if 'n_scen' not in st.session_state:
@@ -775,13 +897,8 @@ if s_file and d_file and lt_file:
                 fig_curve.update_layout(title="SS Sensitivity to Service Level (Scenario 1 LT assumptions)", xaxis_title="Service Level (%)", yaxis_title="Simulated SS (units)")
                 st.plotly_chart(fig_curve, use_container_width=True)
 
-            # Shadowed separator
-            st.markdown("""<div style="height:12px;background:#f0f0f2;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.07);margin:12px 0;"></div>""", unsafe_allow_html=True)
+            st.markdown("<div style=\"height:12px;background:#f0f0f2;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.07);margin:12px 0;\"></div>", unsafe_allow_html=True)
 
-            # ----------------------
-            # Business rules & Diagnostics with explanation (point 4)
-            # - include LaTeX math for clarity
-            # ----------------------
             st.subheader("4. Business Rules & Diagnostics — explanation & diagnostics")
             st.markdown(r"""
             Background & explanation of the calculation steps and business-rule adjustments.
@@ -797,43 +914,40 @@ if s_file and d_file and lt_file:
             - D : aggregated network demand (daily)
             """)
             st.markdown(r"""
-            Capping policy (if enabled):
+            Capping policy (per-policy, or global fallback):
             """)
             st.latex(r"\text{lower\_limit} = D \times \text{cap\_min\_pct}")
             st.latex(r"\text{upper\_limit} = D \times \text{cap\_max\_pct}")
             st.markdown(r"""
             Then: Safety_Stock = clip(SS_{raw}, lower_limit, upper_limit)
             with exceptions:
-            - If D == 0 and zero suppression rule is enabled -> Safety_Stock = 0
-            - Explicit overrides (e.g., specific locations such as B616) may force 0
+            - If D <= zero_threshold and zero suppression is enabled -> Safety_Stock = 0
+            - Policy overrides (via Policy CSV/editor) may force explicit values for specific locations/products
             """)
 
-            # add some vertical space for clarity before the checks
             st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**Zero Demand Rule**")
-                if zero_if_no_net_fcst and row['Agg_Future_Demand'] <= 0:
-                    st.error("❌ Network Demand is 0. SS Forced to 0.")
+                if zero_if_no_net_fcst and row['Agg_Future_Demand'] <= float(zero_threshold):
+                    st.error(f"❌ Network Demand ({row['Agg_Future_Demand']}) <= threshold ({zero_threshold}). SS Forced to 0.")
                 else:
-                    st.success("✅ Network Demand exists. Keep Statistical SS.")
+                    st.success("✅ Network Demand exists. Keep Statistical SS (unless policy override).")
             with c2:
-                st.markdown("**Capping (Min/Max) Diagnostics**")
-                if apply_cap:
-                    lower_limit = row['Agg_Future_Demand'] * (cap_range[0]/100)
-                    upper_limit = row['Agg_Future_Demand'] * (cap_range[1]/100)
-                    st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
-                    st.write(f"Lower limit = Agg_Future_Demand * {cap_range[0]}% = {euro_format(lower_limit, True)}")
-                    st.write(f"Upper limit = Agg_Future_Demand * {cap_range[1]}% = {euro_format(upper_limit, True)}")
-                    if raw_ss_calc > upper_limit:
-                        st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) > Max Cap ({euro_format(upper_limit, True)}). Capping downwards to {euro_format(upper_limit, True)}.")
-                    elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
-                        st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) < Min Cap ({euro_format(lower_limit, True)}). Raising to {euro_format(lower_limit, True)}.")
-                    else:
-                        st.success("✅ Raw SS is within caps (no capping applied).")
+                st.markdown("**Capping (Min/Max) Diagnostics (per-policy)**")
+                pol = find_policy_for_row(row['Product'], row['Location'], policy_df_clean)
+                lower_limit = row['Agg_Future_Demand'] * (pol.get('Cap_Min_Pct')/100.0) if pol.get('Cap_Min_Pct') is not None else row['Agg_Future_Demand'] * (cap_min_global/100.0)
+                upper_limit = row['Agg_Future_Demand'] * (pol.get('Cap_Max_Pct')/100.0) if pol.get('Cap_Max_Pct') is not None else row['Agg_Future_Demand'] * (cap_max_global/100.0)
+                st.write(f"Constraint: {int((pol.get('Cap_Min_Pct') if pol.get('Cap_Min_Pct') is not None else cap_min_global))}% to {int((pol.get('Cap_Max_Pct') if pol.get('Cap_Max_Pct') is not None else cap_max_global))}% of Demand")
+                st.write(f"Lower limit = Agg_Future_Demand * cap_min = {euro_format(lower_limit, True)}")
+                st.write(f"Upper limit = Agg_Future_Demand * cap_max = {euro_format(upper_limit, True)}")
+                if raw_ss_calc > upper_limit:
+                    st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) > Max Cap ({euro_format(upper_limit, True)}). Capping downwards to {euro_format(upper_limit, True)}.")
+                elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
+                    st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) < Min Cap ({euro_format(lower_limit, True)}). Raising to {euro_format(lower_limit, True)}.")
                 else:
-                    st.write("Capping logic disabled.")
+                    st.success("✅ Raw SS is within caps (no capping applied).")
 
     # -------------------------------
     # TAB 7: By Material (pastel colors + bold grand totals, hide zero rows)
@@ -854,7 +968,6 @@ if s_file and d_file and lt_file:
             selected_period = st.selectbox("Select Period to Snapshot", [CURRENT_MONTH_TS], index=0, key="mat_period")
 
         mat_period_df = results[(results['Product'] == selected_product) & (results['Period'] == selected_period)].copy()
-        # hide zero rows for dashboard presentation
         mat_period_df_display = hide_zero_rows(mat_period_df)
         total_forecast = mat_period_df['Forecast'].sum(); total_net = mat_period_df['Agg_Future_Demand'].sum()
         total_ss = mat_period_df['Safety_Stock'].sum(); nodes_count = mat_period_df['Location'].nunique()
@@ -896,7 +1009,6 @@ if s_file and d_file and lt_file:
             }
 
             drv_df = pd.DataFrame({'driver': list(raw_drivers.keys()), 'amount': [float(v) for v in raw_drivers.values()]})
-            # hide drivers with zero amount for table and chart readability
             drv_df_display = drv_df[drv_df['amount'] != 0].copy()
             drv_denom = drv_df['amount'].sum()
             drv_df_display['pct_of_total_ss'] = drv_df_display['amount'] / (drv_denom if drv_denom > 0 else 1.0) * 100
@@ -992,7 +1104,6 @@ if s_file and d_file and lt_file:
             st.markdown("SS Attribution table (numbers and % of total SS)")
             st.dataframe(df_format_for_display(ss_drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS']), use_container_width=True, height=260)
 
-            # Bold grand totals summary for the displayed columns
             grand_forecast = mat_period_df['Forecast'].sum()
             grand_net = mat_period_df['Agg_Future_Demand'].sum()
             grand_ss = mat_period_df['Safety_Stock'].sum()
