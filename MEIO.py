@@ -220,7 +220,7 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
 # LOGO helper (added as requested)
 # -------------------------------
 LOGO_FILENAME = "GY_logo.jpg"
-DEFAULT_LOGO_WIDTH = 220
+DEFAULT_LOGO_WIDTH = 300
 
 def display_logo(width=DEFAULT_LOGO_WIDTH):
     """
@@ -852,8 +852,6 @@ if s_file and d_file and lt_file:
                     fig_curve.update_layout(title="SS Sensitivity to Service Level (Scenario 1 LT assumptions)", xaxis_title="Service Level (%)", yaxis_title="Simulated SS (units)")
                     st.plotly_chart(fig_curve, use_container_width=True)
 
-                # Shadowed separator
-                st.markdown("""<div style="height:12px;background:#f0f0f2;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.07);margin:12px 0;"></div>""", unsafe_allow_html=True)
 
                 # ----------------------
                 # Business rules & Diagnostics with explanation (point 4)
@@ -888,6 +886,9 @@ if s_file and d_file and lt_file:
                 # add some vertical space for clarity before the checks
                 st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
+                # Shadowed separator
+                st.markdown("""<div style="height:12px;background:#f0f0f2;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.07);margin:12px 0;"></div>""", unsafe_allow_html=True)
+                
                 c1, c2 = st.columns(2)
                 with c1:
                     st.markdown("**Zero Demand Rule**")
