@@ -721,7 +721,13 @@ if s_file and d_file and lt_file:
                 c_net1, c_net2 = st.columns([3,1])
                 with c_net1:
                     if not net_table.empty:
-                        st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(), cols=['Network_Consumption','Network_Forecast_Hist'], two_decim[...]
+                        st.dataframe(
+    df_format_for_display(
+        net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(),
+        cols=['Network_Consumption', 'Network_Forecast_Hist'],
+        two_decimals_cols=['Network_Consumption', 'Network_Forecast_Hist'],
+    )
+)
                     else:
                         st.write("No aggregated network history available for the chosen selection.")
                 with c_net2:
