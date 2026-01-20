@@ -1,6 +1,6 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — JAN 2026
-
+# Modified: move logo above title + rewrite Safety Stock engine (Jan 2026)
 
 import streamlit as st
 import pandas as pd
@@ -21,27 +21,25 @@ import re
 # -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
 
-# Place logo and title on the same line: logo before the title, 300px width.
+# Move logo to the very top, then render the title below the logo.
 # If the logo file is missing we silently show only the title.
 LOGO_FILENAME = "GY_logo.jpg"
-col_logo, col_title = st.columns([0.15, 0.85])
-with col_logo:
-    if os.path.exists(LOGO_FILENAME):
-        try:
-            st.image(LOGO_FILENAME, width=300)
-        except Exception:
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-    else:
+if os.path.exists(LOGO_FILENAME):
+    try:
+        st.image(LOGO_FILENAME, width=300)
+    except Exception:
+        # If image rendering fails for any reason, just continue to title
         st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-with col_title:
-    # emoji removed from title per request
-    st.markdown("<h1 style='margin:0; padding-top:10px;'>MEIO for Raw Materials — v0.69 — Jan 2026</h1>", unsafe_allow_html=True)
+else:
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+# Title below the logo
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.69 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # -------------------------------
 # UI ADJUSTMENTS (styling)
 # -------------------------------
 # Make multiselect selected chips match the softer blue style used elsewhere.
-# Applies to BaseWeb tag elements used by Streamlit for selected items.
 st.markdown(
     """
     <style>
@@ -81,14 +79,13 @@ def euro_format(x, always_two_decimals=True):
     """
     Formatting helper.
     User requested: remove any values after the comma -> we round to integer and show no decimals.
-    The parameter `always_two_decimals` is kept for compatibility but ignored (rounding to integer applied).
     Zero-suppression: return empty string when value is (near) zero to keep UI clean.
     Still returns empty string for NaN/None.
     """
     try:
         if x is None:
             return ""
-        # convert possible pandas types
+        # convert possible pandas/numpy types
         if isinstance(x, (np.floating, float, np.integer, int)):
             xv = float(x)
         else:
@@ -105,7 +102,7 @@ def euro_format(x, always_two_decimals=True):
         # Round to nearest integer (user requested no decimals)
         rounded = int(round(abs(xv)))
         s = f"{rounded:,}"
-        # European formatting (swap decimal/comma) -- no decimals remaining but keep thousands separator style
+        # European formatting (swap thousand separator comma -> dot)
         s = s.replace(',', '.')
         return f"-{s}" if neg else s
     except Exception:
@@ -217,13 +214,8 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 
 def render_selection_badge(product=None, location=None, df_context=None, small=False):
     """
-    Streamlit-native badge (blue box) using st.markdown(unsafe_allow_html=True) so
-    the badge inherits the app font and styling. Removed components.html so we don't
-    get an iframe font mismatch. Safety Stock number uses a smaller font to match
-    surrounding UI.
-    Layout requested:
-      - Golden box inside the blue box showing ONLY Safety Stock.
-      - Below that two key figures side-by-side: Local Demand and Total Network Demand.
+    Streamlit-native badge (blue box) using st.markdown so
+    the badge inherits the app font and styling.
     """
     if product is None or product == "":
         return
@@ -246,8 +238,6 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
 
     title = f"{product}{(' — ' + location) if location else ''}"
 
-    # Use inline styles but render with st.markdown so fonts match the rest of the app.
-    # Adjusted SS font-size to be more conservative (14px) so it doesn't overpower the badge.
     badge_html = f"""
     <div style="background:#0b3d91;padding:14px;border-radius:8px;color:white;max-width:100%;font-family:inherit;">
       <div style="font-size:11px;opacity:0.95;margin-bottom:6px;">Selected</div>
@@ -279,7 +269,6 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     </div>
     """
 
-    # Render using Streamlit's markdown so the fonts and spacing match the app.
     st.markdown(badge_html, unsafe_allow_html=True)
 
 # -------------------------------
@@ -315,7 +304,6 @@ if lt_file: st.sidebar.success(f"✅ Lead Time Loaded: {getattr(lt_file,'name', 
 # MAIN LOGIC
 # -------------------------------
 DEFAULT_PRODUCT_CHOICE = "NOKANDO2"
-# User requested default location DEW1 (applies to tabs except Full Plan where no location default)
 DEFAULT_LOCATION_CHOICE = "DEW1"
 CURRENT_MONTH_TS = pd.Timestamp.now().to_period('M').to_timestamp()
 
@@ -349,6 +337,7 @@ if s_file and d_file and lt_file:
     df_d['Forecast'] = clean_numeric(df_d['Forecast'])
     df_lt['Lead_Time_Days'] = clean_numeric(df_lt['Lead_Time_Days']); df_lt['Lead_Time_Std_Dev'] = clean_numeric(df_lt['Lead_Time_Std_Dev'])
 
+    # Historical stats: per product/location
     stats = df_s.groupby(['Product', 'Location'])['Consumption'].agg(['mean', 'std']).reset_index()
     stats.columns = ['Product', 'Location', 'Local_Mean', 'Local_Std']
     global_median_std = stats['Local_Std'].median(skipna=True)
@@ -372,54 +361,89 @@ if s_file and d_file and lt_file:
     product_median_localstd = stats.groupby('Product')['Local_Std'].median().to_dict()
     results['Agg_Std_Hist'] = results.apply(lambda r: product_median_localstd.get(r['Product'], global_median_std) if pd.isna(r['Agg_Std_Hist']) else r['Agg_Std_Hist'], axis=1)
 
-    # SAFETY STOCK calculation (Method 5)
-    # Clearer math representation:
-    # - monthly variance per day = (Agg_Std_Hist^2) / days_per_month
-    # - variance contribution from demand variability over lead time = monthly_variance_per_day * LT_Mean
-    # - variance contribution from lead time variability = (LT_Std^2) * (demand_per_day^2)
-    # - SS = z * sqrt(variance_demand_over_LT + variance_leadtime_effect)
-    # This mirrors the previous formula but is expressed with explicit intermediate variables for clarity.
+    # -------------------------------
+    # NEW SAFETY-STOCK ENGINE
+    # Rationale:
+    # - Use a statistically defensible normal approximation for the distribution of demand during lead time:
+    #   SS_stat = z * sqrt( Var(D_daily) * L + (D_daily^2) * Var(L) )
+    # - Convert monthly statistics to daily equivalents properly (std scales with sqrt(n))
+    # - For very low demand items, fall back to a Poisson-like variance floor to avoid underestimating variability
+    # - Keep existing business rules: zero suppression, capping, explicit overrides
+    # - Return rounded integer SS
+    # -------------------------------
+
     # Ensure numeric types for vectorized operations
     results['Agg_Std_Hist'] = results['Agg_Std_Hist'].astype(float)
     results['LT_Mean'] = results['LT_Mean'].astype(float)
     results['LT_Std'] = results['LT_Std'].astype(float)
     results['Agg_Future_Demand'] = results['Agg_Future_Demand'].astype(float)
+    results['Forecast'] = results['Forecast'].astype(float)
 
-    monthly_variance = (results['Agg_Std_Hist'] ** 2)
-    variance_per_day = monthly_variance / float(days_per_month)
-    demand_per_day = results['Agg_Future_Demand'] / float(days_per_month)
-    variance_demand_over_LT = variance_per_day * results['LT_Mean']
-    variance_due_to_LT = (results['LT_Std'] ** 2) * (demand_per_day ** 2)
-    combined_variance = variance_demand_over_LT + variance_due_to_LT
+    # Daily conversions
+    # If monthly std describes monthly totals, daily std = monthly_std / sqrt(days_per_month)
+    results['Sigma_D_Day'] = results['Agg_Std_Hist'] / np.sqrt(float(days_per_month))
+    results['D_day'] = results['Agg_Future_Demand'] / float(days_per_month)
+    # variance per day
+    results['Var_D_Day'] = results['Sigma_D_Day']**2
 
-    # Prevent negative or NaN inside sqrt
+    # Poisson floor: if demand is very low, demand variance is at least equal to mean (Poisson)
+    # threshold defined in monthly units; items below threshold are considered low-volume
+    low_demand_monthly_threshold = 20.0
+    low_mask = results['Agg_Future_Demand'] < low_demand_monthly_threshold
+    # Apply floor on variance per day where appropriate
+    results.loc[low_mask, 'Var_D_Day'] = results.loc[low_mask, 'Var_D_Day'].where(results.loc[low_mask, 'Var_D_Day'] >= results.loc[low_mask, 'D_day'], results.loc[low_mask, 'D_day'])
+
+    # Core statistical safety stock (vectorized)
+    # SS_stat = z * sqrt( Var_D_day * LT_Mean + (D_day^2) * (LT_Std^2) )
+    demand_component = results['Var_D_Day'] * results['LT_Mean']
+    lt_component = (results['LT_Std']**2) * (results['D_day']**2)
+    combined_variance = demand_component + lt_component
     combined_variance = combined_variance.clip(lower=0)
-    results['Pre_Rule_SS'] = z * np.sqrt(combined_variance)
+    results['SS_stat'] = z * np.sqrt(combined_variance)
 
+    # Optional minimum SS floor: ensure we keep at least a small proportion of expected demand during lead time
+    # This prevents unrealistically zero SS for items with tiny variability but non-zero demand.
+    # Set as a fraction of mean demand during LT (configurable here as a constant).
+    min_floor_fraction_of_LT_demand = 0.01  # 1% of mean demand during lead time (conservative)
+    results['Mean_Demand_LT'] = results['D_day'] * results['LT_Mean']
+    results['SS_floor'] = results['Mean_Demand_LT'] * min_floor_fraction_of_LT_demand
+    # Apply final pre-rule SS as the max between statistical SS and floor (keeps conservative result)
+    results['Pre_Rule_SS'] = results[['SS_stat', 'SS_floor']].max(axis=1)
+
+    # Initialize adjustment/status columns
     results['Adjustment_Status'] = 'Optimal (Statistical)'
     results['Safety_Stock'] = results['Pre_Rule_SS']
-    results['Pre_Zero_SS'] = results['Safety_Stock']
+
+    # Zero suppression rule
     if zero_if_no_net_fcst:
         zero_mask = (results['Agg_Future_Demand'] <= 0)
         results.loc[zero_mask, 'Adjustment_Status'] = 'Forced to Zero'
-        results.loc[zero_mask, 'Safety_Stock'] = 0
+        results.loc[zero_mask, 'Safety_Stock'] = 0.0
+
+    # Preserve pre-cap value for diagnostics
     results['Pre_Cap_SS'] = results['Safety_Stock']
+
+    # Capping logic (keeps existing behaviour but applies to our new SS engine)
     if apply_cap:
         l_cap, u_cap = cap_range[0]/100.0, cap_range[1]/100.0
-        l_lim = results['Agg_Future_Demand'] * l_cap; u_lim = results['Agg_Future_Demand'] * u_cap
+        l_lim = results['Agg_Future_Demand'] * l_cap
+        u_lim = results['Agg_Future_Demand'] * u_cap
+        # Only cap items that were 'Optimal (Statistical)' to indicate policy intervention
         high_mask = (results['Safety_Stock'] > u_lim) & (results['Adjustment_Status'] == 'Optimal (Statistical)')
         low_mask = (results['Safety_Stock'] < l_lim) & (results['Adjustment_Status'] == 'Optimal (Statistical)') & (results['Agg_Future_Demand'] > 0)
         results.loc[high_mask, 'Adjustment_Status'] = 'Capped (High)'
         results.loc[low_mask, 'Adjustment_Status'] = 'Capped (Low)'
         results['Safety_Stock'] = results['Safety_Stock'].clip(lower=l_lim, upper=u_lim)
+
     # Round Safety Stock to integer (no decimals displayed per user request)
     results['Safety_Stock'] = results['Safety_Stock'].round(0)
 
-    # B616 override per previous behaviour
+    # B616 override per previous behaviour (explicit policy)
     results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0
+
     results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast']
 
-    # Historical accuracy
+    # Historical accuracy and additional derived tables (unchanged)
     hist = df_s[['Product', 'Location', 'Period', 'Consumption', 'Forecast']].copy()
     hist.rename(columns={'Forecast': 'Forecast_Hist'}, inplace=True)
     hist['Deviation'] = hist['Consumption'] - hist['Forecast_Hist']
@@ -484,7 +508,6 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 2: Network Topology
-    # - inject JS to fit & center the pyvis network on load
     # -------------------------------
     with tab2:
         col_main, col_badge = st.columns([8, 2])
@@ -544,7 +567,7 @@ if s_file and d_file and lt_file:
                     else:
                         bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
 
-                lbl = f"{n}\nFcst: {euro_format(m['Forecast'])}\nNet: {euro_format(m['Agg_Future_Demand'])}\nSS: {euro_format(m['Safety_Stock'], False)}"
+                lbl = f"{n}\nFcst: {euro_format(m['Forecast'])}\nNet: {euro_format(m['Agg_Future_Demand'])}\nSS: {euro_format(m['Safety_Stock'])}"
                 net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
 
             for _, r in sku_lt.iterrows():
@@ -574,7 +597,6 @@ if s_file and d_file and lt_file:
               .vis-network { display:block !important; margin: 0 auto !important; }
             </style>
             """
-            # JS to auto-fit and center the network after load
             injection_js = """
             <script>
               // Delay to ensure the network object is available, then fit + center.
@@ -798,7 +820,7 @@ if s_file and d_file and lt_file:
 
         with col_main:
             st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
-            st.write("See how changing service level or lead-time assumptions affects Method 5 safety stock. The scenario planning area below is collapsed by default.")
+            st.write("See how changing service level or lead-time assumptions affects safety stock. The scenario planning area below is collapsed by default.")
 
             row_df = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
             if row_df.empty:
@@ -815,29 +837,36 @@ if s_file and d_file and lt_file:
                 i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days"); i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
 
                 st.subheader("2. Statistical Calculation (Actual)")
-                term1_demand_var = (row['Agg_Std_Hist']**2 / float(days_per_month)) * row['LT_Mean']
-                term2_supply_var = (row['LT_Std']**2) * ((row['Agg_Future_Demand'] / float(days_per_month))**2)
-                combined_sd = np.sqrt(term1_demand_var + term2_supply_var)
-                raw_ss_calc = z * combined_sd
+                # Recompute terms for the selected row using the new engine (for display)
+                sigma_d_day = float(row['Agg_Std_Hist']) / math.sqrt(float(days_per_month))
+                d_day = float(row['Agg_Future_Demand']) / float(days_per_month)
+                demand_var_day = sigma_d_day**2
+                if row['Agg_Future_Demand'] < 20.0:
+                    # Poisson floor
+                    demand_var_day = max(demand_var_day, d_day)
+                term1_demand_var = demand_var_day * float(row['LT_Mean'])
+                term2_supply_var = (float(row['LT_Std'])**2) * (d_day**2)
+                combined_sd = math.sqrt(max(term1_demand_var + term2_supply_var, 0.0))
+                raw_ss_calc = float(norm.ppf(service_level)) * combined_sd
+                ss_floor = (d_day * float(row['LT_Mean'])) * min_floor_fraction_of_LT_demand
 
-                st.latex(r"SS_{\text{raw}} = Z \times \sqrt{\,\sigma_D^2 \times L \;+\; \sigma_L^2 \times D^2}")
+                st.latex(r"SS = Z \times \sqrt{\sigma_D^2 \cdot L \;+\; \sigma_L^2 \cdot D^2}")
                 st.markdown("Where σ_D and D are daily values (converted from monthly inputs in the dataset).")
                 st.markdown("**Step-by-Step Substitution (values used):**")
                 st.code(f"""
-    1. σ_D_daily^2 (from monthly agg std) = ({euro_format(row['Agg_Std_Hist'], True)})^2 / {days_per_month}
-       Demand Component = σ_D_daily^2 * L = {euro_format(term1_demand_var, True)}
-    2. Supply Component = σ_L^2 * D_daily^2 = ({euro_format(row['LT_Std'], True)})^2 * ({euro_format(row['Agg_Future_Demand'], True)} / {days_per_month})^2
-       = {euro_format(term2_supply_var, True)}
-    3. Combined Variance = {euro_format(term1_demand_var, True)} + {euro_format(term2_supply_var, True)}
-       = {euro_format(term1_demand_var + term2_supply_var, True)}
-    4. Combined Std Dev = sqrt(Combined Variance)
-       = {euro_format(combined_sd, True)}
-    5. Raw SS = {z:.4f} (Z-Score) * {euro_format(combined_sd, True)}
-       = {euro_format(raw_ss_calc, True)} units
+    1. σ_D_daily = {sigma_d_day:.4f} (monthly σ / sqrt(days_per_month))
+       Demand component variance = σ_D_daily^2 * L = {term1_demand_var:.4f}
+    2. Supply component variance = σ_L^2 * D_daily^2 = ({row['LT_Std']:.4f})^2 * ({d_day:.4f})^2
+       = {term2_supply_var:.4f}
+    3. Combined variance = {term1_demand_var:.4f} + {term2_supply_var:.4f} = {term1_demand_var + term2_supply_var:.4f}
+    4. Combined Std Dev = sqrt(Combined Variance) = {combined_sd:.4f}
+    5. Raw SS = Z({service_level*100:.2f}%) * {combined_sd:.4f} = {raw_ss_calc:.2f} units
+    6. Floor applied (1% of mean LT demand) = {ss_floor:.2f} units
+    7. Pre-rule SS (max of raw vs floor) = {max(raw_ss_calc, ss_floor):.2f} units
     """)
-                st.info(f"🧮 **Resulting Statistical SS (Method 5):** {euro_format(raw_ss_calc, True)} units")
+                st.info(f"🧮 **Resulting Pre-rule SS:** {euro_format(max(raw_ss_calc, ss_floor), True)} units")
 
-                # Scenario planning (same as before)
+                # Scenario planning
                 with st.expander("Scenario Planning (expand to configure scenarios)", expanded=False):
                     st.write("Use scenarios to test sensitivity to Service Level or Lead Time. Scenarios do not change implemented policy — they are analysis-only.")
                     if 'n_scen' not in st.session_state:
@@ -856,10 +885,16 @@ if s_file and d_file and lt_file:
                     scen_rows = []
                     for idx, sc in enumerate(scenarios):
                         sc_z = norm.ppf(sc['SL_pct']/100.0)
-                        sc_ss = sc_z * np.sqrt(
-                            (row['Agg_Std_Hist']**2 / float(days_per_month)) * sc['LT_mean'] +
-                            (sc['LT_std']**2) * (row['Agg_Future_Demand'] / float(days_per_month))**2
-                        )
+                        # per-scenario SS using the new engine
+                        d_day = float(row['Agg_Future_Demand']) / float(days_per_month)
+                        sigma_d_day = float(row['Agg_Std_Hist']) / math.sqrt(float(days_per_month))
+                        var_d = sigma_d_day**2
+                        if row['Agg_Future_Demand'] < 20.0:
+                            var_d = max(var_d, d_day)
+                        sc_ss = sc_z * math.sqrt(var_d * sc['LT_mean'] + (sc['LT_std']**2) * (d_day**2))
+                        # apply floor like base
+                        sc_floor = (d_day * sc['LT_mean']) * min_floor_fraction_of_LT_demand
+                        sc_ss = max(sc_ss, sc_floor)
                         scen_rows.append({
                             'Scenario': f"S{idx+1}",
                             'Service_Level_%': sc['SL_pct'],
@@ -892,10 +927,17 @@ if s_file and d_file and lt_file:
                     ss_curve = []
                     for slev in sl_range:
                         zz = norm.ppf(slev/100.0)
-                        val = zz * np.sqrt(
-                            (row['Agg_Std_Hist']**2 / float(days_per_month)) * sel_lt +
-                            (sel_lt_std**2) * (row['Agg_Future_Demand'] / float(days_per_month))**2
+                        val = zz * math.sqrt(
+                            (float(row['Agg_Std_Hist'])**2 / float(days_per_month)) / float(days_per_month) * sel_lt
+                            if False else 0.0
                         )
+                        # The above branch was a placeholder in original logic; use the new engine:
+                        sigma_d_day = float(row['Agg_Std_Hist']) / math.sqrt(float(days_per_month))
+                        d_day = float(row['Agg_Future_Demand']) / float(days_per_month)
+                        var_d = sigma_d_day**2
+                        if row['Agg_Future_Demand'] < 20.0:
+                            var_d = max(var_d, d_day)
+                        val = zz * math.sqrt(var_d * sel_lt + (sel_lt_std**2) * (d_day**2))
                         ss_curve.append(val)
                     fig_curve = go.Figure()
                     fig_curve.add_trace(go.Scatter(x=sl_range, y=ss_curve, mode='lines', line=dict(color='#0b3d91')))
@@ -909,15 +951,15 @@ if s_file and d_file and lt_file:
                 st.markdown(r"""
                 Background & explanation of the calculation steps and business-rule adjustments.
 
-                Mathematical formulation (Method 5):
+                Mathematical formulation (new engine, normal approx):
                 """)
-                st.latex(r"SS_{\text{raw}} = Z \cdot \sqrt{\sigma_D^2 \cdot L \;+\; \sigma_L^2 \cdot D^2}")
+                st.latex(r"SS = Z \cdot \sqrt{\mathrm{Var}(D_{\text{day}})\cdot L \;+\; (\bar{D}_{\text{day}})^2 \cdot \mathrm{Var}(L)}")
                 st.markdown(r"""
                 where:
-                - \sigma_D : aggregated demand standard deviation (daily)
+                - Var(D_day) : variance of daily demand (derived from historical monthly std or Poisson floor)
                 - L : average lead time (days)
-                - \sigma_L : lead-time standard deviation (days)
-                - D : aggregated network demand (daily)
+                - Var(L) : variance of lead time (days^2)
+                - D_day : mean daily aggregated network demand
                 """)
                 st.markdown(r"""
                 Capping policy (if enabled):
@@ -925,7 +967,7 @@ if s_file and d_file and lt_file:
                 st.latex(r"\text{lower\_limit} = D \times \text{cap\_min\_pct}")
                 st.latex(r"\text{upper\_limit} = D \times \text{cap\_max\_pct}")
                 st.markdown(r"""
-                Then: Safety_Stock = clip(SS_{raw}, lower_limit, upper_limit)
+                Then: Safety_Stock = clip(SS_{pre}, lower_limit, upper_limit)
                 with exceptions:
                 - If D == 0 and zero suppression rule is enabled -> Safety_Stock = 0
                 - Explicit overrides (e.g., specific locations such as B616) may force 0
@@ -1051,8 +1093,18 @@ if s_file and d_file and lt_file:
                 per_node['is_b616_override'] = (per_node['Location'] == 'B616') & (per_node['Safety_Stock'] == 0)
                 per_node['pre_ss'] = per_node['Pre_Rule_SS'].clip(lower=0)
                 per_node['share_denom'] = per_node['demand_uncertainty_raw'] + per_node['lt_uncertainty_raw']
-                per_node['demand_share'] = per_node.apply(lambda r: (r['pre_ss'] * (r['demand_uncertainty_raw'] / r['share_denom'])) if r['share_denom'] > 0 else (r['pre_ss'] / 2 if r['pre_ss'] > 0 else 0), axis=1)
-                per_node['lt_share'] = per_node.apply(lambda r: (r['pre_ss'] * (r['lt_uncertainty_raw'] / r['share_denom'])) if r['share_denom'] > 0 else (r['pre_ss'] / 2 if r['pre_ss'] > 0 else 0), axis=1)
+                def demand_share_calc(r):
+                    if r['share_denom'] > 0:
+                        return r['pre_ss'] * (r['demand_uncertainty_raw'] / r['share_denom'])
+                    else:
+                        return (r['pre_ss'] / 2) if r['pre_ss'] > 0 else 0.0
+                per_node['demand_share'] = per_node.apply(demand_share_calc, axis=1)
+                def lt_share_calc(r):
+                    if r['share_denom'] > 0:
+                        return r['pre_ss'] * (r['lt_uncertainty_raw'] / r['share_denom'])
+                    else:
+                        return (r['pre_ss'] / 2) if r['pre_ss'] > 0 else 0.0
+                per_node['lt_share'] = per_node.apply(lt_share_calc, axis=1)
                 per_node['forced_zero_amount'] = per_node.apply(lambda r: r['pre_ss'] if r['is_forced_zero'] else 0.0, axis=1)
                 per_node['b616_override_amount'] = per_node.apply(lambda r: r['pre_ss'] if r['is_b616_override'] else 0.0, axis=1)
                 def retained_ratio_calc(r):
@@ -1153,12 +1205,16 @@ if s_file and d_file and lt_file:
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
         top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
+        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=400)
 
         st.markdown("---")
         st.subheader("Export — Material Snapshot")
         if not mat_period_df.empty:
-            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="text/csv")
+            try:
+                filename = f"material_{selected_product}_{pd.to_datetime(selected_period).strftime('%Y-%m')}.csv"
+            except Exception:
+                filename = f"material_{selected_product}_snapshot.csv"
+            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=filename, mime="text/csv")
         else:
             st.write("No snapshot available to download for this selection.")
 
