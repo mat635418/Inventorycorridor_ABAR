@@ -1106,7 +1106,7 @@ if s_file and d_file and lt_file:
         st.markdown("---")
         st.subheader("Export — Material Snapshot")
         if not mat_period_df.empty:
-            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="[...]
+            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="[...])
         else:
             st.write("No snapshot available to download for this selection.")
 
