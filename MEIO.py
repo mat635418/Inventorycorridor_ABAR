@@ -189,15 +189,19 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 
     return pd.DataFrame(results)
 
+def render_selection_badge_title_only(title_html):
+    """Helper to render a title/heading with the blue badge style (no numbers)."""
+    st.markdown(f"""
+    <div style="background:#0b3d91;padding:12px;border-radius:8px;color:white;max-width:100%;font-family:inherit;">
+      <div style="font-size:11px;opacity:0.95;margin-bottom:6px;">Selected</div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title_html}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
 def render_selection_badge(product=None, location=None, df_context=None, small=False):
     """
     Streamlit-native badge (blue box) using st.markdown(unsafe_allow_html=True) so
-    the badge inherits the app font and styling. Removed components.html so we don't
-    get an iframe font mismatch. Safety Stock number uses a smaller font to match
-    surrounding UI.
-    Layout requested:
-      - Golden box inside the blue box showing ONLY Safety Stock.
-      - Below that two key figures side-by-side: Local Demand and Total Network Demand.
+    the badge inherits the app font and styling.
     """
     if product is None or product == "":
         return
@@ -220,8 +224,6 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
 
     title = f"{product}{(' — ' + location) if location else ''}"
 
-    # Use inline styles but render with st.markdown so fonts match the rest of the app.
-    # Adjusted SS font-size to be more conservative (14px) so it doesn't overpower the badge.
     badge_html = f"""
     <div style="background:#0b3d91;padding:14px;border-radius:8px;color:white;max-width:100%;font-family:inherit;">
       <div style="font-size:11px;opacity:0.95;margin-bottom:6px;">Selected</div>
@@ -253,7 +255,6 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     </div>
     """
 
-    # Render using Streamlit's markdown so the fonts and spacing match the app.
     st.markdown(badge_html, unsafe_allow_html=True)
 
 # -------------------------------
@@ -425,23 +426,27 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 1: Inventory Corridor
-    # (ensure it starts with DEFAULT_PRODUCT_CHOICE and default location DEW1 when available)
-    # Layout standardized: left 70% (controls + content), right 30% (badge)
+    # Move filtering to the right badge (30%), content left (70%)
     # -------------------------------
     with tab1:
         col_main, col_badge = st.columns([7, 3])
-        with col_main:
+        with col_badge:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("Product", all_products, index=sku_index, key='tab1_sku')
             loc_opts = sorted(results[results['Product'] == sku]['Location'].unique().tolist())
-            # force DEW1 default when available
             loc_default = DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in loc_opts else (loc_opts[0] if loc_opts else "(no location)")
             loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
             if loc_opts:
                 loc = st.selectbox("Location", loc_opts, index=loc_index, key='tab1_loc')
             else:
                 loc = st.selectbox("Location", ["(no location)"], index=0, key='tab1_loc')
+
+            # Render badge (filters are on top of the badge area to maintain visual grouping)
+            render_selection_badge(product=sku, location=loc if loc != "(no location)" else None, df_context=results[(results['Product'] == sku) & (results['Location'] == loc)])
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        with col_main:
             st.markdown(f"**Selected**: {sku} — {loc}")
             plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
 
@@ -453,38 +458,17 @@ if s_file and d_file and lt_file:
             ])
             fig.update_layout(legend=dict(orientation="h"), xaxis_title='Period', yaxis_title='Units')
             st.plotly_chart(fig, use_container_width=True)
-        with col_badge:
-            render_selection_badge(product=sku, location=loc if loc != "(no location)" else None, df_context=plot_df)
-            ssum = float(plot_df['Safety_Stock'].sum()) if not plot_df.empty else 0.0
-            ndsum = float(plot_df['Agg_Future_Demand'].sum()) if not plot_df.empty else 0.0
-            extra_html = f"""
-            <div style="padding-top:10px;">
-              <div style="font-size:12px;color:#333">Quick Totals</div>
-              <div style="display:flex;gap:10px;margin-top:6px;flex-wrap:wrap;">
-                <div style="background:#f7f9fc;padding:12px;border-radius:6px;min-width:160px;">
-                  <div style="font-size:11px;color:#666">Total SS (sku/loc)</div>
-                  <div style="font-size:13px;font-weight:600;color:#0b3d91">{euro_format(ssum, False)}</div>
-                </div>
-                <div style="background:#f7f9fc;padding:12px;border-radius:6px;min-width:160px;">
-                  <div style="font-size:11px;color:#666">Total Net Demand</div>
-                  <div style="font-size:13px;font-weight:600;color:#0b3d91">{euro_format(ndsum, True)}</div>
-                </div>
-              </div>
-            </div>
-            """
-            st.markdown(extra_html, unsafe_allow_html=True)
 
     # -------------------------------
     # TAB 2: Network Topology
-    # Layout standardized: left 70% (controls + network), right 30% (badge)
+    # Filters on right within badge area, network on left
     # -------------------------------
     with tab2:
         col_main, col_badge = st.columns([7, 3])
-        with col_main:
+        with col_badge:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("Product for Network View", all_products, index=sku_index, key="network_sku")
-
             period_choices = all_periods
             if period_choices:
                 try:
@@ -495,6 +479,10 @@ if s_file and d_file and lt_file:
             else:
                 chosen_period = st.selectbox("Period", [CURRENT_MONTH_TS], index=0, key="network_period")
 
+            render_selection_badge(product=sku, location=None, df_context=results[(results['Product']==sku)&(results['Period']==chosen_period)])
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        with col_main:
             st.markdown("""
                 <style>
                     iframe {
@@ -567,83 +555,80 @@ if s_file and d_file and lt_file:
                 html_text = html_text.replace('</head>', injection_css + '</head>', 1)
             components.html(html_text, height=750)
 
-        with col_badge:
-            render_selection_badge(product=sku, location=None, df_context=results[(results['Product']==sku)&(results['Period']==chosen_period)])
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-
     # -------------------------------
-    # TAB 3: Full Plan (apply standard pre-filtering for product only)
-    # - display hides rows that are zero across key numeric columns
-    # - Full Plan should NOT preselect any location by default (user request)
-    # Layout standardized: left 70% (filters + table), right 30% (badge)
+    # TAB 3: Full Plan
+    # Filters moved to right badge; table left.
     # -------------------------------
     with tab3:
         col_main, col_badge = st.columns([7, 3])
-        with col_main:
-            st.subheader("📋 Global Inventory Plan")
-            col1, col2, col3 = st.columns(3)
+        with col_badge:
+            st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
             prod_choices = sorted(results['Product'].unique())
             loc_choices = sorted(results['Location'].unique())
             period_choices = sorted(results['Period'].unique())
 
-            # Standard pre-filtering: preselect product only (if available), leave other filters empty
             default_prod_list = [default_product] if default_product in prod_choices else []
-            # Ensure current month is selected by default in Full Plan if available
             default_period_list = [default_period] if (default_period in period_choices) else []
-            f_prod = col1.multiselect("Filter Product", prod_choices, default=default_prod_list)
-            # Full Plan: do not preselect any location by default
-            f_loc = col2.multiselect("Filter Location", loc_choices, default=[])
-            f_period = col3.multiselect("Filter Period", period_choices, default=default_period_list)
 
+            f_prod = st.multiselect("Filter Product", prod_choices, default=default_prod_list, key="full_f_prod")
+            f_loc = st.multiselect("Filter Location", loc_choices, default=[], key="full_f_loc")
+            f_period = st.multiselect("Filter Period", period_choices, default=default_period_list, key="full_f_period")
+
+            # Show badge summary below filters
+            # Decide product to show in badge
+            badge_product = f_prod[0] if f_prod else (default_product if default_product in all_products else (all_products[0] if all_products else ""))
+            badge_df = results[results['Product'] == badge_product] if badge_product else None
+            render_selection_badge(product=badge_product, location=None, df_context=badge_df)
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        with col_main:
+            st.subheader("📋 Global Inventory Plan")
             filtered = results.copy()
             if f_prod: filtered = filtered[filtered['Product'].isin(f_prod)]
             if f_loc: filtered = filtered[filtered['Location'].isin(f_loc)]
             if f_period: filtered = filtered[filtered['Period'].isin(f_period)]
             filtered = filtered.sort_values('Safety_Stock', ascending=False)
 
-            # For display purposes, hide rows where Forecast, Agg_Future_Demand and Safety_Stock are all zero
             filtered_display = hide_zero_rows(filtered)
 
             display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
             disp = df_format_for_display(filtered_display[display_cols].copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock','Max_Corridor'], two_decimals_cols=['Forecast'])
             st.dataframe(disp, use_container_width=True, height=700)
-            csv_buf = filtered[display_cols].to_csv(index=False)  # full csv still contains zeros
+            csv_buf = filtered[display_cols].to_csv(index=False)
             st.download_button("📥 Download Filtered Plan (CSV)", data=csv_buf, file_name="filtered_plan.csv", mime="text/csv")
 
-        with col_badge:
-            # Show badge (same behavior as tab1: if single product/location show that, otherwise product-only)
-            if (filtered_display is not None) and (not filtered_display.empty):
-                if (filtered_display['Product'].nunique() == 1) and (filtered_display['Location'].nunique() == 1):
-                    badge_prod = filtered_display['Product'].iloc[0]; badge_loc = filtered_display['Location'].iloc[0]; badge_df = filtered_display
-                    render_selection_badge(product=badge_prod, location=badge_loc, df_context=badge_df)
-                else:
-                    badge_prod = filtered_display['Product'].iloc[0] if not filtered_display.empty else default_product
-                    badge_df = filtered_display[filtered_display['Product'] == badge_prod] if not filtered_display.empty else results[results['Product']==badge_prod]
-                    render_selection_badge(product=badge_prod, location=None, df_context=badge_df)
-            else:
-                # empty state: show badge for default_product
-                badge_df = results[results['Product'] == default_product] if default_product in all_products else None
-                render_selection_badge(product=default_product, location=None, df_context=badge_df)
-
     # -------------------------------
-    # TAB 4: Efficiency Analysis (restored)
-    # Layout standardized: left 70% (controls + charts), right 30% (badge)
+    # TAB 4: Efficiency Analysis
+    # Filters right, charts left
     # -------------------------------
     with tab4:
         col_main, col_badge = st.columns([7, 3])
-        with col_main:
-            st.subheader("⚖️ Efficiency & Policy Analysis")
+        with col_badge:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("Material", all_products, index=sku_index, key="eff_sku")
-            snapshot_period = default_period if default_period in all_periods else (all_periods[-1] if all_periods else None)
+            period_choices = all_periods
+            if period_choices:
+                try:
+                    period_index = period_choices.index(default_period)
+                except Exception:
+                    period_index = len(period_choices)-1
+                eff_period = st.selectbox("Snapshot Period", period_choices, index=period_index, key="eff_period")
+            else:
+                eff_period = st.selectbox("Snapshot Period", [CURRENT_MONTH_TS], index=0, key="eff_period")
+
+            render_selection_badge(product=sku, location=None, df_context=results[(results['Product']==sku)&(results['Period']==eff_period)])
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        with col_main:
+            st.subheader("⚖️ Efficiency & Policy Analysis")
+            snapshot_period = eff_period if eff_period in all_periods else (all_periods[-1] if all_periods else None)
             if snapshot_period is None:
                 st.warning("No period data available for Efficiency Analysis.")
                 eff = results[(results['Product'] == sku)].copy()
             else:
                 eff = results[(results['Product'] == sku) & (results['Period'] == snapshot_period)].copy()
             eff['SS_to_FCST_Ratio'] = (eff['Safety_Stock'] / eff['Agg_Future_Demand'].replace(0, np.nan)).fillna(0)
-            # hide rows with no relevant values for display
             eff_display = hide_zero_rows(eff)
             total_ss_sku = eff['Safety_Stock'].sum(); total_net_demand_sku = eff['Agg_Future_Demand'].sum()
             sku_ratio = total_ss_sku / total_net_demand_sku if total_net_demand_sku > 0 else 0
@@ -667,18 +652,14 @@ if s_file and d_file and lt_file:
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
                 st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True)
-        with col_badge:
-            render_selection_badge(product=sku, location=None, df_context=eff)
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
     # -------------------------------
-    # TAB 5: Forecast Accuracy (restored)
-    # Layout standardized: left 70% (controls + charts), right 30% (badge)
+    # TAB 5: Forecast Accuracy
+    # Filters right, charts left
     # -------------------------------
     with tab5:
         col_main, col_badge = st.columns([7, 3])
-        with col_main:
-            st.subheader("📉 Historical Forecast vs Actuals")
+        with col_badge:
             h_sku_default = default_product
             h_sku_index = all_products.index(h_sku_default) if h_sku_default in all_products else 0
             h_sku = st.selectbox("Select Product", all_products, index=h_sku_index, key="h1")
@@ -695,7 +676,11 @@ if s_file and d_file and lt_file:
                 badge_df = results[(results['Product'] == h_sku) & (results['Location'] == h_loc)]
             else:
                 badge_df = results[results['Product'] == h_sku]
+            render_selection_badge(product=h_sku, location=(h_loc if h_loc != "(no location)" else None), df_context=badge_df)
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
+        with col_main:
+            st.subheader("📉 Historical Forecast vs Actuals")
             hdf = hist.copy()
             if h_loc != "(no location)":
                 hdf = hdf[(hdf['Product'] == h_sku) & (hdf['Location'] == h_loc)].sort_values('Period')
@@ -738,46 +723,47 @@ if s_file and d_file and lt_file:
                 with c_net2:
                     c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                     st.metric("Network WAPE (%)", c_val)
-        with col_badge:
-            render_selection_badge(product=h_sku, location=(h_loc if h_loc != "(no location)" else None), df_context=badge_df)
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
     # -------------------------------
-    # TAB 6: Calculation Trace & Simulation (restored & enhanced)
-    # - use LaTeX for formula rendering
-    # - add a shadowed bar between explanation and the two checks
-    # Layout standardized: left 70% (controls + calculation), right 30% (badge)
+    # TAB 6: Calculation Trace & Simulation
+    # Selection controls moved to right badge; calculation content left.
     # -------------------------------
     with tab6:
         col_main, col_badge = st.columns([7, 3])
-        with col_main:
-            st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
-            st.write("See how changing service level or lead-time assumptions affects Method 5 safety stock. The scenario planning area below is collapsed by default.")
-
-            c1, c2, c3 = st.columns(3)
+        with col_badge:
             calc_sku_default = default_product
             calc_sku_index = all_products.index(calc_sku_default) if calc_sku_default in all_products else 0
-            calc_sku = c1.selectbox("Select Product", all_products, index=calc_sku_index, key="c_sku")
+            calc_sku = st.selectbox("Select Product", all_products, index=calc_sku_index, key="c_sku")
             avail_locs = sorted(results[results['Product'] == calc_sku]['Location'].unique().tolist())
             if not avail_locs: avail_locs = ["(no location)"]
             calc_loc_default = DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in avail_locs else (avail_locs[0] if avail_locs else "(no location)")
             calc_loc_index = avail_locs.index(calc_loc_default) if calc_loc_default in avail_locs else 0
-            calc_loc = c2.selectbox("Select Location", avail_locs, index=calc_loc_index, key="c_loc")
+            calc_loc = st.selectbox("Select Location", avail_locs, index=calc_loc_index, key="c_loc")
             avail_periods = all_periods
             if avail_periods:
                 try:
                     calc_period_index = avail_periods.index(default_period)
                 except Exception:
                     calc_period_index = len(avail_periods)-1
-                calc_period = c3.selectbox("Select Period", avail_periods, index=calc_period_index, key="c_period")
+                calc_period = st.selectbox("Select Period", avail_periods, index=calc_period_index, key="c_period")
             else:
-                calc_period = c3.selectbox("Select Period", [CURRENT_MONTH_TS], index=0, key="c_period")
+                calc_period = st.selectbox("Select Period", [CURRENT_MONTH_TS], index=0, key="c_period")
+
+            # Badge summarizing selection
+            row_df_small = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
+            render_selection_badge(product=calc_sku, location=calc_loc if calc_loc != "(no location)" else None, df_context=row_df_small)
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        with col_main:
+            st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
+            st.write("See how changing service level or lead-time assumptions affects Method 5 safety stock. The scenario planning area below is collapsed by default.")
 
             row_df = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
             if row_df.empty:
                 st.warning("Selection not found in results.")
             else:
                 row = row_df.iloc[0]
+
                 st.markdown("---")
                 st.subheader("1. Frozen Inputs (current)")
                 i1, i2, i3, i4, i5 = st.columns(5)
@@ -876,11 +862,7 @@ if s_file and d_file and lt_file:
                     fig_curve.update_layout(title="SS Sensitivity to Service Level (Scenario 1 LT assumptions)", xaxis_title="Service Level (%)", yaxis_title="Simulated SS (units)")
                     st.plotly_chart(fig_curve, use_container_width=True)
 
-
-                # ----------------------
-                # Business rules & Diagnostics with explanation (point 4)
-                # - include LaTeX math for clarity
-                # ----------------------
+                # Business rules & diagnostics
                 st.subheader("4. Business Rules & Diagnostics — explanation & diagnostics")
                 st.markdown(r"""
                 Background & explanation of the calculation steps and business-rule adjustments.
@@ -907,10 +889,7 @@ if s_file and d_file and lt_file:
                 - Explicit overrides (e.g., specific locations such as B616) may force 0
                 """)
 
-                # add some vertical space for clarity before the checks
                 st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-
-                # Shadowed separator
                 st.markdown("""<div style="height:12px;background:#f0f0f2;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.07);margin:12px 0;"></div>""", unsafe_allow_html=True)
                 
                 c1, c2 = st.columns(2)
@@ -936,19 +915,14 @@ if s_file and d_file and lt_file:
                             st.success("✅ Raw SS is within caps (no capping applied).")
                     else:
                         st.write("Capping logic disabled.")
-        with col_badge:
-            # badge for selected calc scenario
-            render_selection_badge(product=calc_sku, location=calc_loc if calc_loc != "(no location)" else None, df_context=row_df if not row_df.empty else None)
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
     # -------------------------------
-    # TAB 7: By Material (pastel colors + bold grand totals, hide zero rows)
-    # Layout standardized: left 70% (controls + charts), right 30% (badge)
+    # TAB 7: By Material
+    # Filters right, content left
     # -------------------------------
     with tab7:
         col_main, col_badge = st.columns([7, 3])
-        with col_main:
-            st.header("📦 View by Material (Single Material Focus + 8 Reasons for Inventory)")
+        with col_badge:
             sel_prod_default = default_product
             sel_prod_index = all_products.index(sel_prod_default) if sel_prod_default in all_products else 0
             selected_product = st.selectbox("Select Material", all_products, index=sel_prod_index, key="mat_sel")
@@ -962,8 +936,12 @@ if s_file and d_file and lt_file:
             else:
                 selected_period = st.selectbox("Select Period to Snapshot", [CURRENT_MONTH_TS], index=0, key="mat_period")
 
+            render_selection_badge(product=selected_product, location=None, df_context=results[(results['Product']==selected_product)&(results['Period']==selected_period)])
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        with col_main:
+            st.header("📦 View by Material (Single Material Focus + 8 Reasons for Inventory)")
             mat_period_df = results[(results['Product'] == selected_product) & (results['Period'] == selected_period)].copy()
-            # hide zero rows for dashboard presentation
             mat_period_df_display = hide_zero_rows(mat_period_df)
             total_forecast = mat_period_df['Forecast'].sum(); total_net = mat_period_df['Agg_Future_Demand'].sum()
             total_ss = mat_period_df['Safety_Stock'].sum(); nodes_count = mat_period_df['Location'].nunique()
@@ -1004,7 +982,6 @@ if s_file and d_file and lt_file:
                 }
 
                 drv_df = pd.DataFrame({'driver': list(raw_drivers.keys()), 'amount': [float(v) for v in raw_drivers.values()]})
-                # hide drivers with zero amount for table and chart readability
                 drv_df_display = drv_df[drv_df['amount'] != 0].copy()
                 drv_denom = drv_df['amount'].sum()
                 drv_df_display['pct_of_total_ss'] = drv_df_display['amount'] / (drv_denom if drv_denom > 0 else 1.0) * 100
@@ -1025,9 +1002,7 @@ if s_file and d_file and lt_file:
                                                   two_decimals_cols=['Pct_of_raw_sum']),
                              use_container_width=True)
 
-                # -------------------------------
-                # B. SS Attribution — waterfall with pastel colors
-                # -------------------------------
+                # B. SS Attribution
                 st.markdown("---")
                 st.markdown("#### B. SS Attribution — Mutually exclusive components that SUM EXACTLY to Total Safety Stock")
                 per_node = mat.copy()
@@ -1106,7 +1081,6 @@ if s_file and d_file and lt_file:
                                                   two_decimals_cols=['Pct_of_total_SS']),
                              use_container_width=True)
 
-                # Bold grand totals summary for the displayed columns
                 grand_forecast = mat_period_df['Forecast'].sum()
                 grand_net = mat_period_df['Agg_Future_Demand'].sum()
                 grand_ss = mat_period_df['Safety_Stock'].sum()
@@ -1129,10 +1103,6 @@ if s_file and d_file and lt_file:
                 </div>
                 """
                 st.markdown(summary_html, unsafe_allow_html=True)
-
-        with col_badge:
-            render_selection_badge(product=selected_product, location=None, df_context=mat_period_df)
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         st.markdown("---")
         st.subheader("Top Locations by Safety Stock (snapshot)")
