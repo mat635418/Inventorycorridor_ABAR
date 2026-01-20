@@ -191,8 +191,14 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 
 def render_selection_badge(product=None, location=None, df_context=None, small=False):
     """
-    Renders selection badge. Defensive to accept either 'Forecast' or 'Forecast_Hist' and missing columns.
-    NOTE: Per user request removed Fcst (Local) from this badge to keep filters consistent and avoid confusion.
+    Renders selection badge (blue box). Shows three key figures:
+      - Local Demand (sum of local forecast(s))
+      - Total Demand (aggregated network demand used in SS calc: local + direct downstream one-level)
+      - Safety Stock (final Safety_Stock after rules)
+
+    Also includes a small-font explanation of how each metric is calculated.
+
+    Defensive to accept either 'Forecast' or 'Forecast_Hist' and missing columns.
     """
     if product is None or product == "":
         return
@@ -208,22 +214,45 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
                     return 0.0
         return 0.0
 
-    total_net = _sum_candidates(df_context, ['Agg_Future_Demand'])
+    # Local Demand: prefer Forecast (future), fall back to Forecast_Hist where appropriate
+    local_demand = _sum_candidates(df_context, ['Forecast', 'Forecast_Hist'])
+    # Total Demand: aggregated future demand used in SS calc
+    total_demand = _sum_candidates(df_context, ['Agg_Future_Demand'])
+    # Safety Stock: final safety stock (after zero/cap rules)
     total_ss = _sum_candidates(df_context, ['Safety_Stock'])
 
+    # Small explanatory text (kept compact)
+    explanation = (
+        "Calculations: "
+        "Local Demand = sum(local forecasts); "
+        "Total Demand = local + direct downstream (one-level) forecasts used for network aggregation; "
+        "Safety Stock = Method 5 statistical SS (demand+LT variance), then zero-suppression and cap rules applied."
+    )
+
     badge_html = f"""
-    <div style="background:#0b3d91;padding:18px;border-radius:8px;color:white;max-width:100%;">
-      <div style="font-size:12px;opacity:0.95">Selected</div>
-      <div style="font-size:15px;font-weight:700;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{product}{(' — ' + location) if location else ''}</div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <div style="background:#ffffff22;padding:10px;border-radius:6px;min-width:200px;">
-          <div style="font-size:11px;opacity:0.85">Net Demand</div>
-          <div style="font-size:13px;font-weight:700">{euro_format(total_net, True)}</div>
+    <div style="background:#0b3d91;padding:16px;border-radius:8px;color:white;max-width:100%;">
+      <div style="font-size:11px;opacity:0.9;margin-bottom:6px;">Selected</div>
+      <div style="font-size:14px;font-weight:700;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{product}{(' — ' + location) if location else ''}</div>
+
+      <div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;">
+        <div style="background:#e3f2fd;color:#0b3d91;padding:10px;border-radius:6px;min-width:150px;">
+          <div style="font-size:10px;opacity:0.85">Local Demand</div>
+          <div style="font-size:13px;font-weight:700">{euro_format(local_demand)}</div>
         </div>
-        <div style="background:#00b0f622;padding:10px;border-radius:6px;min-width:200px;">
-          <div style="font-size:11px;opacity:0.85">SS (Current)</div>
-          <div style="font-size:13px;font-weight:700">{euro_format(total_ss, False)}</div>
+
+        <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;min-width:150px;">
+          <div style="font-size:10px;opacity:0.85">Total Demand</div>
+          <div style="font-size:13px;font-weight:700">{euro_format(total_demand)}</div>
         </div>
+
+        <div style="background:#1565c0;color:white;padding:10px;border-radius:6px;min-width:150px;">
+          <div style="font-size:10px;opacity:0.95">Safety Stock</div>
+          <div style="font-size:13px;font-weight:700">{euro_format(total_ss)}</div>
+        </div>
+      </div>
+
+      <div style="margin-top:10px;font-size:11px;opacity:0.9;color:#e6f2ff;">
+        <small>{explanation}</small>
       </div>
     </div>
     """
@@ -451,6 +480,7 @@ if s_file and d_file and lt_file:
                 """
                 st.markdown(extra_html, unsafe_allow_html=True)
 
+    
     # -------------------------------
     # TAB 2: Network Topology
     # -------------------------------
