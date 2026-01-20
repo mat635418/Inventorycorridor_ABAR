@@ -4,6 +4,7 @@
 # Modified: Fix duplicated filter in last tab, unify badge column width to 15%, ensure multiselect chips use consistent blue styling (Jan 2026)
 # Modified: Remove stray placeholder tokens that caused SyntaxError (Jan 2026)
 # Modified: Improve network aggregation to sum downstream (transitive) demand/variance so total network demand always adds up (Feb 2026)
+# Modified: Move logo from top of page to right-side badge; make title the top element; bump version to 0.75; restrict filters to meaningful materials/locations (Jan 2026)
 
 import streamlit as st
 import pandas as pd
@@ -24,20 +25,12 @@ import re
 # -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
 
-# Move logo to the very top, then render the title below the logo.
-# If the logo file is missing we silently show only the title.
+# Logo filename (no longer displayed at the very top).
+# The logo will instead be shown at the top of the right-side badge (filters).
 LOGO_FILENAME = "GY_logo.jpg"
-if os.path.exists(LOGO_FILENAME):
-    try:
-        st.image(LOGO_FILENAME, width=300)
-    except Exception:
-        # If image rendering fails for any reason, just continue to title
-        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-else:
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
-# Title below the logo
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.69 — Jan 2026</h1>", unsafe_allow_html=True)
+# Title is now the top page element. Version bumped to 0.75
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.75 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # -------------------------------
 # UI ADJUSTMENTS (styling)
@@ -152,7 +145,7 @@ def hide_zero_rows(df, check_cols=None):
 
 def aggregate_network_stats(df_forecast, df_stats, df_lt):
     """
-    Improved aggregation to ensure total network demand at a node = local forecast + sum of forecasts
+    Improved aggregation to ensure total network demand at a node = local_forecast + sum of forecasts
     of all downstream nodes (transitive closure), avoiding double-counting.
 
     Rationale for change:
@@ -272,9 +265,19 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     """
     Streamlit-native badge (blue box) using st.markdown so
     the badge inherits the app font and styling.
+
+    NOTE: Logo will be rendered above the badge (if available) so the right-side filter/badge shows the brand.
     """
     if product is None or product == "":
         return
+
+    # Show logo above the badge (as requested).
+    if LOGO_FILENAME and os.path.exists(LOGO_FILENAME):
+        try:
+            # Keep logo reasonably sized so it fits above the filter/badge
+            st.image(LOGO_FILENAME, width=120)
+        except Exception:
+            pass
 
     def _sum_candidates(df, candidates):
         if df is None or df.empty:
@@ -509,14 +512,30 @@ if s_file and d_file and lt_file:
     hist['Accuracy_%'] = (1 - hist['APE_%'] / 100) * 100
     hist_net = df_s.groupby(['Product', 'Period'], as_index=False).agg(Network_Consumption=('Consumption', 'sum'), Network_Forecast_Hist=('Forecast', 'sum'))
 
-    # Defaults & lists
-    all_products = sorted(results['Product'].unique().tolist())
+    # -------------------------------
+    # FILTERS: only show "meaningful" materials & locations
+    # Meaningful = any of Agg_Future_Demand, Forecast, Safety_Stock, Pre_Rule_SS non-zero
+    # -------------------------------
+    meaningful_mask = results[['Agg_Future_Demand', 'Forecast', 'Safety_Stock', 'Pre_Rule_SS']].fillna(0).abs().sum(axis=1) > 0
+    meaningful_results = results[meaningful_mask].copy()
+
+    # Defaults & lists (use meaningful sets; fallback to full results if none)
+    all_products = sorted(meaningful_results['Product'].unique().tolist())
+    if not all_products:
+        all_products = sorted(results['Product'].unique().tolist())
+
     default_product = DEFAULT_PRODUCT_CHOICE if DEFAULT_PRODUCT_CHOICE in all_products else (all_products[0] if all_products else "")
+
     def default_location_for(prod):
-        locs = sorted(results[results['Product'] == prod]['Location'].unique().tolist())
+        # Prefer meaningful locations for the given product, fallback to any known locations for that product
+        locs = sorted(meaningful_results[meaningful_results['Product'] == prod]['Location'].unique().tolist())
+        if not locs:
+            locs = sorted(results[results['Product'] == prod]['Location'].unique().tolist())
         return DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in locs else (locs[0] if locs else "")
+
     all_periods = sorted(results['Period'].unique().tolist())
     default_period = CURRENT_MONTH_TS if CURRENT_MONTH_TS in all_periods else (all_periods[-1] if all_periods else None)
+
     # TABS
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📈 Inventory Corridor",
@@ -538,7 +557,11 @@ if s_file and d_file and lt_file:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("Product", all_products, index=sku_index, key='tab1_sku')
-            loc_opts = sorted(results[results['Product'] == sku]['Location'].unique().tolist())
+
+            # show only meaningful locations for the selected product (with fallback)
+            loc_opts = sorted(meaningful_results[meaningful_results['Product'] == sku]['Location'].unique().tolist())
+            if not loc_opts:
+                loc_opts = sorted(results[results['Product'] == sku]['Location'].unique().tolist())
             loc_default = DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in loc_opts else (loc_opts[0] if loc_opts else "(no location)")
             loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
             if loc_opts:
@@ -686,8 +709,9 @@ if s_file and d_file and lt_file:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
-            prod_choices = sorted(results['Product'].unique())
-            loc_choices = sorted(results['Location'].unique())
+            # Use meaningful products/locations for filters
+            prod_choices = sorted(meaningful_results['Product'].unique()) if not meaningful_results.empty else sorted(results['Product'].unique())
+            loc_choices = sorted(meaningful_results['Location'].unique()) if not meaningful_results.empty else sorted(results['Location'].unique())
             period_choices = sorted(results['Period'].unique())
 
             default_prod_list = [default_product] if default_product in prod_choices else []
@@ -773,7 +797,7 @@ if s_file and d_file and lt_file:
                 st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
-                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True)
+                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), [...]
 
     # -------------------------------
     # TAB 5: Forecast Accuracy
@@ -854,7 +878,9 @@ if s_file and d_file and lt_file:
             calc_sku_default = default_product
             calc_sku_index = all_products.index(calc_sku_default) if calc_sku_default in all_products else 0
             calc_sku = st.selectbox("Select Product", all_products, index=calc_sku_index, key="c_sku")
-            avail_locs = sorted(results[results['Product'] == calc_sku]['Location'].unique().tolist())
+            avail_locs = sorted(meaningful_results[meaningful_results['Product'] == calc_sku]['Location'].unique().tolist())
+            if not avail_locs:
+                avail_locs = sorted(results[results['Product'] == calc_sku]['Location'].unique().tolist())
             if not avail_locs: avail_locs = ["(no location)"]
             calc_loc_default = DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in avail_locs else (avail_locs[0] if avail_locs else "(no location)")
             calc_loc_index = avail_locs.index(calc_loc_default) if calc_loc_default in avail_locs else 0
@@ -935,7 +961,7 @@ if s_file and d_file and lt_file:
                         with st.expander(f"Scenario {s+1} inputs", expanded=False):
                             sc_sl = st.slider(f"Scenario {s+1} Service Level (%)", 50.0, 99.9, float(service_level*100 if s==0 else min(99.9, service_level*100 + 0.5*s)), key=f"sc_sl_{s}")
                             sc_lt = st.slider(f"Scenario {s+1} Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2 or 30.0), value=float(row['LT_Mean'] if s==0 else row['LT_Mean']), key=f"sc_lt_{s}")
-                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2 or 10.0), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_ltstd_{s}")
+                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2 or 10.0), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_lt_std_{s}")
                             scenarios.append({'SL_pct': sc_sl, 'LT_mean': sc_lt, 'LT_std': sc_lt_std})
 
                     scen_rows = []
@@ -1253,7 +1279,7 @@ if s_file and d_file and lt_file:
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
         top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=400)
+        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=40[...]
 
         st.markdown("---")
         st.subheader("Export — Material Snapshot")
