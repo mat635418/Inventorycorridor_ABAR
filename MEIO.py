@@ -797,7 +797,15 @@ if s_file and d_file and lt_file:
                 st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
-                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), [...]
+                # Fixed truncated placeholder: show top 10 with use_container_width
+                st.dataframe(
+                    df_format_for_display(
+                        eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10),
+                        cols=['Safety_Stock'],
+                        two_decimals_cols=['Safety_Stock']
+                    ),
+                    use_container_width=True
+                )
 
     # -------------------------------
     # TAB 5: Forecast Accuracy
@@ -1259,7 +1267,7 @@ if s_file and d_file and lt_file:
                 <div style="margin-top:12px;">
                   <table style="border-collapse:collapse;">
                     <tr>
-                      <td style="padding:2px 12px;font-size:12px;">Grand Totals/td>
+                      <td style="padding:2px 12px;font-size:12px;">Grand Totals</td>
                       <td style="padding:2px 12px;font-size:12px;">Local Demand</td>
                       <td style="padding:2px 12px;font-size:12px;">Total Network Demand</td>
                       <td style="padding:2px 12px;font-size:12px;">Safety Stock</td>                      
@@ -1279,7 +1287,16 @@ if s_file and d_file and lt_file:
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
         top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=40[...]
+        # Fixed truncated placeholder: show top 25 with explicit display height
+        st.dataframe(
+            df_format_for_display(
+                top_nodes_display.head(25).copy(),
+                cols=['Forecast','Agg_Future_Demand','Safety_Stock'],
+                two_decimals_cols=['Forecast']
+            ),
+            use_container_width=True,
+            height=400
+        )
 
         st.markdown("---")
         st.subheader("Export — Material Snapshot")
