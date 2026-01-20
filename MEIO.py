@@ -1,6 +1,7 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — JAN 2026
 # Modified: move logo above title + rewrite Safety Stock engine (Jan 2026)
+# Modified: Fix duplicated filter in last tab, unify badge column width to 15%, ensure multiselect chips use consistent blue styling (Jan 2026)
 
 import streamlit as st
 import pandas as pd
@@ -40,11 +41,16 @@ st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v
 # UI ADJUSTMENTS (styling)
 # -------------------------------
 # Make multiselect selected chips match the softer blue style used elsewhere.
+# Expand selectors to ensure any variant/state of the tag component inherits the same styling
 st.markdown(
     """
     <style>
       /* Style selected chips (multiselect tags) to match app blue theme */
-      div[data-baseweb="tag"] {
+      div[data-baseweb="tag"],
+      div[data-baseweb="tag"][data-state],
+      div[data-baseweb="tag"][data-state="danger"],
+      .stMultiSelect div[data-baseweb="tag"],
+      .stSelectbox div[data-baseweb="tag"] {
         background: #e3f2fd !important;
         color: #0b3d91 !important;
         border: 1px solid #90caf9 !important;
@@ -52,11 +58,13 @@ st.markdown(
         padding: 2px 8px !important;
         font-weight: 600 !important;
       }
-      div[data-baseweb="tag"] span, div[data-baseweb="tag"] > div {
+      div[data-baseweb="tag"] span, div[data-baseweb="tag"] > div,
+      .stMultiSelect div[data-baseweb="tag"] span,
+      .stSelectbox div[data-baseweb="tag"] span {
         color: #0b3d91 !important;
       }
       /* Ensure the 'x' icon in tags has the right color */
-      div[data-baseweb="tag"] svg { fill: #0b3d91 !important; }
+      div[data-baseweb="tag"] svg, .stMultiSelect div[data-baseweb="tag"] svg, .stSelectbox div[data-baseweb="tag"] svg { fill: #0b3d91 !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -477,7 +485,8 @@ if s_file and d_file and lt_file:
     # TAB 1: Inventory Corridor
     # -------------------------------
     with tab1:
-        col_main, col_badge = st.columns([8, 2])
+        # Make main column 85% / badge 15% (use integer ratio 17:3)
+        col_main, col_badge = st.columns([17, 3])
         with col_badge:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
@@ -510,7 +519,7 @@ if s_file and d_file and lt_file:
     # TAB 2: Network Topology
     # -------------------------------
     with tab2:
-        col_main, col_badge = st.columns([8, 2])
+        col_main, col_badge = st.columns([17, 3])
         with col_badge:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
@@ -627,7 +636,7 @@ if s_file and d_file and lt_file:
     # TAB 3: Full Plan
     # -------------------------------
     with tab3:
-        col_main, col_badge = st.columns([8, 2])
+        col_main, col_badge = st.columns([17, 3])
         with col_badge:
             st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
             prod_choices = sorted(results['Product'].unique())
@@ -668,7 +677,7 @@ if s_file and d_file and lt_file:
     # TAB 4: Efficiency Analysis
     # -------------------------------
     with tab4:
-        col_main, col_badge = st.columns([8, 2])
+        col_main, col_badge = st.columns([17, 3])
         with col_badge:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
@@ -717,13 +726,13 @@ if s_file and d_file and lt_file:
                 st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
-                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True)
+                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), [...]
 
     # -------------------------------
     # TAB 5: Forecast Accuracy
     # -------------------------------
     with tab5:
-        col_main, col_badge = st.columns([8, 2])
+        col_main, col_badge = st.columns([17, 3])
         with col_badge:
             h_sku_default = default_product
             h_sku_index = all_products.index(h_sku_default) if h_sku_default in all_products else 0
@@ -793,7 +802,7 @@ if s_file and d_file and lt_file:
     # TAB 6: Calculation Trace & Simulation
     # -------------------------------
     with tab6:
-        col_main, col_badge = st.columns([8, 2])
+        col_main, col_badge = st.columns([17, 3])
         with col_badge:
             calc_sku_default = default_product
             calc_sku_index = all_products.index(calc_sku_default) if calc_sku_default in all_products else 0
@@ -879,7 +888,7 @@ if s_file and d_file and lt_file:
                         with st.expander(f"Scenario {s+1} inputs", expanded=False):
                             sc_sl = st.slider(f"Scenario {s+1} Service Level (%)", 50.0, 99.9, float(service_level*100 if s==0 else min(99.9, service_level*100 + 0.5*s)), key=f"sc_sl_{s}")
                             sc_lt = st.slider(f"Scenario {s+1} Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2 or 30.0), value=float(row['LT_Mean'] if s==0 else row['LT_Mean']), key=f"sc_lt_{s}")
-                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2 or 10.0), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_lt_std_{s}")
+                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2 or 10.0), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_ltstd_{s}")
                             scenarios.append({'SL_pct': sc_sl, 'LT_mean': sc_lt, 'LT_std': sc_lt_std})
 
                     scen_rows = []
@@ -1004,7 +1013,7 @@ if s_file and d_file and lt_file:
     # TAB 7: By Material
     # -------------------------------
     with tab7:
-        col_main, col_badge = st.columns([8, 2])
+        col_main, col_badge = st.columns([17, 3])
         with col_badge:
             sel_prod_default = default_product
             sel_prod_index = all_products.index(sel_prod_default) if sel_prod_default in all_products else 0
@@ -1197,15 +1206,11 @@ if s_file and d_file and lt_file:
                 """
                 st.markdown(summary_html, unsafe_allow_html=True)
 
-        with col_badge:
-            render_selection_badge(product=selected_product, location=None, df_context=mat_period_df)
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-
         st.markdown("---")
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
         top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=400)
+        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=40[...]
 
         st.markdown("---")
         st.subheader("Export — Material Snapshot")
