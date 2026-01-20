@@ -1,6 +1,8 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — JAN 2026
-# Revised Jan 2026 — Syntax fixes, truncated key fixes, duplicate else removal, minor robustness improvements.
+# Revised 2026-01-20 — UI adjustments: fixed days_per_month to 30 (removed widget),
+# removed Conversion Mode and Comparison sections, and updated badge layout so the three
+# key figures are full-width inside the blue selection box. Additional small robustness fixes.
 
 import streamlit as st
 import pandas as pd
@@ -268,33 +270,28 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
 
     title = f"{product}{(' — ' + location) if location else ''}"
 
+    # Updated layout: make each of the three key figures occupy full width (100%) of the blue box.
     badge_html = f"""
     <div style="background:#0b3d91;padding:14px;border-radius:8px;color:white;max-width:100%;font-family:inherit;">
       <div style="font-size:11px;opacity:0.95;margin-bottom:6px;">Selected</div>
       <div style="font-size:13px;font-weight:700;margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title}</div>
 
-      <!-- Golden safety-stock box -->
-      <div style="background:#FFC107;color:#0b3d91;padding:8px;border-radius:6px;min-width:100%;margin-bottom:10px;display:flex;align-items:center;">
-        <div style="flex:1;">
-          <div style="font-size:11px;font-weight:600;">Safety Stock</div>
-        </div>
-        <div style="min-width:120px;text-align:right;">
-          <div style="font-size:14px;font-weight:700;">{euro_format(total_ss)}</div>
-        </div>
+      <!-- Golden safety-stock box (full width) -->
+      <div style="background:#FFC107;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;margin-bottom:10px;display:block;">
+        <div style="font-size:11px;font-weight:600;margin-bottom:4px;">Safety Stock</div>
+        <div style="font-size:14px;font-weight:700;text-align:right;">{euro_format(total_ss)}</div>
       </div>
 
-      <!-- Two key figures below: Local Demand + Total Network Demand -->
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <div style="background:#e3f2fd;color:#0b3d91;padding:10px;border-radius:6px;min-width:150px;flex:1;">
-          <div style="font-size:10px;opacity:0.85;">Local Demand</div>
-          <div style="font-size:13px;font-weight:700;">{euro_format(local_demand)}</div>
-        </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;min-width:150px;flex:1;">
-          <div style="font-size:10px;opacity:0.85;">Total Network Demand</div>
-          <div style="font-size:13px;font-weight:700;">{euro_format(total_demand)}</div>
-        </div>
+      <!-- Local Demand (full width) -->
+      <div style="background:#e3f2fd;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;margin-bottom:8px;display:block;">
+        <div style="font-size:10px;opacity:0.85;">Local Demand</div>
+        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(local_demand)}</div>
       </div>
+
+      <!-- Total Network Demand (full width) -->
+      <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;display:block;">
+        <div style="font-size:10px;opacity:0.85;">Total Network Demand</div>
+        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(total_demand)}</div>
       </div>
     </div>
     """
@@ -310,7 +307,10 @@ z = norm.ppf(service_level)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📐 Calculation Settings")
-days_per_month = st.sidebar.number_input("Days per month (used to convert monthly->daily)", value=30, min_value=1)
+# Days per month removed from sidebar per request; use default 30 days.
+days_per_month = 30
+st.sidebar.caption("Using fixed conversion: 30 days per month (default)")
+
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛡️ Safety Stock Rules")
 zero_if_no_net_fcst = st.sidebar.checkbox("Force Zero SS if No Network Demand", value=True)
@@ -319,7 +319,7 @@ cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200),
                               help="Ensures SS stays between these % of total network demand for that node.")
 st.sidebar.markdown("---")
 
-# NEW: Aggregation / variance / LT / conversion controls
+# NEW: Aggregation / variance / LT controls
 st.sidebar.subheader("⚙️ Aggregation & Uncertainty Controls")
 agg_mode = st.sidebar.selectbox("Network Aggregation Mode", ["Transitive (full downstream)", "Direct children only"], index=0)
 use_transitive = True if agg_mode.startswith("Transitive") else False
@@ -328,14 +328,10 @@ var_rho = st.sidebar.slider("Variance damping factor (ρ)", 0.0, 1.0, 1.0,
                             help="Lower values damp downstream variance aggregation (0=no downstream variance, 1=full variance add).")
 
 lt_mode = st.sidebar.selectbox("Lead-time variance handling", ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"], index=0)
-conversion_mode = st.sidebar.selectbox("Conversion Mode", ["Strict daily conversion", "Monthly-scale for LT term"], index=0)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🔁 Comparison")
-comparison_mode = st.sidebar.checkbox("Enable comparison mode (alternative configuration)", value=False)
-if comparison_mode:
-    st.sidebar.markdown("Comparison configuration: Alternative scenario uses direct aggregation, ρ=0.6, ignores LT variance and uses monthly scale for LT-term (for quick comparison).")
-st.sidebar.markdown("---")
+
+# Comparison section removed per request.
 
 st.sidebar.subheader("📂 Data Sources (CSV)")
 DEFAULT_FILES = {"sales": "sales.csv", "demand": "demand.csv", "lt": "leadtime.csv"}
@@ -356,9 +352,10 @@ DEFAULT_PRODUCT_CHOICE = "NOKANDO2"
 DEFAULT_LOCATION_CHOICE = "DEW1"
 CURRENT_MONTH_TS = pd.Timestamp.now().to_period('M').to_timestamp()
 
-def run_pipeline(transitive, rho, lt_mode_param, conversion_mode_param):
+def run_pipeline(transitive, rho, lt_mode_param):
     """
     Run the aggregation -> stats -> SS pipeline with the provided parameters.
+    Note: Conversion mode removed; LT-term uses daily conversion by default (D_for_LT = daily demand).
     Returns final results DataFrame (with Safety_Stock and related columns) and reachable_map.
     """
     network_stats, reachable_map = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt, transitive=transitive, rho=rho)
@@ -391,16 +388,11 @@ def run_pipeline(transitive, rho, lt_mode_param, conversion_mode_param):
     # demand component
     demand_component = res['Var_D_Day'] * res['LT_Mean']
 
-    # LT component - conditional per mode & conversion mode
+    # LT component - conditional per mode; conversion is daily by default (D_for_LT = d_day)
     lt_component_list = []
     for idx, row in res.iterrows():
-        d_month = float(row['Agg_Future_Demand'])
         d_day = float(row['D_day'])
-        # choose D_for_LT according to conversion_mode_param
-        if conversion_mode_param == 'Monthly-scale for LT term':
-            D_for_LT = d_month
-        else:
-            D_for_LT = d_day
+        D_for_LT = d_day  # daily conversion fixed
 
         if lt_mode_param == 'Ignore LT variance':
             lt_comp = 0.0
@@ -507,26 +499,9 @@ if s_file and d_file and lt_file:
     stats['Local_Std'] = stats.apply(fill_local_std, axis=1)
 
     # Run base pipeline with user-selected params
-    results, reachable_map = run_pipeline(transitive=use_transitive, rho=var_rho, lt_mode_param=lt_mode, conversion_mode_param=conversion_mode)
+    results, reachable_map = run_pipeline(transitive=use_transitive, rho=var_rho, lt_mode_param=lt_mode)
 
-    # If comparison mode is enabled, compute alternative scenario
-    if comparison_mode:
-        alt_results, alt_reachable_map = run_pipeline(transitive=False, rho=0.6,
-                                                      lt_mode_param='Ignore LT variance',
-                                                      conversion_mode_param='Monthly-scale for LT term')
-        # prepare summary metrics
-        total_ss_base = results['Safety_Stock'].sum()
-        total_ss_alt = alt_results['Safety_Stock'].sum()
-        total_delta = total_ss_base - total_ss_alt
-
-        # attach alt safety stock to main results for convenience (merge on Product, Location, Period)
-        alt_trim = alt_results[['Product','Location','Period','Safety_Stock']].rename(columns={'Safety_Stock':'Safety_Stock_alt'})
-        results = results.merge(alt_trim, on=['Product','Location','Period'], how='left')
-        results['Safety_Stock_alt'] = results['Safety_Stock_alt'].fillna(0)
-        results['Delta_SS'] = results['Safety_Stock'] - results['Safety_Stock_alt']
-    else:
-        results['Safety_Stock_alt'] = np.nan
-        results['Delta_SS'] = np.nan
+    # Comparison mode removed — no alternative scenario calculation.
 
     # Historical accuracy
     hist = df_s[['Product', 'Location', 'Period', 'Consumption', 'Forecast']].copy()
@@ -765,24 +740,11 @@ if s_file and d_file and lt_file:
             filtered_display = hide_zero_rows(filtered)
 
             display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
-            if comparison_mode:
-                # include alternative SS and delta
-                display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Safety_Stock_alt','Delta_SS','Adjustment_Status','Max_Corridor']
 
             # Prepare formatting columns (ensure they exist)
-            fmt_cols = [c for c in ['Forecast','Agg_Future_Demand','Safety_Stock','Safety_Stock_alt','Delta_SS','Max_Corridor'] if c in filtered_display.columns]
+            fmt_cols = [c for c in ['Forecast','Agg_Future_Demand','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
             disp = df_format_for_display(filtered_display[display_cols].copy(), cols=fmt_cols, two_decimals_cols=fmt_cols)
             st.dataframe(disp, use_container_width=True, height=700)
-
-            # If comparison is enabled show quick totals
-            if comparison_mode:
-                c1, c2, c3 = st.columns(3)
-                base_total = filtered['Safety_Stock'].sum()
-                alt_total = filtered['Safety_Stock_alt'].sum()
-                delta_total = base_total - alt_total
-                c1.metric("Total SS (current)", euro_format(base_total, True))
-                c2.metric("Total SS (alternative)", euro_format(alt_total, True))
-                c3.metric("Δ Total SS", euro_format(delta_total, True))
 
             csv_buf = filtered[display_cols].to_csv(index=False)
             st.download_button("📥 Download Filtered Plan (CSV)", data=csv_buf, file_name="filtered_plan.csv", mime="text/csv")
