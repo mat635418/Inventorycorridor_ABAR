@@ -24,7 +24,7 @@ st.set_page_config(page_title="MEIO for RM", layout="wide")
 # Place logo and title on the same line: logo before the title, 300px width.
 # If the logo file is missing we silently show only the title.
 LOGO_FILENAME = "GY_logo.jpg"
-col_logo, col_title = st.columns([0.25, 0.75])
+col_logo, col_title = st.columns([0.15, 0.85])
 with col_logo:
     if os.path.exists(LOGO_FILENAME):
         try:
@@ -37,6 +37,32 @@ with col_title:
     # emoji removed from title per request
     st.markdown("<h1 style='margin:0; padding-top:10px;'>MEIO for Raw Materials — v0.69 — Jan 2026</h1>", unsafe_allow_html=True)
 
+# -------------------------------
+# UI ADJUSTMENTS (styling)
+# -------------------------------
+# Make multiselect selected chips match the softer blue style used elsewhere.
+# Applies to BaseWeb tag elements used by Streamlit for selected items.
+st.markdown(
+    """
+    <style>
+      /* Style selected chips (multiselect tags) to match app blue theme */
+      div[data-baseweb="tag"] {
+        background: #e3f2fd !important;
+        color: #0b3d91 !important;
+        border: 1px solid #90caf9 !important;
+        border-radius: 8px !important;
+        padding: 2px 8px !important;
+        font-weight: 600 !important;
+      }
+      div[data-baseweb="tag"] span, div[data-baseweb="tag"] > div {
+        color: #0b3d91 !important;
+      }
+      /* Ensure the 'x' icon in tags has the right color */
+      div[data-baseweb="tag"] svg { fill: #0b3d91 !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -189,19 +215,15 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 
     return pd.DataFrame(results)
 
-def render_selection_badge_title_only(title_html):
-    """Helper to render a title/heading with the blue badge style (no numbers)."""
-    st.markdown(f"""
-    <div style="background:#0b3d91;padding:12px;border-radius:8px;color:white;max-width:100%;font-family:inherit;">
-      <div style="font-size:11px;opacity:0.95;margin-bottom:6px;">Selected</div>
-      <div style="font-size:13px;font-weight:700;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title_html}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
 def render_selection_badge(product=None, location=None, df_context=None, small=False):
     """
     Streamlit-native badge (blue box) using st.markdown(unsafe_allow_html=True) so
-    the badge inherits the app font and styling.
+    the badge inherits the app font and styling. Removed components.html so we don't
+    get an iframe font mismatch. Safety Stock number uses a smaller font to match
+    surrounding UI.
+    Layout requested:
+      - Golden box inside the blue box showing ONLY Safety Stock.
+      - Below that two key figures side-by-side: Local Demand and Total Network Demand.
     """
     if product is None or product == "":
         return
@@ -224,6 +246,8 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
 
     title = f"{product}{(' — ' + location) if location else ''}"
 
+    # Use inline styles but render with st.markdown so fonts match the rest of the app.
+    # Adjusted SS font-size to be more conservative (14px) so it doesn't overpower the badge.
     badge_html = f"""
     <div style="background:#0b3d91;padding:14px;border-radius:8px;color:white;max-width:100%;font-family:inherit;">
       <div style="font-size:11px;opacity:0.95;margin-bottom:6px;">Selected</div>
@@ -255,6 +279,7 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     </div>
     """
 
+    # Render using Streamlit's markdown so the fonts and spacing match the app.
     st.markdown(badge_html, unsafe_allow_html=True)
 
 # -------------------------------
@@ -426,10 +451,9 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 1: Inventory Corridor
-    # Move filtering to the right badge (30%), content left (70%)
     # -------------------------------
     with tab1:
-        col_main, col_badge = st.columns([7, 3])
+        col_main, col_badge = st.columns([8, 2])
         with col_badge:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
@@ -442,7 +466,6 @@ if s_file and d_file and lt_file:
             else:
                 loc = st.selectbox("Location", ["(no location)"], index=0, key='tab1_loc')
 
-            # Render badge (filters are on top of the badge area to maintain visual grouping)
             render_selection_badge(product=sku, location=loc if loc != "(no location)" else None, df_context=results[(results['Product'] == sku) & (results['Location'] == loc)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -461,10 +484,10 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 2: Network Topology
-    # Filters on right within badge area, network on left
+    # - inject JS to fit & center the pyvis network on load
     # -------------------------------
     with tab2:
-        col_main, col_badge = st.columns([7, 3])
+        col_main, col_badge = st.columns([8, 2])
         with col_badge:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
@@ -551,16 +574,38 @@ if s_file and d_file and lt_file:
               .vis-network { display:block !important; margin: 0 auto !important; }
             </style>
             """
+            # JS to auto-fit and center the network after load
+            injection_js = """
+            <script>
+              // Delay to ensure the network object is available, then fit + center.
+              setTimeout(function(){
+                try {
+                  if (typeof network !== 'undefined') {
+                    network.fit();
+                    var bounds = network.getBoundingBox();
+                    if (bounds) {
+                      var cx = (bounds.right + bounds.left) / 2;
+                      var cy = (bounds.top + bounds.bottom) / 2;
+                      network.moveTo({position: {x: cx, y: cy}});
+                    }
+                  }
+                } catch (e) { console.warn("Network fit/center failed:", e); }
+              }, 700);
+            </script>
+            """
             if '</head>' in html_text:
                 html_text = html_text.replace('</head>', injection_css + '</head>', 1)
+            if '</body>' in html_text:
+                html_text = html_text.replace('</body>', injection_js + '</body>', 1)
+            else:
+                html_text = html_text + injection_js
             components.html(html_text, height=750)
 
     # -------------------------------
     # TAB 3: Full Plan
-    # Filters moved to right badge; table left.
     # -------------------------------
     with tab3:
-        col_main, col_badge = st.columns([7, 3])
+        col_main, col_badge = st.columns([8, 2])
         with col_badge:
             st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
             prod_choices = sorted(results['Product'].unique())
@@ -570,12 +615,12 @@ if s_file and d_file and lt_file:
             default_prod_list = [default_product] if default_product in prod_choices else []
             default_period_list = [default_period] if (default_period in period_choices) else []
 
+            # multiselects (styled via global CSS injected above)
             f_prod = st.multiselect("Filter Product", prod_choices, default=default_prod_list, key="full_f_prod")
             f_loc = st.multiselect("Filter Location", loc_choices, default=[], key="full_f_loc")
             f_period = st.multiselect("Filter Period", period_choices, default=default_period_list, key="full_f_period")
 
             # Show badge summary below filters
-            # Decide product to show in badge
             badge_product = f_prod[0] if f_prod else (default_product if default_product in all_products else (all_products[0] if all_products else ""))
             badge_df = results[results['Product'] == badge_product] if badge_product else None
             render_selection_badge(product=badge_product, location=None, df_context=badge_df)
@@ -599,10 +644,9 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 4: Efficiency Analysis
-    # Filters right, charts left
     # -------------------------------
     with tab4:
-        col_main, col_badge = st.columns([7, 3])
+        col_main, col_badge = st.columns([8, 2])
         with col_badge:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
@@ -655,10 +699,9 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 5: Forecast Accuracy
-    # Filters right, charts left
     # -------------------------------
     with tab5:
-        col_main, col_badge = st.columns([7, 3])
+        col_main, col_badge = st.columns([8, 2])
         with col_badge:
             h_sku_default = default_product
             h_sku_index = all_products.index(h_sku_default) if h_sku_default in all_products else 0
@@ -726,10 +769,9 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 6: Calculation Trace & Simulation
-    # Selection controls moved to right badge; calculation content left.
     # -------------------------------
     with tab6:
-        col_main, col_badge = st.columns([7, 3])
+        col_main, col_badge = st.columns([8, 2])
         with col_badge:
             calc_sku_default = default_product
             calc_sku_index = all_products.index(calc_sku_default) if calc_sku_default in all_products else 0
@@ -795,7 +837,7 @@ if s_file and d_file and lt_file:
     """)
                 st.info(f"🧮 **Resulting Statistical SS (Method 5):** {euro_format(raw_ss_calc, True)} units")
 
-                # Entire scenario planning collapsible
+                # Scenario planning (same as before)
                 with st.expander("Scenario Planning (expand to configure scenarios)", expanded=False):
                     st.write("Use scenarios to test sensitivity to Service Level or Lead Time. Scenarios do not change implemented policy — they are analysis-only.")
                     if 'n_scen' not in st.session_state:
@@ -918,10 +960,9 @@ if s_file and d_file and lt_file:
 
     # -------------------------------
     # TAB 7: By Material
-    # Filters right, content left
     # -------------------------------
     with tab7:
-        col_main, col_badge = st.columns([7, 3])
+        col_main, col_badge = st.columns([8, 2])
         with col_badge:
             sel_prod_default = default_product
             sel_prod_index = all_products.index(sel_prod_default) if sel_prod_default in all_products else 0
@@ -1002,7 +1043,7 @@ if s_file and d_file and lt_file:
                                                   two_decimals_cols=['Pct_of_raw_sum']),
                              use_container_width=True)
 
-                # B. SS Attribution
+                # B. SS Attribution (rest of logic unchanged)
                 st.markdown("---")
                 st.markdown("#### B. SS Attribution — Mutually exclusive components that SUM EXACTLY to Total Safety Stock")
                 per_node = mat.copy()
@@ -1103,6 +1144,10 @@ if s_file and d_file and lt_file:
                 </div>
                 """
                 st.markdown(summary_html, unsafe_allow_html=True)
+
+        with col_badge:
+            render_selection_badge(product=selected_product, location=None, df_context=mat_period_df)
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         st.markdown("---")
         st.subheader("Top Locations by Safety Stock (snapshot)")
