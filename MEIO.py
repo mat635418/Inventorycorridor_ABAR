@@ -243,11 +243,12 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
           <div style="font-size:10px;opacity:0.85;">Local Demand</div>
           <div style="font-size:13px;font-weight:700;">{euro_format(local_demand)}</div>
         </div>
-
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;min-width:150px;flex:1;">
           <div style="font-size:10px;opacity:0.85;">Total Network Demand</div>
           <div style="font-size:13px;font-weight:700;">{euro_format(total_demand)}</div>
         </div>
+      </div>
       </div>
     </div>
     """
