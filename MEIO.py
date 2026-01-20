@@ -28,7 +28,7 @@ st.set_page_config(page_title="MEIO for RM", layout="wide")
 LOGO_FILENAME = "GY_logo.jpg"
 if os.path.exists(LOGO_FILENAME):
     try:
-        st.image(LOGO_FILENAME, width=300)
+        st.image(LOGO_FILENAME, width=300, align=left)
     except Exception:
         # If image rendering fails for any reason, just continue to title
         st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
