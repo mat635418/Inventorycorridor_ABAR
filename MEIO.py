@@ -649,6 +649,7 @@ if s_file and d_file and lt_file:
     # -------------------------------
     # TAB 5: Forecast Accuracy (restored)
     # -------------------------------
+                             
     with tab5:
         top_left, top_right = st.columns([6,1])
         with top_right:
