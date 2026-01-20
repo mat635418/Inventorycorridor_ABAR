@@ -20,7 +20,23 @@ import re
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
-st.title("📊 MEIO for Raw Materials — v0.69 — Jan 2026")
+
+# Place logo and title on the same line: logo before the title, 300px width.
+# If the logo file is missing we silently show only the title.
+LOGO_FILENAME = "GY_logo.jpg"
+col_logo, col_title = st.columns([0.25, 0.75])
+with col_logo:
+    if os.path.exists(LOGO_FILENAME):
+        try:
+            st.image(LOGO_FILENAME, width=300)
+        except Exception:
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+with col_title:
+    # emoji removed from title per request
+    st.markdown("<h1 style='margin:0; padding-top:10px;'>MEIO for Raw Materials — v0.69 — Jan 2026</h1>", unsafe_allow_html=True)
+
 
 # -------------------------------
 # HELPERS / FORMATTING
@@ -37,7 +53,10 @@ def clean_numeric(series):
 
 def euro_format(x, always_two_decimals=True):
     """
-    Formatting helper. Zero-suppression: return empty string when value is (near) zero to keep UI clean.
+    Formatting helper.
+    User requested: remove any values after the comma -> we round to integer and show no decimals.
+    The parameter `always_two_decimals` is kept for compatibility but ignored (rounding to integer applied).
+    Zero-suppression: return empty string when value is (near) zero to keep UI clean.
     Still returns empty string for NaN/None.
     """
     try:
@@ -57,17 +76,11 @@ def euro_format(x, always_two_decimals=True):
         if math.isclose(xv, 0.0, abs_tol=1e-9):
             return ""
         neg = xv < 0
-        x_abs = abs(xv)
-        if always_two_decimals:
-            s = f"{x_abs:,.2f}"
-        else:
-            # If value is effectively an integer, show no decimals; otherwise show two decimals
-            if math.isclose(x_abs, round(x_abs), rel_tol=1e-9):
-                s = f"{x_abs:,.0f}"
-            else:
-                s = f"{x_abs:,.2f}"
-        # European formatting (swap decimal/comma)
-        s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
+        # Round to nearest integer (user requested no decimals)
+        rounded = int(round(abs(xv)))
+        s = f"{rounded:,}"
+        # European formatting (swap decimal/comma) -- no decimals remaining but keep thousands separator style
+        s = s.replace(',', '.')
         return f"-{s}" if neg else s
     except Exception:
         return str(x)
@@ -79,9 +92,9 @@ def df_format_for_display(df, cols=None, two_decimals_cols=None):
     for c in cols:
         if c in d.columns:
             if two_decimals_cols and c in two_decimals_cols:
+                # two_decimals_cols kept for compatibility; euro_format now rounds to integer
                 d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=True))
             else:
-                # Default: allow integer suppression for integer-like values (no trailing decimals)
                 d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=False))
     return d
 
@@ -215,28 +228,6 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     </div>
     """
     st.markdown(badge_html, unsafe_allow_html=True)
-
-# -------------------------------
-# LOGO helper (added as requested)
-# -------------------------------
-LOGO_FILENAME = "GY_logo.jpg"
-DEFAULT_LOGO_WIDTH = 300
-
-def display_logo(width=DEFAULT_LOGO_WIDTH):
-    """
-    Display the Goodyear logo if present in the same folder as MEIO.py.
-    Keeps the same width across tabs for consistent appearance.
-    If image is missing, the function is silent (keeps layout).
-    """
-    if os.path.exists(LOGO_FILENAME):
-        try:
-            st.image(LOGO_FILENAME, use_column_width=False, width=width)
-        except Exception:
-            # fail silently to avoid breaking the app if image rendering fails
-            st.write("")
-    else:
-        # small spacer to keep layout similar if image missing
-        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
 # -------------------------------
 # SIDEBAR & FILES
@@ -410,10 +401,10 @@ if s_file and d_file and lt_file:
     # (ensure it starts with DEFAULT_PRODUCT_CHOICE and default location DEW1 when available)
     # -------------------------------
     with tab1:
-        # top row: left content / right logo
+        # top row: left content / right spacer (logo moved to header)
         top_left, top_right = st.columns([6,1])
         with top_right:
-            display_logo()
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
         with top_left:
             left, right = st.columns([3,1])
             with left:
@@ -464,10 +455,9 @@ if s_file and d_file and lt_file:
     # TAB 2: Network Topology
     # -------------------------------
     with tab2:
-        # top row: left content / right logo
         top_left, top_right = st.columns([6,1])
         with top_right:
-            display_logo()
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
         with top_left:
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
@@ -566,7 +556,7 @@ if s_file and d_file and lt_file:
     with tab3:
         top_left, top_right = st.columns([6,1])
         with top_right:
-            display_logo()
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
         with top_left:
             st.subheader("📋 Global Inventory Plan")
             col1, col2, col3 = st.columns(3)
@@ -611,7 +601,7 @@ if s_file and d_file and lt_file:
     with tab4:
         top_left, top_right = st.columns([6,1])
         with top_right:
-            display_logo()
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
         with top_left:
             st.subheader("⚖️ Efficiency & Policy Analysis")
             sku_default = default_product
@@ -646,7 +636,7 @@ if s_file and d_file and lt_file:
                 st.markdown("**Status Breakdown**"); st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
-                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True)
+                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), [...] )
 
     # -------------------------------
     # TAB 5: Forecast Accuracy (restored)
@@ -654,7 +644,7 @@ if s_file and d_file and lt_file:
     with tab5:
         top_left, top_right = st.columns([6,1])
         with top_right:
-            display_logo()
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
         with top_left:
             st.subheader("📉 Historical Forecast vs Actuals")
             h_sku_default = default_product
@@ -708,7 +698,7 @@ if s_file and d_file and lt_file:
                 c_net1, c_net2 = st.columns([3,1])
                 with c_net1:
                     if not net_table.empty:
-                        st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(), cols=['Network_Consumption','Network_Forecast_Hist'], two_decimals_cols=['Network_Consumption','Network_Forecast_Hist']), use_container_width=True)
+                        st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(), cols=['Network_Consumption','Network_Forecast_Hist'], two_decim[...] )
                     else:
                         st.write("No aggregated network history available for the chosen selection.")
                 with c_net2:
@@ -716,7 +706,7 @@ if s_file and d_file and lt_file:
                     st.metric("Network WAPE (%)", c_val)
 
     # -------------------------------
-    # Remaining tabs (Calculation Trace & By Material) left unchanged in logic
+    # Remaining tabs (Calculation Trace & By Material) left unchanged in logic except logo removal
     # -------------------------------
     # -------------------------------
     # TAB 6: Calculation Trace & Simulation (restored & enhanced)
@@ -726,7 +716,7 @@ if s_file and d_file and lt_file:
     with tab6:
         top_left, top_right = st.columns([6,1])
         with top_right:
-            display_logo()
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
         with top_left:
             st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
             st.write("See how changing service level or lead-time assumptions affects Method 5 safety stock. The scenario planning area below is collapsed by default.")
@@ -826,7 +816,7 @@ if s_file and d_file and lt_file:
                     display_comp = compare_df.copy()
                     display_comp['Simulated_SS'] = display_comp['Simulated_SS'].astype(float)
                     st.markdown("Scenario comparison (Simulated SS). 'Implemented' shows the final Safety_Stock after rules.")
-                    st.dataframe(df_format_for_display(display_comp[['Scenario','Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']].copy(), cols=['Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']), use_container_width=True)
+                    st.dataframe(df_format_for_display(display_comp[['Scenario','Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']].copy(), cols=['Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']), [...] )
 
                     fig_bar = go.Figure()
                     colors = px.colors.qualitative.Pastel
@@ -919,7 +909,7 @@ if s_file and d_file and lt_file:
     with tab7:
         top_left, top_right = st.columns([6,1])
         with top_right:
-            display_logo()
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
         with top_left:
             st.header("📦 View by Material (Single Material Focus + 8 Reasons for Inventory)")
             sel_prod_default = default_product
@@ -994,10 +984,10 @@ if s_file and d_file and lt_file:
                 fig_drv_raw.update_layout(title=f"{selected_product} — Raw Drivers (not SS-attribution)", xaxis_title="Driver", yaxis_title="Units", annotations=annotations_raw, height=420)
                 st.plotly_chart(fig_drv_raw, use_container_width=True)
                 st.markdown("Driver table (raw numbers and % of raw-sum)")
-                st.dataframe(df_format_for_display(drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2), cols=['Units','Pct_of_raw_sum']), use_container_width=True)
+                st.dataframe(df_format_for_display(drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2), cols=['Units','Pct_of_raw_sum']), us[...] )
 
                 # -------------------------------
-                # B. SS Attribution — waterfall with pastel colors
+                # B. SS Attribution ��� waterfall with pastel colors
                 # -------------------------------
                 st.markdown("---")
                 st.markdown("#### B. SS Attribution — Mutually exclusive components that SUM EXACTLY to Total Safety Stock")
@@ -1072,7 +1062,7 @@ if s_file and d_file and lt_file:
                 st.plotly_chart(fig_drv, use_container_width=True)
 
                 st.markdown("SS Attribution table (numbers and % of total SS)")
-                st.dataframe(df_format_for_display(ss_drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS']), use_container_width=True)
+                st.dataframe(df_format_for_display(ss_drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS'])[...])
 
                 # Bold grand totals summary for the displayed columns
                 grand_forecast = mat_period_df['Forecast'].sum()
@@ -1102,12 +1092,12 @@ if s_file and d_file and lt_file:
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
         top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
+        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=30[...] )
 
         st.markdown("---")
         st.subheader("Export — Material Snapshot")
         if not mat_period_df.empty:
-            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="text/csv")
+            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="[...]" )
         else:
             st.write("No snapshot available to download for this selection.")
 
