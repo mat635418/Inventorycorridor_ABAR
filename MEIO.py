@@ -37,13 +37,8 @@ def clean_numeric(series):
 
 def euro_format(x, always_two_decimals=True):
     """
-    Formatting helper. Modified to return integer-style formatting with no decimals
-    across the app per UI request: "every number in every tab needs to have no values after comma".
-    Zero-suppression: return empty string when value is (near) zero to keep UI clean.
+    Formatting helper. Zero-suppression: return empty string when value is (near) zero to keep UI clean.
     Still returns empty string for NaN/None.
-
-    Note: The parameter always_two_decimals is kept for backward compatibility but is ignored
-    because the UI requires no decimals everywhere.
     """
     try:
         if x is None:
@@ -63,10 +58,16 @@ def euro_format(x, always_two_decimals=True):
             return ""
         neg = xv < 0
         x_abs = abs(xv)
-        # Always round to nearest integer (no decimals)
-        s = f"{round(x_abs):,d}"
-        # European formatting (swap decimal/comma) — since we have no decimals, just replace thousands separator (comma) with dot
-        s = s.replace(',', '.')
+        if always_two_decimals:
+            s = f"{x_abs:,.2f}"
+        else:
+            # If value is effectively an integer, show no decimals; otherwise show two decimals
+            if math.isclose(x_abs, round(x_abs), rel_tol=1e-9):
+                s = f"{x_abs:,.0f}"
+            else:
+                s = f"{x_abs:,.2f}"
+        # European formatting (swap decimal/comma)
+        s = s.replace(',', 'X').replace('.', ',').replace('X', '.')
         return f"-{s}" if neg else s
     except Exception:
         return str(x)
@@ -77,8 +78,11 @@ def df_format_for_display(df, cols=None, two_decimals_cols=None):
         cols = [c for c in d.columns if d[c].dtype.kind in 'biufc']
     for c in cols:
         if c in d.columns:
-            # Regardless of two_decimals_cols, format to no decimals per UI requirement
-            d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=False))
+            if two_decimals_cols and c in two_decimals_cols:
+                d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=True))
+            else:
+                # Default: allow integer suppression for integer-like values (no trailing decimals)
+                d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=False))
     return d
 
 def hide_zero_rows(df, check_cols=None):
@@ -527,7 +531,7 @@ if s_file and d_file and lt_file:
                 from_used = (demand_lookup.get(from_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(from_n, {}).get('Forecast', 0) > 0)
                 to_used = (demand_lookup.get(to_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(to_n, {}).get('Forecast', 0) > 0)
                 edge_color = '#dddddd' if not from_used and not to_used else '#888888'
-                label = f"{int(round(r.get('Lead_Time_Days', 0) or 0))}d" if not pd.isna(r.get('Lead_Time_Days', 0)) else ""
+                label = f"{int(r.get('Lead_Time_Days', 0))}d" if not pd.isna(r.get('Lead_Time_Days', 0)) else ""
                 net.add_edge(from_n, to_n, label=label, color=edge_color)
 
             net.set_options("""
@@ -628,8 +632,7 @@ if s_file and d_file and lt_file:
             global_ratio = all_res['Safety_Stock'].sum() / all_res['Agg_Future_Demand'].replace(0, np.nan).sum() if not all_res.empty else 0
             render_selection_badge(product=sku, location=None, df_context=eff)
             m1, m2, m3 = st.columns(3)
-            # Show ratios as integer percentages (no decimals)
-            m1.metric(f"Network Ratio ({sku})", f"{sku_ratio*100:.0f}%"); m2.metric("Global Network Ratio (All Items)", f"{global_ratio*100:.0f}%")
+            m1.metric(f"Network Ratio ({sku})", f"{sku_ratio:.2f}"); m2.metric("Global Network Ratio (All Items)", f"{global_ratio:.2f}")
             m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
             st.markdown("---")
             c1, c2 = st.columns([2,1])
@@ -643,13 +646,11 @@ if s_file and d_file and lt_file:
                 st.markdown("**Status Breakdown**"); st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
-                # Format Safety_Stock with no decimals
-                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), [...]
+                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True)
 
     # -------------------------------
     # TAB 5: Forecast Accuracy (restored)
     # -------------------------------
-                             
     with tab5:
         top_left, top_right = st.columns([6,1])
         with top_right:
@@ -686,12 +687,11 @@ if s_file and d_file and lt_file:
                 if denom_consumption > 0:
                     wape_val = (hdf['Abs_Error'].sum() / denom_consumption * 100)
                     bias_val = (hdf['Deviation'].sum() / denom_consumption * 100)
-                    # Show as integer percentages (no decimals)
-                    k1.metric("WAPE (%)", f"{wape_val:.0f}%"); k2.metric("Bias (%)", f"{bias_val:.0f}%")
+                    k1.metric("WAPE (%)", f"{wape_val:.1f}"); k2.metric("Bias (%)", f"{bias_val:.1f}")
                 else:
                     k1.metric("WAPE (%)", "N/A"); k2.metric("Bias (%)", "N/A")
                 avg_acc = hdf['Accuracy_%'].mean() if not hdf['Accuracy_%'].isna().all() else np.nan
-                k3.metric("Avg Accuracy (%)", f"{avg_acc:.0f}%" if not np.isnan(avg_acc) else "N/A")
+                k3.metric("Avg Accuracy (%)", f"{avg_acc:.1f}" if not np.isnan(avg_acc) else "N/A")
 
                 fig_hist = go.Figure([go.Scatter(x=hdf['Period'], y=hdf['Consumption'], name='Actuals', line=dict(color='black')),
                                       go.Scatter(x=hdf['Period'], y=hdf['Forecast_Hist'], name='Forecast', line=dict(color='blue', dash='dot'))])
@@ -708,11 +708,11 @@ if s_file and d_file and lt_file:
                 c_net1, c_net2 = st.columns([3,1])
                 with c_net1:
                     if not net_table.empty:
-                        st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(), cols=['Network_Consumption','Network_Forecast_Hist'], two_decim[...]
+                        st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(), cols=['Network_Consumption','Network_Forecast_Hist'], two_decimals_cols=['Network_Consumption','Network_Forecast_Hist']), use_container_width=True)
                     else:
                         st.write("No aggregated network history available for the chosen selection.")
                 with c_net2:
-                    c_val = f"{net_wape:.0f}%" if not np.isnan(net_wape) else "N/A"
+                    c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                     st.metric("Network WAPE (%)", c_val)
 
     # -------------------------------
@@ -760,11 +760,10 @@ if s_file and d_file and lt_file:
                 st.markdown("---")
                 st.subheader("1. Frozen Inputs (current)")
                 i1, i2, i3, i4, i5 = st.columns(5)
-                # Show Service Level as integer percent and z rounded to no decimals per request
-                i1.metric("Service Level", f"{service_level*100:.0f}%", help=f"Z-Score: {z:.0f}")
+                i1.metric("Service Level", f"{service_level*100:.2f}%", help=f"Z-Score: {z:.4f}")
                 i2.metric("Network Demand (D, monthly)", euro_format(row['Agg_Future_Demand'], True), help="Aggregated Future Demand (monthly)")
                 i3.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True), help="Aggregated Historical Std Dev (monthly totals)")
-                i4.metric("Avg Lead Time (L)", f"{int(round(row['LT_Mean']))} days"); i5.metric("LT Std Dev (σ_L)", f"{int(round(row['LT_Std']))} days")
+                i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days"); i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
 
                 st.subheader("2. Statistical Calculation (Actual)")
                 term1_demand_var = (row['Agg_Std_Hist']**2 / float(days_per_month)) * row['LT_Mean']
@@ -784,7 +783,7 @@ if s_file and d_file and lt_file:
        = {euro_format(term1_demand_var + term2_supply_var, True)}
     4. Combined Std Dev = sqrt(Combined Variance)
        = {euro_format(combined_sd, True)}
-    5. Raw SS = {z:.0f} (Z-Score) * {euro_format(combined_sd, True)}
+    5. Raw SS = {z:.4f} (Z-Score) * {euro_format(combined_sd, True)}
        = {euro_format(raw_ss_calc, True)} units
     """)
                 st.info(f"🧮 **Resulting Statistical SS (Method 5):** {euro_format(raw_ss_calc, True)} units")
@@ -827,7 +826,7 @@ if s_file and d_file and lt_file:
                     display_comp = compare_df.copy()
                     display_comp['Simulated_SS'] = display_comp['Simulated_SS'].astype(float)
                     st.markdown("Scenario comparison (Simulated SS). 'Implemented' shows the final Safety_Stock after rules.")
-                    st.dataframe(df_format_for_display(display_comp[['Scenario','Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']].copy(), cols=['Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']), [...]
+                    st.dataframe(df_format_for_display(display_comp[['Scenario','Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']].copy(), cols=['Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']), use_container_width=True)
 
                     fig_bar = go.Figure()
                     colors = px.colors.qualitative.Pastel
@@ -995,7 +994,7 @@ if s_file and d_file and lt_file:
                 fig_drv_raw.update_layout(title=f"{selected_product} — Raw Drivers (not SS-attribution)", xaxis_title="Driver", yaxis_title="Units", annotations=annotations_raw, height=420)
                 st.plotly_chart(fig_drv_raw, use_container_width=True)
                 st.markdown("Driver table (raw numbers and % of raw-sum)")
-                st.dataframe(df_format_for_display(drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2), cols=['Units','Pct_of_raw_sum']), us[...]
+                st.dataframe(df_format_for_display(drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2), cols=['Units','Pct_of_raw_sum']), use_container_width=True)
 
                 # -------------------------------
                 # B. SS Attribution — waterfall with pastel colors
@@ -1063,7 +1062,7 @@ if s_file and d_file and lt_file:
                     measure=measures,
                     x=labels,
                     y=values,
-                    text=[f"{round(v):,d}" for v in ss_drv_df_display['amount'].tolist()] + [f"{round(total_ss):,d}"],
+                    text=[f"{v:,.0f}" for v in ss_drv_df_display['amount'].tolist()] + [f"{total_ss:,.0f}"],
                     connector={"line":{"color":"rgba(63,63,63,0.25)"}},
                     decreasing=dict(marker=dict(color=pastel_dec)),
                     increasing=dict(marker=dict(color=pastel_inc)),
@@ -1073,7 +1072,8 @@ if s_file and d_file and lt_file:
                 st.plotly_chart(fig_drv, use_container_width=True)
 
                 st.markdown("SS Attribution table (numbers and % of total SS)")
-                st.dataframe(df_format_for_display(ss_drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS'])[...]
+                st.dataframe(df_format_for_display(ss_drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS']), use_container_width=True)
+
                 # Bold grand totals summary for the displayed columns
                 grand_forecast = mat_period_df['Forecast'].sum()
                 grand_net = mat_period_df['Agg_Future_Demand'].sum()
@@ -1102,9 +1102,14 @@ if s_file and d_file and lt_file:
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
         top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=30[...]
+        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
 
-
+        st.markdown("---")
+        st.subheader("Export — Material Snapshot")
+        if not mat_period_df.empty:
+            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="text/csv")
+        else:
+            st.write("No snapshot available to download for this selection.")
 
 else:
     st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
