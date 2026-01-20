@@ -1,11 +1,5 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — JAN 2026
-# Modified: move logo above title + rewrite Safety Stock engine (Jan 2026)
-# Modified: Fix duplicated filter in last tab, unify badge column width to 15%, ensure multiselect chips use consistent blue styling (Jan 2026)
-# Modified: Remove stray placeholder tokens that caused SyntaxError (Jan 2026)
-# Modified: Improve network aggregation to sum downstream (transitive) demand/variance so total network demand always adds up (Feb 2026)
-# Modified: Move logo from top of page to right-side badge; make title the top element; bump version to 0.75; restrict filters to meaningful materials/locations (Jan 2026)
-# Modified: Standardize filter labels to MATERIAL / LOCATION / PERIOD and show logo before parameters at 1.5x size (Feb 2026)
 
 import streamlit as st
 import pandas as pd
@@ -28,10 +22,10 @@ st.set_page_config(page_title="MEIO for RM", layout="wide")
 
 # Logo filename (will be shown above the right-side filters / badge).
 LOGO_FILENAME = "GY_logo.jpg"
-LOGO_BASE_WIDTH = 120  # previous size; we'll scale by 1.5 where requested
+LOGO_BASE_WIDTH = 160  # previous size; we'll scale by 1.5 where requested
 
 # Title is the top page element. Version bumped to 0.75
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.75 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.76 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # -------------------------------
 # UI ADJUSTMENTS (styling)
@@ -127,7 +121,19 @@ def hide_zero_rows(df, check_cols=None):
     except Exception:
         return df
 
-def aggregate_network_stats(df_forecast, df_stats, df_lt):
+def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1.0):
+    """
+    Aggregates network demand and variances.
+
+    Parameters:
+    - transitive: if True, include full downstream subtree (recursive). If False, include only direct children.
+    - rho: variance damping factor in [0,1]; 1.0 = full additive variance, <1 dampens downstream variance contribution.
+
+    Returns:
+    - DataFrame with columns Product, Location, Period, Agg_Future_Demand, Agg_Std_Hist
+    - reachable_map: dict keyed by (product, start_location) -> set(of reachable locations including start)
+      (used by LT averaging option)
+    """
     results = []
     months = df_forecast['Period'].unique()
     products = df_forecast['Product'].unique()
@@ -137,6 +143,8 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
             routes_by_product[prod] = df_lt[df_lt['Product'] == prod].copy()
     else:
         routes_by_product[None] = df_lt.copy()
+
+    reachable_map = {}
 
     for month in months:
         df_month = df_forecast[df_forecast['Period'] == month]
@@ -160,7 +168,16 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
                         continue
                     children.setdefault(f, set()).add(t)
             reachable_cache = {}
+
             def get_reachable(start):
+                # If not transitive, only direct children
+                if not transitive:
+                    direct = children.get(start, set())
+                    # include start for downstream computations convenience
+                    outset = set(direct)
+                    outset.add(start)
+                    return outset
+
                 if start in reachable_cache:
                     return reachable_cache[start]
                 visited = set()
@@ -172,20 +189,32 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
                         if k not in visited and k != start:
                             visited.add(k)
                             stack.append(k)
-                reachable_cache[start] = visited
-                return visited
+                # include start itself for convenience (so subtree includes node)
+                visited_with_start = set(visited)
+                visited_with_start.add(start)
+                reachable_cache[start] = visited_with_start
+                return visited_with_start
 
             for n in nodes:
-                local_fcst = float(p_fore.get(n, {'Forecast': 0})['Forecast']) if n in p_fore else 0.0
                 reachable = get_reachable(n)
+                # store as key for use later (product, location)
+                reachable_map[(prod, n, month)] = reachable
+
+                # local forecast (direct)
+                local_fcst = float(p_fore.get(n, {'Forecast': 0})['Forecast']) if n in p_fore else 0.0
+
+                # aggregate future demand: local + downstream (direct or transitive depending on param)
                 child_fcst_sum = 0.0
                 child_var_sum = 0.0
                 for c in reachable:
+                    if c == n:
+                        continue
                     child_fcst = float(p_fore.get(c, {'Forecast': 0})['Forecast']) if c in p_fore else 0.0
                     child_fcst_sum += child_fcst
                     child_std = p_stats.get(c, {}).get('Local_Std', np.nan)
                     if not pd.isna(child_std):
-                        child_var_sum += float(child_std) ** 2
+                        child_var_sum += (float(child_std) ** 2) * float(rho)
+
                 agg_demand = local_fcst + child_fcst_sum
                 local_std = p_stats.get(n, {}).get('Local_Std', np.nan)
                 local_var = 0.0 if pd.isna(local_std) else float(local_std) ** 2
@@ -198,7 +227,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
                     'Agg_Future_Demand': agg_demand,
                     'Agg_Std_Hist': agg_std
                 })
-    return pd.DataFrame(results)
+    return pd.DataFrame(results), reachable_map
 
 # New tiny helper: render logo above parameters (1.5x width as requested)
 def render_logo_above_parameters(scale=1.5):
@@ -286,6 +315,25 @@ apply_cap = st.sidebar.checkbox("Enable SS Capping (% of Network Demand)", value
 cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200),
                               help="Ensures SS stays between these % of total network demand for that node.")
 st.sidebar.markdown("---")
+
+# NEW: Aggregation / variance / LT / conversion controls
+st.sidebar.subheader("⚙️ Aggregation & Uncertainty Controls")
+agg_mode = st.sidebar.selectbox("Network Aggregation Mode", ["Transitive (full downstream)", "Direct children only"], index=0)
+use_transitive = True if agg_mode.startswith("Transitive") else False
+
+var_rho = st.sidebar.slider("Variance damping factor (ρ)", 0.0, 1.0, 1.0,
+                            help="Lower values damp downstream variance aggregation (0=no downstream variance, 1=full variance add).")
+
+lt_mode = st.sidebar.selectbox("Lead-time variance handling", ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"], index=0)
+conversion_mode = st.sidebar.selectbox("Conversion Mode", ["Strict daily conversion", "Monthly-scale for LT term"], index=0)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔁 Comparison")
+comparison_mode = st.sidebar.checkbox("Enable comparison mode (alternative configuration)", value=False)
+if comparison_mode:
+    st.sidebar.markdown("Comparison configuration: Alternative scenario uses direct aggregation, ρ=0.6, ignores LT variance and uses monthly scale for LT-term (for quick comparison).")
+st.sidebar.markdown("---")
+
 st.sidebar.subheader("📂 Data Sources (CSV)")
 DEFAULT_FILES = {"sales": "sales.csv", "demand": "demand.csv", "lt": "leadtime.csv"}
 s_upload = st.sidebar.file_uploader("1. Sales Data (Historical: sales.csv)", type="csv")
@@ -304,6 +352,113 @@ if lt_file: st.sidebar.success(f"✅ Lead Time Loaded: {getattr(lt_file,'name', 
 DEFAULT_PRODUCT_CHOICE = "NOKANDO2"
 DEFAULT_LOCATION_CHOICE = "DEW1"
 CURRENT_MONTH_TS = pd.Timestamp.now().to_period('M').to_timestamp()
+
+def run_pipeline(transitive, rho, lt_mode_param, conversion_mode_param):
+    """
+    Run the aggregation -> stats -> SS pipeline with the provided parameters.
+    Returns final results DataFrame (with Safety_Stock and related columns) and reachable_map.
+    """
+    network_stats, reachable_map = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt, transitive=transitive, rho=rho)
+    node_lt_local = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
+    node_lt_local.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
+
+    res = pd.merge(network_stats, df_d[['Product', 'Location', 'Period', 'Forecast']], on=['Product', 'Location', 'Period'], how='left')
+    res = pd.merge(res, node_lt_local, on=['Product', 'Location'], how='left')
+    res = res.fillna({'Forecast': 0, 'Agg_Std_Hist': np.nan, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
+    product_median_localstd = stats.groupby('Product')['Local_Std'].median().to_dict()
+    res['Agg_Std_Hist'] = res.apply(lambda r: product_median_localstd.get(r['Product'], global_median_std) if pd.isna(r['Agg_Std_Hist']) else r['Agg_Std_Hist'], axis=1)
+
+    # Ensure numeric types
+    res['Agg_Std_Hist'] = res['Agg_Std_Hist'].astype(float)
+    res['LT_Mean'] = res['LT_Mean'].astype(float)
+    res['LT_Std'] = res['LT_Std'].astype(float)
+    res['Agg_Future_Demand'] = res['Agg_Future_Demand'].astype(float)
+    res['Forecast'] = res['Forecast'].astype(float)
+
+    # Daily conversions
+    res['Sigma_D_Day'] = res['Agg_Std_Hist'] / np.sqrt(float(days_per_month))
+    res['D_day'] = res['Agg_Future_Demand'] / float(days_per_month)
+    res['Var_D_Day'] = res['Sigma_D_Day']**2
+
+    # Low-demand floor behaviour kept
+    low_demand_monthly_threshold = 20.0
+    low_mask = res['Agg_Future_Demand'] < low_demand_monthly_threshold
+    res.loc[low_mask, 'Var_D_Day'] = res.loc[low_mask, 'Var_D_Day'].where(res.loc[low_mask, 'Var_D_Day'] >= res.loc[low_mask, 'D_day'], res.loc[low_mask, 'D_day'])
+
+    # demand component
+    demand_component = res['Var_D_Day'] * res['LT_Mean']
+
+    # LT component - conditional per mode & conversion mode
+    lt_component_list = []
+    for idx, row in res.iterrows():
+        d_month = float(row['Agg_Future_Demand'])
+        d_day = float(row['D_day'])
+        # choose D_for_LT according to conversion_mode_param
+        if conversion_mode_param == 'Monthly-scale for LT term':
+            D_for_LT = d_month
+        else:
+            D_for_LT = d_day
+
+        if lt_mode_param == 'Ignore LT variance':
+            lt_comp = 0.0
+        elif lt_mode_param == 'Apply LT variance':
+            lt_comp = (float(row['LT_Std'])**2) * (D_for_LT**2)
+        elif lt_mode_param == 'Average LT Std across downstream':
+            # compute reachable set (product, location, period key)
+            reachable = reachable_map.get((row['Product'], row['Location'], row['Period']), set())
+            # include the node itself
+            if not reachable:
+                lt_used = float(row['LT_Std'])
+            else:
+                # compute mean LT_Std across reachable nodes (map to node_lt_local)
+                vals = []
+                for rn in reachable:
+                    match = node_lt_local[(node_lt_local['Product'] == row['Product']) & (node_lt_local['Location'] == rn)]
+                    if not match.empty:
+                        vals.append(float(match['LT_Std'].iloc[0]))
+                if len(vals) == 0:
+                    lt_used = float(row['LT_Std'])
+                else:
+                    lt_used = float(np.mean(vals))
+            lt_comp = (lt_used**2) * (D_for_LT**2)
+        else:
+            lt_comp = (float(row['LT_Std'])**2) * (D_for_LT**2)
+
+        lt_component_list.append(lt_comp)
+
+    res['lt_component'] = np.array(lt_component_list)
+
+    combined_variance = demand_component + res['lt_component']
+    combined_variance = combined_variance.clip(lower=0)
+    res['SS_stat'] = z * np.sqrt(combined_variance)
+    min_floor_fraction_of_LT_demand = 0.01
+    res['Mean_Demand_LT'] = res['D_day'] * res['LT_Mean']
+    res['SS_floor'] = res['Mean_Demand_LT'] * min_floor_fraction_of_LT_demand
+    res['Pre_Rule_SS'] = res[['SS_stat', 'SS_floor']].max(axis=1)
+    res['Adjustment_Status'] = 'Optimal (Statistical)'
+    res['Safety_Stock'] = res['Pre_Rule_SS']
+
+    if zero_if_no_net_fcst:
+        zero_mask = (res['Agg_Future_Demand'] <= 0)
+        res.loc[zero_mask, 'Adjustment_Status'] = 'Forced to Zero'
+        res.loc[zero_mask, 'Safety_Stock'] = 0.0
+
+    res['Pre_Cap_SS'] = res['Safety_Stock']
+    if apply_cap:
+        l_cap, u_cap = cap_range[0]/100.0, cap_range[1]/100.0
+        l_lim = res['Agg_Future_Demand'] * l_cap
+        u_lim = res['Agg_Future_Demand'] * u_cap
+        high_mask = (res['Safety_Stock'] > u_lim) & (res['Adjustment_Status'] == 'Optimal (Statistical)')
+        low_mask = (res['Safety_Stock'] < l_lim) & (res['Adjustment_Status'] == 'Optimal (Statistical)') & (res['Agg_Future_Demand'] > 0)
+        res.loc[high_mask, 'Adjustment_Status'] = 'Capped (High)'
+        res.loc[low_mask, 'Adjustment_Status'] = 'Capped (Low)'
+        res['Safety_Stock'] = res['Safety_Stock'].clip(lower=l_lim, upper=u_lim)
+    res['Safety_Stock'] = res['Safety_Stock'].round(0)
+    # keep B616 override behavior
+    res.loc[res['Location'] == 'B616', 'Safety_Stock'] = 0
+    res['Max_Corridor'] = res['Safety_Stock'] + res['Forecast']
+
+    return res, reachable_map
 
 if s_file and d_file and lt_file:
     try:
@@ -348,59 +503,27 @@ if s_file and d_file and lt_file:
         return pm if not pd.isna(pm) else global_median_std
     stats['Local_Std'] = stats.apply(fill_local_std, axis=1)
 
-    # ONE-LEVEL aggregation replaced by transitive aggregation to prevent underestimation
-    network_stats = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt)
-    node_lt = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
-    node_lt.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
+    # Run base pipeline with user-selected params
+    results, reachable_map = run_pipeline(transitive=use_transitive, rho=var_rho, lt_mode_param=lt_mode, conversion_mode_param=conversion_mode)
 
-    results = pd.merge(network_stats, df_d[['Product', 'Location', 'Period', 'Forecast']], on=['Product', 'Location', 'Period'], how='left')
-    results = pd.merge(results, node_lt, on=['Product', 'Location'], how='left')
-    results = results.fillna({'Forecast': 0, 'Agg_Std_Hist': np.nan, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
-    product_median_localstd = stats.groupby('Product')['Local_Std'].median().to_dict()
-    results['Agg_Std_Hist'] = results.apply(lambda r: product_median_localstd.get(r['Product'], global_median_std) if pd.isna(r['Agg_Std_Hist']) else r['Agg_Std_Hist'], axis=1)
+    # If comparison mode is enabled, compute alternative scenario
+    if comparison_mode:
+        alt_results, alt_reachable_map = run_pipeline(transitive=False, rho=0.6,
+                                                      lt_mode_param='Ignore LT variance',
+                                                      conversion_mode_param='Monthly-scale for LT term')
+        # prepare summary metrics
+        total_ss_base = results['Safety_Stock'].sum()
+        total_ss_alt = alt_results['Safety_Stock'].sum()
+        total_delta = total_ss_base - total_ss_alt
 
-    # -------------------------------
-    # NEW SAFETY-STOCK ENGINE (unchanged from previous safe implementation)
-    # -------------------------------
-    results['Agg_Std_Hist'] = results['Agg_Std_Hist'].astype(float)
-    results['LT_Mean'] = results['LT_Mean'].astype(float)
-    results['LT_Std'] = results['LT_Std'].astype(float)
-    results['Agg_Future_Demand'] = results['Agg_Future_Demand'].astype(float)
-    results['Forecast'] = results['Forecast'].astype(float)
-    results['Sigma_D_Day'] = results['Agg_Std_Hist'] / np.sqrt(float(days_per_month))
-    results['D_day'] = results['Agg_Future_Demand'] / float(days_per_month)
-    results['Var_D_Day'] = results['Sigma_D_Day']**2
-    low_demand_monthly_threshold = 20.0
-    low_mask = results['Agg_Future_Demand'] < low_demand_monthly_threshold
-    results.loc[low_mask, 'Var_D_Day'] = results.loc[low_mask, 'Var_D_Day'].where(results.loc[low_mask, 'Var_D_Day'] >= results.loc[low_mask, 'D_day'], results.loc[low_mask, 'D_day'])
-    demand_component = results['Var_D_Day'] * results['LT_Mean']
-    lt_component = (results['LT_Std']**2) * (results['D_day']**2)
-    combined_variance = demand_component + lt_component
-    combined_variance = combined_variance.clip(lower=0)
-    results['SS_stat'] = z * np.sqrt(combined_variance)
-    min_floor_fraction_of_LT_demand = 0.01
-    results['Mean_Demand_LT'] = results['D_day'] * results['LT_Mean']
-    results['SS_floor'] = results['Mean_Demand_LT'] * min_floor_fraction_of_LT_demand
-    results['Pre_Rule_SS'] = results[['SS_stat', 'SS_floor']].max(axis=1)
-    results['Adjustment_Status'] = 'Optimal (Statistical)'
-    results['Safety_Stock'] = results['Pre_Rule_SS']
-    if zero_if_no_net_fcst:
-        zero_mask = (results['Agg_Future_Demand'] <= 0)
-        results.loc[zero_mask, 'Adjustment_Status'] = 'Forced to Zero'
-        results.loc[zero_mask, 'Safety_Stock'] = 0.0
-    results['Pre_Cap_SS'] = results['Safety_Stock']
-    if apply_cap:
-        l_cap, u_cap = cap_range[0]/100.0, cap_range[1]/100.0
-        l_lim = results['Agg_Future_Demand'] * l_cap
-        u_lim = results['Agg_Future_Demand'] * u_cap
-        high_mask = (results['Safety_Stock'] > u_lim) & (results['Adjustment_Status'] == 'Optimal (Statistical)')
-        low_mask = (results['Safety_Stock'] < l_lim) & (results['Adjustment_Status'] == 'Optimal (Statistical)') & (results['Agg_Future_Demand'] > 0)
-        results.loc[high_mask, 'Adjustment_Status'] = 'Capped (High)'
-        results.loc[low_mask, 'Adjustment_Status'] = 'Capped (Low)'
-        results['Safety_Stock'] = results['Safety_Stock'].clip(lower=l_lim, upper=u_lim)
-    results['Safety_Stock'] = results['Safety_Stock'].round(0)
-    results.loc[results['Location'] == 'B616', 'Safety_Stock'] = 0
-    results['Max_Corridor'] = results['Safety_Stock'] + results['Forecast']
+        # attach alt safety stock to main results for convenience (merge on Product, Location, Period)
+        alt_trim = alt_results[['Product','Location','Period','Safety_Stock']].rename(columns={'Safety_Stock':'Safety_Stock_alt'})
+        results = results.merge(alt_trim, on=['Product','Location','Period'], how='left')
+        results['Safety_Stock_alt'] = results['Safety_Stock_alt'].fillna(0)
+        results['Delta_SS'] = results['Safety_Stock'] - results['Safety_Stock_alt']
+    else:
+        results['Safety_Stock_alt'] = np.nan
+        results['Delta_SS'] = np.nan
 
     # Historical accuracy
     hist = df_s[['Product', 'Location', 'Period', 'Consumption', 'Forecast']].copy()
@@ -639,8 +762,23 @@ if s_file and d_file and lt_file:
             filtered_display = hide_zero_rows(filtered)
 
             display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
-            disp = df_format_for_display(filtered_display[display_cols].copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock','Max_Corridor'], two_decimals_cols=['Forecast'])
+            if comparison_mode:
+                # include alternative SS and delta
+                display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Safety_Stock_alt','Delta_SS','Adjustment_Status','Max_Corridor']
+
+            disp = df_format_for_display(filtered_display[display_cols].copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock','Safety_Stock_alt','Delta_SS','Max_Corridor'], two_decimals_cols=['Forecast'])
             st.dataframe(disp, use_container_width=True, height=700)
+
+            # If comparison is enabled show quick totals
+            if comparison_mode:
+                c1, c2, c3 = st.columns(3)
+                base_total = filtered['Safety_Stock'].sum()
+                alt_total = filtered['Safety_Stock_alt'].sum()
+                delta_total = base_total - alt_total
+                c1.metric("Total SS (current)", euro_format(base_total, True))
+                c2.metric("Total SS (alternative)", euro_format(alt_total, True))
+                c3.metric("Δ Total SS", euro_format(delta_total, True))
+
             csv_buf = filtered[display_cols].to_csv(index=False)
             st.download_button("📥 Download Filtered Plan (CSV)", data=csv_buf, file_name="filtered_plan.csv", mime="text/csv")
 
@@ -844,7 +982,7 @@ if s_file and d_file and lt_file:
                 term2_supply_var = (float(row['LT_Std'])**2) * (d_day**2)
                 combined_sd = math.sqrt(max(term1_demand_var + term2_supply_var, 0.0))
                 raw_ss_calc = float(norm.ppf(service_level)) * combined_sd
-                ss_floor = (d_day * float(row['LT_Mean'])) * min_floor_fraction_of_LT_demand
+                ss_floor = (d_day * float(row['LT_Mean'])) * 0.01
 
                 st.latex(r"SS = Z \times \sqrt{\sigma_D^2 \cdot L \;+\; \sigma_L^2 \cdot D^2}")
                 st.markdown("Where σ_D and D are daily values (converted from monthly inputs in the dataset).")
@@ -887,7 +1025,7 @@ if s_file and d_file and lt_file:
                         if row['Agg_Future_Demand'] < 20.0:
                             var_d = max(var_d, d_day)
                         sc_ss = sc_z * math.sqrt(var_d * sc['LT_mean'] + (sc['LT_std']**2) * (d_day**2))
-                        sc_floor = (d_day * sc['LT_mean']) * min_floor_fraction_of_LT_demand
+                        sc_floor = (d_day * sc['LT_mean']) * 0.01
                         sc_ss = max(sc_ss, sc_floor)
                         scen_rows.append({
                             'Scenario': f"S{idx+1}",
@@ -1177,6 +1315,9 @@ if s_file and d_file and lt_file:
             st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=filename, mime="text/csv")
         else:
             st.write("No snapshot available to download for this selection.")
+
+else:
+    st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
 
 else:
     st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
