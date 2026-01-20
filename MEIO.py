@@ -191,13 +191,11 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
 
 def render_selection_badge(product=None, location=None, df_context=None, small=False):
     """
-    Renders selection badge (blue box). Shows three key figures:
-      - Local Demand (sum of local forecast(s))
-      - Total Demand (aggregated network demand used in SS calc: local + direct downstream one-level)
-      - Safety Stock (final Safety_Stock after rules)
-
-    Small-font explanation removed per request.
-    Uses components.html to reliably render the HTML in an iframe (avoids partial escaping issues).
+    Renders selection badge (blue box).
+    Layout requested:
+      - In a separated yellow/golden box (inside the blue box) show ONLY Safety Stock.
+      - Below that show two key figures side-by-side: Local Demand and Total Network Demand.
+    Uses components.html to reliably render HTML.
     """
     if product is None or product == "":
         return
@@ -213,42 +211,48 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
                     return 0.0
         return 0.0
 
-    # Local Demand: prefer Forecast (future), fall back to Forecast_Hist where appropriate
+    # Calculate values
     local_demand = _sum_candidates(df_context, ['Forecast', 'Forecast_Hist'])
-    # Total Demand: aggregated future demand used in SS calc
     total_demand = _sum_candidates(df_context, ['Agg_Future_Demand'])
-    # Safety Stock: final safety stock (after zero/cap rules)
     total_ss = _sum_candidates(df_context, ['Safety_Stock'])
 
-    badge_html = f"""
-    <div style="background:#0b3d91;padding:16px;border-radius:8px;color:white;max-width:100%;">
-      <div style="font-size:11px;opacity:0.9;margin-bottom:6px;">Selected</div>
-      <div style="font-size:14px;font-weight:700;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{product}{(' — ' + location) if location else ''}</div>
+    title = f"{product}{(' — ' + location) if location else ''}"
 
+    badge_html = f"""
+    <div style="background:#0b3d91;padding:16px;border-radius:8px;color:white;max-width:100%;font-family:Arial,Helvetica,sans-serif;">
+      <div style="font-size:11px;opacity:0.9;margin-bottom:6px;">Selected</div>
+      <div style="font-size:14px;font-weight:700;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title}</div>
+
+      <!-- Golden safety-stock box (full width inside blue box) -->
+      <div style="background:#FFC107;color:#0b3d91;padding:10px;border-radius:6px;min-width:100%;margin-bottom:12px;display:flex;justify-content:flex-start;align-items:center;">
+        <div style="flex:1;">
+          <div style="font-size:11px;opacity:0.95;font-weight:600;">Safety Stock</div>
+        </div>
+        <div style="min-width:140px;text-align:right;">
+          <div style="font-size:16px;font-weight:800;">{euro_format(total_ss)}</div>
+        </div>
+      </div>
+
+      <!-- Two key figures below: Local Demand + Total Network Demand -->
       <div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;">
-        <div style="background:#e3f2fd;color:#0b3d91;padding:10px;border-radius:6px;min-width:150px;">
+        <div style="background:#e3f2fd;color:#0b3d91;padding:10px;border-radius:6px;min-width:150px;flex:1;">
           <div style="font-size:10px;opacity:0.85">Local Demand</div>
           <div style="font-size:13px;font-weight:700">{euro_format(local_demand)}</div>
         </div>
 
-        <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;min-width:150px;">
-          <div style="font-size:10px;opacity:0.85">Total Demand</div>
+        <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;min-width:150px;flex:1;">
+          <div style="font-size:10px;opacity:0.85">Total Network Demand</div>
           <div style="font-size:13px;font-weight:700">{euro_format(total_demand)}</div>
-        </div>
-
-        <div style="background:#1565c0;color:white;padding:10px;border-radius:6px;min-width:150px;">
-          <div style="font-size:10px;opacity:0.95">Safety Stock</div>
-          <div style="font-size:13px;font-weight:700">{euro_format(total_ss)}</div>
         </div>
       </div>
     </div>
     """
 
-    # Use components.html for robust HTML rendering. Height tuned to content; adjust if needed.
+    # Use components.html to ensure the HTML renders correctly.
     try:
-        components.html(badge_html, height=140, scrolling=False)
+        # height may be tweaked if the box content wraps; 170 is usually sufficient
+        components.html(badge_html, height=170, scrolling=False)
     except Exception:
-        # fallback to markdown with unsafe HTML if components isn't available
         st.markdown(badge_html, unsafe_allow_html=True)
 
 # -------------------------------
