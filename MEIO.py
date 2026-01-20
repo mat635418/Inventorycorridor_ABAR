@@ -1,5 +1,6 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — JAN 2026
+# Revised Jan 2026 — Syntax fixes, truncated key fixes, duplicate else removal, minor robustness improvements.
 
 import streamlit as st
 import pandas as pd
@@ -24,7 +25,7 @@ st.set_page_config(page_title="MEIO for RM", layout="wide")
 LOGO_FILENAME = "GY_logo.jpg"
 LOGO_BASE_WIDTH = 160  # previous size; we'll scale by 1.5 where requested
 
-# Title is the top page element. Version bumped to 0.75
+# Title is the top page element. Version bumped to 0.76
 st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.76 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # -------------------------------
@@ -66,7 +67,11 @@ def clean_numeric(series):
     s = series.astype(str).str.strip()
     s = s.replace({'': np.nan, '-': np.nan, '—': np.nan, 'na': np.nan, 'n/a': np.nan, 'None': np.nan})
     paren_mask = s.str.startswith('(') & s.str.endswith(')')
-    s.loc[paren_mask] = '-' + s.loc[paren_mask].str[1:-1]
+    try:
+        s.loc[paren_mask] = '-' + s.loc[paren_mask].str[1:-1]
+    except Exception:
+        # fallback safe replace if indexing fails
+        s = s.apply(lambda v: ('-' + v[1:-1]) if isinstance(v, str) and v.startswith('(') and v.endswith(')') else v)
     s = s.str.replace(',', '', regex=False).str.replace(' ', '', regex=False)
     s = s.str.replace(r'[^\d\.\-]+', '', regex=True)
     out = pd.to_numeric(s, errors='coerce')
@@ -131,7 +136,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
 
     Returns:
     - DataFrame with columns Product, Location, Period, Agg_Future_Demand, Agg_Std_Hist
-    - reachable_map: dict keyed by (product, start_location) -> set(of reachable locations including start)
+    - reachable_map: dict keyed by (product, start_location, period) -> set(of reachable locations including start)
       (used by LT averaging option)
     """
     results = []
@@ -170,10 +175,9 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
             reachable_cache = {}
 
             def get_reachable(start):
-                # If not transitive, only direct children
+                # If not transitive, only direct children (plus start)
                 if not transitive:
                     direct = children.get(start, set())
-                    # include start for downstream computations convenience
                     outset = set(direct)
                     outset.add(start)
                     return outset
@@ -189,7 +193,6 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
                         if k not in visited and k != start:
                             visited.add(k)
                             stack.append(k)
-                # include start itself for convenience (so subtree includes node)
                 visited_with_start = set(visited)
                 visited_with_start.add(start)
                 reachable_cache[start] = visited_with_start
@@ -197,7 +200,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
 
             for n in nodes:
                 reachable = get_reachable(n)
-                # store as key for use later (product, location)
+                # store as key for use later (product, location, period)
                 reachable_map[(prod, n, month)] = reachable
 
                 # local forecast (direct)
@@ -766,7 +769,9 @@ if s_file and d_file and lt_file:
                 # include alternative SS and delta
                 display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Safety_Stock_alt','Delta_SS','Adjustment_Status','Max_Corridor']
 
-            disp = df_format_for_display(filtered_display[display_cols].copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock','Safety_Stock_alt','Delta_SS','Max_Corridor'], two_decimals_cols=['Forecast'])
+            # Prepare formatting columns (ensure they exist)
+            fmt_cols = [c for c in ['Forecast','Agg_Future_Demand','Safety_Stock','Safety_Stock_alt','Delta_SS','Max_Corridor'] if c in filtered_display.columns]
+            disp = df_format_for_display(filtered_display[display_cols].copy(), cols=fmt_cols, two_decimals_cols=fmt_cols)
             st.dataframe(disp, use_container_width=True, height=700)
 
             # If comparison is enabled show quick totals
@@ -804,7 +809,7 @@ if s_file and d_file and lt_file:
             else:
                 eff_period = st.selectbox("PERIOD", [CURRENT_MONTH_TS], index=0, key="eff_period")
 
-            render_selection_badge(product=sku, location=None, df_context=results[(results['Product']==sku)&(results['Period']==eff_period)])
+            render_selection_badge(product=sku, location=None, df_context=results[(results['Product'] == sku)&(results['Period'] == eff_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
@@ -1011,9 +1016,10 @@ if s_file and d_file and lt_file:
                     scenarios = []
                     for s in range(n_scen):
                         with st.expander(f"Scenario {s+1} inputs", expanded=False):
-                            sc_sl = st.slider(f"Scenario {s+1} Service Level (%)", 50.0, 99.9, float(service_level*100 if s==0 else min(99.9, service_level*100 + 0.5*s)), key=f"sc_sl_{s}")
-                            sc_lt = st.slider(f"Scenario {s+1} Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2 or 30.0), value=float(row['LT_Mean'] if s==0 else row['LT_Mean']), key=f"sc_lt_{s}")
-                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2 or 10.0), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_lt_std_{s}")
+                            sc_sl_default = float(service_level*100) if s==0 else min(99.9, float(service_level*100) + 0.5*s)
+                            sc_sl = st.slider(f"Scenario {s+1} Service Level (%)", 50.0, 99.9, sc_sl_default, key=f"sc_sl_{s}")
+                            sc_lt = st.slider(f"Scenario {s+1} Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2), value=float(row['LT_Mean'] if s==0 else row['LT_Mean']), key=f"sc_lt_{s}")
+                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_lt_std_{s}")
                             scenarios.append({'SL_pct': sc_sl, 'LT_mean': sc_lt, 'LT_std': sc_lt_std})
 
                     scen_rows = []
@@ -1315,9 +1321,6 @@ if s_file and d_file and lt_file:
             st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=filename, mime="text/csv")
         else:
             st.write("No snapshot available to download for this selection.")
-
-else:
-    st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
 
 else:
     st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
