@@ -1103,12 +1103,7 @@ if s_file and d_file and lt_file:
         top_nodes_display = hide_zero_rows(top_nodes)
         st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=30[...]
 
-        st.markdown("---")
-        st.subheader("Export — Material Snapshot")
-        if not mat_period_df.empty:
-            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="[...])
-        else:
-            st.write("No snapshot available to download for this selection.")
+
 
 else:
     st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
