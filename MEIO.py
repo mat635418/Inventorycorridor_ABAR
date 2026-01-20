@@ -2,6 +2,7 @@
 # Developed by mat635418 — JAN 2026
 # Modified: move logo above title + rewrite Safety Stock engine (Jan 2026)
 # Modified: Fix duplicated filter in last tab, unify badge column width to 15%, ensure multiselect chips use consistent blue styling (Jan 2026)
+# Modified: Remove stray placeholder tokens that caused SyntaxError (Jan 2026)
 
 import streamlit as st
 import pandas as pd
@@ -726,7 +727,7 @@ if s_file and d_file and lt_file:
                 st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
-                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), [...]
+                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True)
 
     # -------------------------------
     # TAB 5: Forecast Accuracy
@@ -936,11 +937,7 @@ if s_file and d_file and lt_file:
                     ss_curve = []
                     for slev in sl_range:
                         zz = norm.ppf(slev/100.0)
-                        val = zz * math.sqrt(
-                            (float(row['Agg_Std_Hist'])**2 / float(days_per_month)) / float(days_per_month) * sel_lt
-                            if False else 0.0
-                        )
-                        # The above branch was a placeholder in original logic; use the new engine:
+                        # Use the new engine:
                         sigma_d_day = float(row['Agg_Std_Hist']) / math.sqrt(float(days_per_month))
                         d_day = float(row['Agg_Future_Demand']) / float(days_per_month)
                         var_d = sigma_d_day**2
@@ -1210,7 +1207,7 @@ if s_file and d_file and lt_file:
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
         top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=40[...]
+        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=400)
 
         st.markdown("---")
         st.subheader("Export — Material Snapshot")
