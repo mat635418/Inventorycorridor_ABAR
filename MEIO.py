@@ -143,21 +143,12 @@ def hide_zero_rows(df, check_cols=None):
     except Exception:
         return df
 
-def aggregate_network_stats(df_forecast, df_stats, df_lt, max_depth=5):
+def aggregate_network_stats(df_forecast, df_stats, df_lt):
     """
-    Recursive aggregation up to `max_depth` levels:
-
-    For each Product, Month and Node:
-      - Agg_Future_Demand = sum of Forecast for the node + all downstream nodes
-        reachable by following From_Location -> To_Location edges up to `max_depth` steps.
-      - Agg_Std_Hist = sqrt(sum of variances (Local_Std^2) for the node and all included downstream nodes)
-
-    Notes:
-      - This performs a breadth-first traversal from each node and collects unique downstream nodes
-        to avoid double-counting (cycles are prevented by tracking visited nodes).
-      - Aggregation is per product (routes are product-specific where provided).
-      - If a Product column does not exist in df_lt, routes are treated as product-agnostic.
-      - The function returns a DataFrame with columns: Product, Location, Period, Agg_Future_Demand, Agg_Std_Hist
+    ONE-LEVEL aggregation to match Excel logic:
+    - Agg_Future_Demand = local_forecast + sum(local_forecast of direct children (one-level only))
+    - Agg_Std_Hist = sqrt(local_var + sum(child_local_var))  (child local variance included once)
+    No recursive propagation beyond direct children. This prevents double-counting at hubs.
     """
     results = []
     months = df_forecast['Period'].unique()
@@ -171,22 +162,12 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, max_depth=5):
     else:
         routes_by_product[None] = df_lt.copy()
 
-    # Build stats lookup per product -> location -> stats
-    stats_by_product = {}
-    # Stats has columns: Product, Location, Local_Mean, Local_Std
-    for prod in pd.concat([pd.Series(products), pd.Series([None])]).unique():
-        stats_by_product[prod] = stats_lookup = {}
-    # But simpler: we'll index per product when needed from df_stats, below.
-
     for month in months:
         df_month = df_forecast[df_forecast['Period'] == month]
         for prod in products:
-            # stats for this product
             p_stats = df_stats[df_stats['Product'] == prod].set_index('Location').to_dict('index')
-            # forecast map for this product/month
             p_fore = df_month[df_month['Product'] == prod].set_index('Location').to_dict('index')
-            # routes for this product (if not found, fall back to product-agnostic routes)
-            p_lt = routes_by_product.get(prod, routes_by_product.get(None, pd.DataFrame(columns=df_lt.columns)))
+            p_lt = routes_by_product.get(prod, pd.DataFrame(columns=df_lt.columns))
 
             # Nodes are union of forecast locations and any from/to in routes
             nodes = set(df_month[df_month['Product'] == prod]['Location'])
@@ -196,44 +177,33 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, max_depth=5):
             if not nodes:
                 continue
 
-            # Map direct children adjacency (product-specific)
+            # Map direct children (one-level)
             children = {}
             if not p_lt.empty:
                 for _, r in p_lt.iterrows():
                     children.setdefault(r['From_Location'], []).append(r['To_Location'])
 
-            # For each node, perform BFS up to max_depth collecting unique downstream nodes (including self)
             for n in nodes:
-                visited = set()
-                queue = [(n, 0)]
-                agg_demand = 0.0
-                agg_var_sum = 0.0  # sum of variances (std^2)
+                # local forecast
+                local_fcst = float(p_fore.get(n, {'Forecast': 0})['Forecast']) if n in p_fore else 0.0
+                # direct children forecasts (one-level only)
+                direct_children = children.get(n, [])
+                child_fcst_sum = 0.0
+                child_var_sum = 0.0
+                for c in direct_children:
+                    child_fcst = float(p_fore.get(c, {'Forecast': 0})['Forecast']) if c in p_fore else 0.0
+                    child_fcst_sum += child_fcst
+                    child_std = p_stats.get(c, {}).get('Local_Std', np.nan)
+                    if not pd.isna(child_std):
+                        child_var_sum += float(child_std)**2
 
-                while queue:
-                    cur, depth = queue.pop(0)
-                    if cur in visited:
-                        continue
-                    visited.add(cur)
+                agg_demand = local_fcst + child_fcst_sum
 
-                    # add forecast for cur (if present in this product/month)
-                    cur_fcst = float(p_fore.get(cur, {'Forecast': 0})['Forecast']) if cur in p_fore else 0.0
-                    agg_demand += cur_fcst
-
-                    # add variance for cur (if known)
-                    cur_std = p_stats.get(cur, {}).get('Local_Std', np.nan)
-                    if not pd.isna(cur_std):
-                        try:
-                            agg_var_sum += float(cur_std) ** 2
-                        except Exception:
-                            pass
-
-                    # enqueue children if depth < max_depth
-                    if depth < max_depth:
-                        for c in children.get(cur, []):
-                            if c not in visited:
-                                queue.append((c, depth + 1))
-
-                agg_std = np.sqrt(agg_var_sum) if agg_var_sum >= 0 else np.nan
+                # local variance + sum(child variances) -> agg std
+                local_std = p_stats.get(n, {}).get('Local_Std', np.nan)
+                local_var = 0.0 if pd.isna(local_std) else float(local_std)**2
+                total_var = local_var + child_var_sum
+                agg_std = np.sqrt(total_var) if total_var >= 0 and (not pd.isna(total_var)) else np.nan
 
                 results.append({
                     'Product': prod,
@@ -391,8 +361,8 @@ if s_file and d_file and lt_file:
         return pm if not pd.isna(pm) else global_median_std
     stats['Local_Std'] = stats.apply(fill_local_std, axis=1)
 
-    # RECURSIVE aggregation up to 5-levels to capture multi-echelon exposure.
-    network_stats = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt, max_depth=5)
+    # ONE-LEVEL aggregation to prevent recursive double-counting
+    network_stats = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt)
     node_lt = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
     node_lt.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
 
@@ -725,7 +695,7 @@ if s_file and d_file and lt_file:
                 st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
-                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), [...]
+                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True)
 
     # -------------------------------
     # TAB 5: Forecast Accuracy
@@ -1183,9 +1153,14 @@ if s_file and d_file and lt_file:
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
         top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=30[...]
+        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
 
-
+        st.markdown("---")
+        st.subheader("Export — Material Snapshot")
+        if not mat_period_df.empty:
+            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="text/csv")
+        else:
+            st.write("No snapshot available to download for this selection.")
 
 else:
     st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
