@@ -197,7 +197,7 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
       - Safety Stock (final Safety_Stock after rules)
 
     Small-font explanation removed per request.
-    Defensive to accept either 'Forecast' or 'Forecast_Hist' and missing columns.
+    Uses components.html to reliably render the HTML in an iframe (avoids partial escaping issues).
     """
     if product is None or product == "":
         return
@@ -243,7 +243,13 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
       </div>
     </div>
     """
-    st.markdown(badge_html, unsafe_allow_html=True)
+
+    # Use components.html for robust HTML rendering. Height tuned to content; adjust if needed.
+    try:
+        components.html(badge_html, height=140, scrolling=False)
+    except Exception:
+        # fallback to markdown with unsafe HTML if components isn't available
+        st.markdown(badge_html, unsafe_allow_html=True)
 
 # -------------------------------
 # SIDEBAR & FILES
