@@ -219,7 +219,7 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
 # -------------------------------
 # LOGO helper (added as requested)
 # -------------------------------
-LOGO_FILENAME = "goodyear_logo.png"
+LOGO_FILENAME = "GY_logo.jpg"
 DEFAULT_LOGO_WIDTH = 220
 
 def display_logo(width=DEFAULT_LOGO_WIDTH):
