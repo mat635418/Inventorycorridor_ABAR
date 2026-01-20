@@ -636,7 +636,7 @@ if s_file and d_file and lt_file:
                 st.markdown("**Status Breakdown**"); st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
-                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), [...] )
+                st.dataframe(df_format_for_display(eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10), cols=['Safety_Stock'], two_decimals_cols=['Safety_Stock']), use_container_width=True)
 
     # -------------------------------
     # TAB 5: Forecast Accuracy (restored)
@@ -698,7 +698,10 @@ if s_file and d_file and lt_file:
                 c_net1, c_net2 = st.columns([3,1])
                 with c_net1:
                     if not net_table.empty:
-                        st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(), cols=['Network_Consumption','Network_Forecast_Hist'], two_decim[...] )
+                        st.dataframe(df_format_for_display(net_table[['Period', 'Network_Consumption', 'Network_Forecast_Hist']].copy(),
+                                                          cols=['Network_Consumption','Network_Forecast_Hist'],
+                                                          two_decimals_cols=['Network_Consumption','Network_Forecast_Hist']),
+                                     use_container_width=True)
                     else:
                         st.write("No aggregated network history available for the chosen selection.")
                 with c_net2:
@@ -816,7 +819,10 @@ if s_file and d_file and lt_file:
                     display_comp = compare_df.copy()
                     display_comp['Simulated_SS'] = display_comp['Simulated_SS'].astype(float)
                     st.markdown("Scenario comparison (Simulated SS). 'Implemented' shows the final Safety_Stock after rules.")
-                    st.dataframe(df_format_for_display(display_comp[['Scenario','Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']].copy(), cols=['Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']), [...] )
+                    st.dataframe(df_format_for_display(display_comp[['Scenario','Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS']].copy(),
+                                                      cols=['Service_Level_%','LT_mean_days','LT_std_days','Simulated_SS'],
+                                                      two_decimals_cols=['Service_Level_%','Simulated_SS']),
+                                 use_container_width=True)
 
                     fig_bar = go.Figure()
                     colors = px.colors.qualitative.Pastel
@@ -984,10 +990,13 @@ if s_file and d_file and lt_file:
                 fig_drv_raw.update_layout(title=f"{selected_product} — Raw Drivers (not SS-attribution)", xaxis_title="Driver", yaxis_title="Units", annotations=annotations_raw, height=420)
                 st.plotly_chart(fig_drv_raw, use_container_width=True)
                 st.markdown("Driver table (raw numbers and % of raw-sum)")
-                st.dataframe(df_format_for_display(drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2), cols=['Units','Pct_of_raw_sum']), us[...] )
+                st.dataframe(df_format_for_display(drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_raw_sum'}).round(2),
+                                                  cols=['Units','Pct_of_raw_sum'],
+                                                  two_decimals_cols=['Pct_of_raw_sum']),
+                             use_container_width=True)
 
                 # -------------------------------
-                # B. SS Attribution ��� waterfall with pastel colors
+                # B. SS Attribution — waterfall with pastel colors
                 # -------------------------------
                 st.markdown("---")
                 st.markdown("#### B. SS Attribution — Mutually exclusive components that SUM EXACTLY to Total Safety Stock")
@@ -1062,7 +1071,10 @@ if s_file and d_file and lt_file:
                 st.plotly_chart(fig_drv, use_container_width=True)
 
                 st.markdown("SS Attribution table (numbers and % of total SS)")
-                st.dataframe(df_format_for_display(ss_drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2), cols=['Units','Pct_of_total_SS'])[...])
+                st.dataframe(df_format_for_display(ss_drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2),
+                                                  cols=['Units','Pct_of_total_SS'],
+                                                  two_decimals_cols=['Pct_of_total_SS']),
+                             use_container_width=True)
 
                 # Bold grand totals summary for the displayed columns
                 grand_forecast = mat_period_df['Forecast'].sum()
@@ -1092,12 +1104,12 @@ if s_file and d_file and lt_file:
         st.subheader("Top Locations by Safety Stock (snapshot)")
         top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
         top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=30[...] )
+        st.dataframe(df_format_for_display(top_nodes_display.head(25).copy(), cols=['Forecast','Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Forecast']), use_container_width=True, height=300)
 
         st.markdown("---")
         st.subheader("Export — Material Snapshot")
         if not mat_period_df.empty:
-            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="[...]" )
+            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=f"material_{selected_product}_{selected_period.strftime('%Y-%m')}.csv", mime="text/csv")
         else:
             st.write("No snapshot available to download for this selection.")
 
