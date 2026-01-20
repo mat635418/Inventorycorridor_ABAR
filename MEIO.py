@@ -196,8 +196,7 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
       - Total Demand (aggregated network demand used in SS calc: local + direct downstream one-level)
       - Safety Stock (final Safety_Stock after rules)
 
-    Also includes a small-font explanation of how each metric is calculated.
-
+    Small-font explanation removed per request.
     Defensive to accept either 'Forecast' or 'Forecast_Hist' and missing columns.
     """
     if product is None or product == "":
@@ -221,14 +220,6 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     # Safety Stock: final safety stock (after zero/cap rules)
     total_ss = _sum_candidates(df_context, ['Safety_Stock'])
 
-    # Small explanatory text (kept compact)
-    explanation = (
-        "Calculations: "
-        "Local Demand = sum(local forecasts); "
-        "Total Demand = local + direct downstream (one-level) forecasts used for network aggregation; "
-        "Safety Stock = Method 5 statistical SS (demand+LT variance), then zero-suppression and cap rules applied."
-    )
-
     badge_html = f"""
     <div style="background:#0b3d91;padding:16px;border-radius:8px;color:white;max-width:100%;">
       <div style="font-size:11px;opacity:0.9;margin-bottom:6px;">Selected</div>
@@ -249,10 +240,6 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
           <div style="font-size:10px;opacity:0.95">Safety Stock</div>
           <div style="font-size:13px;font-weight:700">{euro_format(total_ss)}</div>
         </div>
-      </div>
-
-      <div style="margin-top:10px;font-size:11px;opacity:0.9;color:#e6f2ff;">
-        <small>{explanation}</small>
       </div>
     </div>
     """
