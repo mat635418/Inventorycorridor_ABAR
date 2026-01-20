@@ -3,6 +3,7 @@
 # Modified: move logo above title + rewrite Safety Stock engine (Jan 2026)
 # Modified: Fix duplicated filter in last tab, unify badge column width to 15%, ensure multiselect chips use consistent blue styling (Jan 2026)
 # Modified: Remove stray placeholder tokens that caused SyntaxError (Jan 2026)
+# Modified: Improve network aggregation to sum downstream (transitive) demand/variance so total network demand always adds up (Feb 2026)
 
 import streamlit as st
 import pandas as pd
@@ -151,10 +152,21 @@ def hide_zero_rows(df, check_cols=None):
 
 def aggregate_network_stats(df_forecast, df_stats, df_lt):
     """
-    ONE-LEVEL aggregation to match Excel logic:
-    - Agg_Future_Demand = local_forecast + sum(local_forecast of direct children (one-level only))
-    - Agg_Std_Hist = sqrt(local_var + sum(child_local_var))  (child local variance included once)
-    No recursive propagation beyond direct children. This prevents double-counting at hubs.
+    Improved aggregation to ensure total network demand at a node = local forecast + sum of forecasts
+    of all downstream nodes (transitive closure), avoiding double-counting.
+
+    Rationale for change:
+    - The previous implementation only summed direct children (one-level). In multi-echelon networks
+      where demand flows across multiple hops, that underestimates the total network demand seen at
+      upstream nodes (e.g., LUEX in your example).
+    - This function now computes, per product and period, for each node:
+        Agg_Future_Demand = local_forecast + sum(local_forecast of all reachable downstream nodes)
+      and
+        Agg_Std_Hist = sqrt( local_var + sum(child_local_var for all reachable downstream nodes) )
+    - We avoid double-counting by visiting each downstream node at most once per source node.
+    - We also handle missing forecasts (treated as zero) and missing std (kept as NaN and can be filled later).
+    - This is still non-recursive in the sense of not propagating previously-aggregated agg-std values (we sum raw local variances),
+      which avoids cascading double-counts across multiple aggregation stages.
     """
     results = []
     months = df_forecast['Period'].unique()
@@ -171,43 +183,78 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt):
     for month in months:
         df_month = df_forecast[df_forecast['Period'] == month]
         for prod in products:
+            # stats for product -> dict of {location: {'Local_Mean':..., 'Local_Std':...}}
             p_stats = df_stats[df_stats['Product'] == prod].set_index('Location').to_dict('index')
+            # forecasts for product and month -> dict of {location: {'Forecast': ...}}
             p_fore = df_month[df_month['Product'] == prod].set_index('Location').to_dict('index')
             p_lt = routes_by_product.get(prod, pd.DataFrame(columns=df_lt.columns))
 
             # Nodes are union of forecast locations and any from/to in routes
             nodes = set(df_month[df_month['Product'] == prod]['Location'])
             if not p_lt.empty:
-                nodes = nodes.union(set(p_lt.get('From_Location', pd.Series([])))).union(set(p_lt.get('To_Location', pd.Series([]))))
+                # p_lt.get returns a Series; ensure values are extracted correctly
+                froms = set([v for v in p_lt['From_Location'].tolist() if pd.notna(v)])
+                tos = set([v for v in p_lt['To_Location'].tolist() if pd.notna(v)])
+                nodes = nodes.union(froms).union(tos)
 
             if not nodes:
                 continue
 
-            # Map direct children (one-level)
+            # Build adjacency: children[from_node] = set(of to_nodes)
             children = {}
             if not p_lt.empty:
                 for _, r in p_lt.iterrows():
-                    children.setdefault(r['From_Location'], []).append(r['To_Location'])
+                    f = r.get('From_Location', None)
+                    t = r.get('To_Location', None)
+                    if pd.isna(f) or pd.isna(t):
+                        continue
+                    children.setdefault(f, set()).add(t)
+
+            # Memoization cache for reachable downstream nodes per node
+            reachable_cache = {}
+
+            def get_reachable(start):
+                """
+                Return set of downstream nodes reachable from 'start' following edges From->To.
+                Does not include 'start' itself. Uses DFS and memoization.
+                """
+                if start in reachable_cache:
+                    return reachable_cache[start]
+                visited = set()
+                stack = [start]
+                # We don't include start in visited result; we only record downstream nodes.
+                while stack:
+                    cur = stack.pop()
+                    kids = children.get(cur, set())
+                    for k in kids:
+                        if k not in visited and k != start:
+                            visited.add(k)
+                            stack.append(k)
+                reachable_cache[start] = visited
+                return visited
 
             for n in nodes:
-                # local forecast
+                # local forecast for this product/month at this node (0 if missing)
                 local_fcst = float(p_fore.get(n, {'Forecast': 0})['Forecast']) if n in p_fore else 0.0
-                # direct children forecasts (one-level only)
-                direct_children = children.get(n, [])
+
+                # compute reachable downstream nodes and sum their forecasts
+                reachable = get_reachable(n)
                 child_fcst_sum = 0.0
                 child_var_sum = 0.0
-                for c in direct_children:
+                for c in reachable:
+                    # sum forecast (0 if missing)
                     child_fcst = float(p_fore.get(c, {'Forecast': 0})['Forecast']) if c in p_fore else 0.0
                     child_fcst_sum += child_fcst
+                    # sum variance: if Local_Std available in p_stats use it (std^2), else skip (NaN)
                     child_std = p_stats.get(c, {}).get('Local_Std', np.nan)
                     if not pd.isna(child_std):
-                        child_var_sum += float(child_std)**2
+                        child_var_sum += float(child_std) ** 2
 
                 agg_demand = local_fcst + child_fcst_sum
 
-                # local variance + sum(child variances) -> agg std
+                # local variance
                 local_std = p_stats.get(n, {}).get('Local_Std', np.nan)
-                local_var = 0.0 if pd.isna(local_std) else float(local_std)**2
+                local_var = 0.0 if pd.isna(local_std) else float(local_std) ** 2
                 total_var = local_var + child_var_sum
                 agg_std = np.sqrt(total_var) if total_var >= 0 and (not pd.isna(total_var)) else np.nan
 
@@ -359,7 +406,7 @@ if s_file and d_file and lt_file:
         return pm if not pd.isna(pm) else global_median_std
     stats['Local_Std'] = stats.apply(fill_local_std, axis=1)
 
-    # ONE-LEVEL aggregation to prevent recursive double-counting
+    # ONE-LEVEL aggregation replaced by transitive aggregation to prevent underestimation
     network_stats = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt)
     node_lt = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
     node_lt.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
@@ -470,7 +517,6 @@ if s_file and d_file and lt_file:
         return DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in locs else (locs[0] if locs else "")
     all_periods = sorted(results['Period'].unique().tolist())
     default_period = CURRENT_MONTH_TS if CURRENT_MONTH_TS in all_periods else (all_periods[-1] if all_periods else None)
-
     # TABS
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📈 Inventory Corridor",
