@@ -745,9 +745,17 @@ if s_file and d_file and lt_file:
             plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
             # create DataFrame covering all periods (even if zeros)
             df_all_periods = pd.DataFrame({'Period': all_periods})
-            plot_full = pd.merge(df_all_periods, plot_df[['Period','Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']], on='Period', how='left')
+            plot_full = pd.merge(
+                df_all_periods,
+                plot_df[['Period', 'Max_Corridor', 'Safety_Stock', 'Forecast', 'Agg_Future_Internal', 'Agg_Future_External']],
+                on='Period',
+                how='left'
+            )
+
             # fill missing with zeros so months with no data are shown explicitly
-            plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_Ex[...]
+            plot_full[['Max_Corridor', 'Safety_Stock', 'Forecast', 'Agg_Future_Internal', 'Agg_Future_External']] = (
+                plot_full[['Max_Corridor', 'Safety_Stock', 'Forecast', 'Agg_Future_Internal', 'Agg_Future_External']].fillna(0)
+            )
 
             # New: Allow toggling Max Corridor visibility (default OFF)
             show_max_corridor = st.checkbox("Show Max Corridor", value=False, key="show_max_corridor")
@@ -817,10 +825,10 @@ if s_file and d_file and lt_file:
 
             demand_lookup = {}
             for n in all_nodes:
-                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': np.nan})
+                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': 0})
 
             for n in sorted(all_nodes):
-                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': np.nan})
+                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': 0})
                 # Node considered 'used' visually if any of the metrics are > 0
                 used = (float(m.get('Agg_Future_External', 0)) > 0) or (float(m.get('Forecast', 0)) > 0)
 
@@ -991,8 +999,8 @@ if s_file and d_file and lt_file:
 
             filtered_display = hide_zero_rows(filtered)
 
-            display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Adjustment_Status','Ma[...]
-            fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Max_Corridor'] if c in filtered_display.colu[...]
+            display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Adjustment_Status','Max_Corridor']
+            fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
 
             # Removed the "TOTAL" header row above the table as requested (no totals in Tab 3)
 
@@ -1486,7 +1494,7 @@ if s_file and d_file and lt_file:
                 mat['LT_Mean'] = mat['LT_Mean'].fillna(0); mat['LT_Std'] = mat['LT_Std'].fillna(0)
                 mat['Agg_Std_Hist'] = mat['Agg_Std_Hist'].fillna(0); mat['Pre_Rule_SS'] = mat['Pre_Rule_SS'].fillna(0)
                 mat['Safety_Stock'] = mat['Safety_Stock'].fillna(0); mat['Forecast'] = mat['Forecast'].fillna(0)
-                mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0); mat['Agg_Future_Internal'] = mat['Agg_Future_Internal'].fillna(0); mat['Agg_Future_External'] = mat['Agg_Future_External'...]
+                mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0); mat['Agg_Future_Internal'] = mat['Agg_Future_Internal'].fillna(0); mat['Agg_Future_External'] = mat['Agg_Future_External'].fillna(0)
                 mat['D_day'] = mat['D_day'].fillna(0); mat['Days_Covered_by_SS'] = mat['Days_Covered_by_SS'].fillna(0)
 
                 mat['term1'] = (mat['Agg_Std_Hist']**2 / float(days_per_month)) * mat['LT_Mean']
