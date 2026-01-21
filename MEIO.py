@@ -340,7 +340,7 @@ with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=False):
         help="Lower and upper bounds (as % of total network demand) applied to Safety Stock. For example, 0–200% allows SS up to twice the node's network demand."
     )
 
-with st.sidebar.expander("⚙️ Aggregation & Uncertainty Controls", expanded=False):
+with st.sidebar.expander("⚙️ Aggregation & Uncertainty", expanded=False):
     # Controls for how downstream demand/variance and lead-time variance are handled.
     agg_mode = st.selectbox(
         "Network Aggregation Mode",
