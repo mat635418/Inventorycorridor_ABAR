@@ -542,6 +542,15 @@ def run_pipeline(df_d, stats, df_lt, service_level,
         nodes = prod_to_nodes.get(p, set())
         prod_distances[p] = compute_hop_distances_for_product(p_routes, nodes)
 
+    # ========== Apply fixed overrides for special nodes ==========
+    # Ensure the three special nodes always report the requested hops.
+    special_hops = {'B616': 4, 'BEEX': 3, 'LUEX': 2}
+    for p, distances in prod_distances.items():
+        for node, fixed_hop in special_hops.items():
+            # set/override regardless of computed distances so diagnostics always show these fixed values
+            distances[node] = int(fixed_hop)
+    # ==============================================================
+
     # Prepare per-product diagnostics summary (fixed mapping)
     product_tiering_params = {}
     for p, distances in prod_distances.items():
@@ -1224,7 +1233,12 @@ if s_file and d_file and lt_file:
                 </div>
                 """
                 st.markdown("**Applied Hop → Service Level mapping (highlight shows which row was used for this node):**")
-                st.markdown(table_html, unsafe_allow_html=True)
+                # Use components.html to ensure the HTML table is rendered (avoids Markdown escaping in some envs)
+                try:
+                    components.html(table_html, height=180)
+                except Exception:
+                    # fallback to markdown (legacy)
+                    st.markdown(table_html, unsafe_allow_html=True)
 
                 # Highlight the exact values used for the calculation in a compact summary box
                 # Build HTML summary with key inputs and highlight
