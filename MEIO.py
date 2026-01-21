@@ -310,9 +310,10 @@ def period_label(ts):
         return str(ts)
 
 # ----------------------
-# SIDEBAR: collapsible sections (all collapsed by default except Data Sources)
+# SIDEBAR: collapsible sections
 # ----------------------
 
+# Make the first two expanders visible (expanded) by default; remove the third and move its controls into the second.
 with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
     service_level = st.slider(
         "Service Level (%)",
@@ -321,10 +322,14 @@ with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
         99.0,
         help="Target probability of not stocking out. Higher values increase the Z-score and therefore Safety Stock — reduces stockouts but raises inventory holdings."
     ) / 100
-    # keep z for backward compatibility but prefer computing local z where needed
     z = norm.ppf(service_level)
 
 with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
+    # Extended explanation:
+    # - zero_if_no_net_fcst: when enabled, nodes with zero aggregated network demand are forced to have 0 Safety Stock.
+    #   This avoids retaining inventory at inactive or decommissioned nodes.
+    # - apply_cap + cap_range: allow business to limit extreme statistical SS values by clipping the computed SS
+    #   within a configurable percentage of node's total network demand (e.g., 0–200%).
     zero_if_no_net_fcst = st.checkbox(
         "Force Zero SS if No Network Demand",
         value=True,
@@ -341,6 +346,32 @@ with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
         500,
         (0, 200),
         help="Lower and upper bounds (as % of total network demand) applied to Safety Stock. For example, 0–200% allows SS up to twice the node's network demand."
+    )
+
+    st.markdown("---")
+    # Moved aggregation & uncertainty controls here so the left sidebar has only two expanders.
+    st.subheader("Aggregation & Uncertainty")
+    agg_mode = st.selectbox(
+        "Network Aggregation Mode",
+        ["Transitive (full downstream)", "Direct children only"],
+        index=0,
+        help="Choose how downstream demand is aggregated: 'Transitive' includes all downstream nodes recursively; 'Direct' uses only immediate children."
+    )
+    use_transitive = True if agg_mode.startswith("Transitive") else False
+
+    var_rho = st.slider(
+        "Variance damping factor (ρ)",
+        0.0,
+        1.0,
+        1.0,
+        help="Scales how much downstream nodes' variance contributes to a parent's variance (0 = ignore downstream variance; 1 = full add)."
+    )
+
+    lt_mode = st.selectbox(
+        "Lead-time variance handling",
+        ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"],
+        index=0,
+        help="How lead-time uncertainty is included: 'Apply LT variance' uses each node's lead-time variance; 'Ignore LT variance' omits lead-time uncertainty from the SS calculation; 'Average LT Std across downstream' computes the mean LT std across reachable downstream nodes and uses that."
     )
 
 st.sidebar.markdown("---")
