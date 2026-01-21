@@ -1171,7 +1171,37 @@ if s_file and d_file and lt_file:
                 - If D == 0 and zero suppression rule is enabled -> Safety_Stock = 0
                 - Explicit overrides (e.g., specific locations such as B616) may force 0
                 """)
+                # add some vertical space for clarity before the checks
+                st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
+                # Shadowed separator
+                st.markdown("""<div style="height:12px;background:#f0f0f2;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.07);margin:12px 0;"></div>""", unsafe_allow_html=True)
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("**Zero Demand Rule**")
+                    if zero_if_no_net_fcst and row['Agg_Future_Demand'] <= 0:
+                        st.error("❌ Network Demand is 0. SS Forced to 0.")
+                    else:
+                        st.success("✅ Network Demand exists. Keep Statistical SS.")
+                with c2:
+                    st.markdown("**Capping (Min/Max) Diagnostics**")
+                    if apply_cap:
+                        lower_limit = row['Agg_Future_Demand'] * (cap_range[0]/100)
+                        upper_limit = row['Agg_Future_Demand'] * (cap_range[1]/100)
+                        st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
+                        st.write(f"Lower limit = Agg_Future_Demand * {cap_range[0]}% = {euro_format(lower_limit, True)}")
+                        st.write(f"Upper limit = Agg_Future_Demand * {cap_range[1]}% = {euro_format(upper_limit, True)}")
+                        if raw_ss_calc > upper_limit:
+                            st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) > Max Cap ({euro_format(upper_limit, True)}). Capping downwards to {euro_format(upper_limit, True)}.")
+                        elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
+                            st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) < Min Cap ({euro_format(lower_limit, True)}). Raising to {euro_format(lower_limit, True)}.")
+                        else:
+                            st.success("✅ Raw SS is within caps (no capping applied).")
+                    else:
+                        st.write("Capping logic disabled.")
+
+    
     # TAB 7: By Material
     with tab7:
         col_main, col_badge = st.columns([17, 3])
