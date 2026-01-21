@@ -369,7 +369,7 @@ with st.sidebar.expander("⚙️ Aggregation & Uncertainty", expanded=False):
         "Lead-time variance handling",
         ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"],
         index=0,
-        help="How lead-time uncertainty is included: 'Apply' uses each node's LT variance; 'Ignore' omits LT variance from SS; 'Average' uses the mean LT Std of downstream nodes to smooth local LT noi[...]
+        help="How lead-time uncertainty is included: 'Apply LT variance' uses each node's lead-time variance; 'Ignore LT variance' omits lead-time uncertainty from the SS calculation; 'Average LT Std across downstream' uses the mean downstream LT std to smooth local LT uncertainty."
     )
 
 st.sidebar.markdown("---")
@@ -728,7 +728,7 @@ if s_file and d_file and lt_file:
                         bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
 
                 # consistent naming: LDD (Local Direct Demand), TND (Total Network Demand), SS (Safety Stock)
-                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), [...]
+                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}"
                 # pyvis expects newline as '\n'
                 lbl = lbl.replace("\\n", "\n")
                 net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
@@ -1094,8 +1094,8 @@ if s_file and d_file and lt_file:
                         with st.expander(f"Scenario {s+1} inputs", expanded=False):
                             sc_sl_default = float(service_level*100) if s==0 else min(99.9, float(service_level*100) + 0.5*s)
                             sc_sl = st.slider(f"Scenario {s+1} Service Level (%)", 50.0, 99.9, sc_sl_default, key=f"sc_sl_{s}")
-                            sc_lt = st.slider(f"Scenario {s+1} Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2), value=float(row['LT_Mean'] if s==0 else row['LT_Mean']), key=f"sc_lt_{s}"[...]
-                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_lt_std_{s[...]
+                            sc_lt = st.slider(f"Scenario {s+1} Service Level Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2), value=float(row['LT_Mean'] if s==0 else row['LT_Mean']), key=f"sc_lt_{s}")
+                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_lt_std_{s}")
                             scenarios.append({'SL_pct': sc_sl, 'LT_mean': sc_lt, 'LT_std': sc_lt_std})
 
                     scen_rows = []
