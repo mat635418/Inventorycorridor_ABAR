@@ -1,8 +1,6 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
-# Developed by mat635418 — JAN 2026
-# Revised 2026-01-20 — UI adjustments: fixed days_per_month to 30 (removed widget),
-# removed Conversion Mode and Comparison sections, and updated badge layout so the three
-# key figures are full-width inside the blue selection box. Additional small robustness fixes.
+# Developed by mat635418 — Jan 2026
+# Revised 2026-01-20 — UI adjustments and robustness fixes.
 
 import streamlit as st
 import pandas as pd
@@ -18,34 +16,22 @@ from io import StringIO
 from datetime import datetime
 import re
 
-# -------------------------------
-# PAGE CONFIG
-# -------------------------------
 st.set_page_config(page_title="MEIO for RM", layout="wide")
 
-# Logo filename (will be shown above the right-side filters / badge).
+# Logo configuration
 LOGO_FILENAME = "GY_logo.jpg"
-LOGO_BASE_WIDTH = 160  # previous size; we'll scale by 1.5 where requested
+LOGO_BASE_WIDTH = 160
 
-# Fixed conversion: use 30 days/month (widget removed from sidebar)
+# Fixed conversion (30 days/month)
 days_per_month = 30
 
-# Title is the top page element. Version bumped to 0.76
 st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.76 — Jan 2026</h1>", unsafe_allow_html=True)
 
-# -------------------------------
-# UI ADJUSTMENTS (styling)
-# -------------------------------
-# Make multiselect selected chips match the softer blue style used elsewhere.
+# Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
     """
     <style>
-      /* Style selected chips (multiselect tags) to match app blue theme */
-      div[data-baseweb="tag"],
-      div[data-baseweb="tag"][data-state],
-      div[data-baseweb="tag"][data-state="danger"],
-      .stMultiSelect div[data-baseweb="tag"],
-      .stSelectbox div[data-baseweb="tag"] {
+      div[data-baseweb="tag"], .stMultiSelect div[data-baseweb="tag"], .stSelectbox div[data-baseweb="tag"] {
         background: #e3f2fd !important;
         color: #0b3d91 !important;
         border: 1px solid #90caf9 !important;
@@ -53,21 +39,16 @@ st.markdown(
         padding: 2px 8px !important;
         font-weight: 600 !important;
       }
-      div[data-baseweb="tag"] span, div[data-baseweb="tag"] > div,
-      .stMultiSelect div[data-baseweb="tag"] span,
-      .stSelectbox div[data-baseweb="tag"] span {
+      div[data-baseweb="tag"] span, .stMultiSelect div[data-baseweb="tag"] span, .stSelectbox div[data-baseweb="tag"] span {
         color: #0b3d91 !important;
       }
-      /* Ensure the 'x' icon in tags has the right color */
       div[data-baseweb="tag"] svg, .stMultiSelect div[data-baseweb="tag"] svg, .stSelectbox div[data-baseweb="tag"] svg { fill: #0b3d91 !important; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# -------------------------------
-# HELPERS / FORMATTING
-# -------------------------------
+# Helpers / formatting utilities
 def clean_numeric(series):
     s = series.astype(str).str.strip()
     s = s.replace({'': np.nan, '-': np.nan, '—': np.nan, 'na': np.nan, 'n/a': np.nan, 'None': np.nan})
@@ -75,7 +56,6 @@ def clean_numeric(series):
     try:
         s.loc[paren_mask] = '-' + s.loc[paren_mask].str[1:-1]
     except Exception:
-        # fallback safe replace if indexing fails
         s = s.apply(lambda v: ('-' + v[1:-1]) if isinstance(v, str) and v.startswith('(') and v.endswith(')') else v)
     s = s.str.replace(',', '', regex=False).str.replace(' ', '', regex=False)
     s = s.str.replace(r'[^\d\.\-]+', '', regex=True)
@@ -133,16 +113,16 @@ def hide_zero_rows(df, check_cols=None):
 
 def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1.0):
     """
-    Aggregates network demand and variances.
+    Aggregate monthly forecast and variance through the network.
 
-    Parameters:
-    - transitive: if True, include full downstream subtree (recursive). If False, include only direct children.
-    - rho: variance damping factor in [0,1]; 1.0 = full additive variance, <1 dampens downstream variance contribution.
+    - transitive: include full downstream subtree (recursive) when True;
+                  include only immediate children when False.
+    - rho: a damping factor in [0,1] used to scale how much downstream variance
+           contributes to the upstream node's variance.
 
     Returns:
-    - DataFrame with columns Product, Location, Period, Agg_Future_Demand, Agg_Std_Hist
-    - reachable_map: dict keyed by (product, start_location, period) -> set(of reachable locations including start)
-      (used by LT averaging option)
+    - DataFrame with Product, Location, Period, Agg_Future_Demand, Agg_Std_Hist
+    - reachable_map: mapping (product, start_location, period) -> set(reachable locations)
     """
     results = []
     months = df_forecast['Period'].unique()
@@ -180,7 +160,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
             reachable_cache = {}
 
             def get_reachable(start):
-                # If not transitive, only direct children (plus start)
+                # If not transitive, return only direct children plus the start node.
                 if not transitive:
                     direct = children.get(start, set())
                     outset = set(direct)
@@ -205,13 +185,11 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
 
             for n in nodes:
                 reachable = get_reachable(n)
-                # store as key for use later (product, location, period)
                 reachable_map[(prod, n, month)] = reachable
 
-                # local forecast (direct)
                 local_fcst = float(p_fore.get(n, {'Forecast': 0})['Forecast']) if n in p_fore else 0.0
 
-                # aggregate future demand: local + downstream (direct or transitive depending on param)
+                # Aggregate demand: local + downstream reachable nodes (depends on transitive flag)
                 child_fcst_sum = 0.0
                 child_var_sum = 0.0
                 for c in reachable:
@@ -237,7 +215,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
                 })
     return pd.DataFrame(results), reachable_map
 
-# New tiny helper: render logo above parameters (1.5x width as requested)
+# Render logo helper
 def render_logo_above_parameters(scale=1.5):
     if LOGO_FILENAME and os.path.exists(LOGO_FILENAME):
         try:
@@ -247,12 +225,6 @@ def render_logo_above_parameters(scale=1.5):
             pass
 
 def render_selection_badge(product=None, location=None, df_context=None, small=False):
-    """
-    Streamlit-native badge (blue box) using st.markdown so
-    the badge inherits the app font and styling.
-    NOTE: This function no longer renders the logo itself — logo is shown
-    before the parameters via render_logo_above_parameters().
-    """
     if product is None or product == "":
         return
 
@@ -270,28 +242,20 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     local_demand = _sum_candidates(df_context, ['Forecast', 'Forecast_Hist'])
     total_demand = _sum_candidates(df_context, ['Agg_Future_Demand'])
     total_ss = _sum_candidates(df_context, ['Safety_Stock'])
-
     title = f"{product}{(' — ' + location) if location else ''}"
 
-    # Updated layout: make each of the three key figures occupy full width (100%) of the blue box.
     badge_html = f"""
     <div style="background:#0b3d91;padding:14px;border-radius:8px;color:white;max-width:100%;font-family:inherit;">
       <div style="font-size:11px;opacity:0.95;margin-bottom:6px;">Selected</div>
       <div style="font-size:13px;font-weight:700;margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title}</div>
-
-      <!-- Golden safety-stock box (full width) -->
       <div style="background:#FFC107;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;margin-bottom:10px;display:block;">
         <div style="font-size:11px;font-weight:600;margin-bottom:4px;">Safety Stock</div>
         <div style="font-size:14px;font-weight:700;text-align:right;">{euro_format(total_ss)}</div>
       </div>
-
-      <!-- Local Demand (full width) -->
       <div style="background:#e3f2fd;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;margin-bottom:8px;display:block;">
         <div style="font-size:10px;opacity:0.85;">Local Demand</div>
         <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(local_demand)}</div>
       </div>
-
-      <!-- Total Network Demand (full width) -->
       <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;display:block;">
         <div style="font-size:10px;opacity:0.85;">Total Network Demand</div>
         <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(total_demand)}</div>
@@ -301,69 +265,70 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
 
     st.markdown(badge_html, unsafe_allow_html=True)
 
-# -------------------------------
-# SIDEBAR & FILES
-# -------------------------------
-st.sidebar.header("⚙️ Parameters")
-service_level = st.sidebar.slider(
-    "Service Level (%)",
-    50.0,
-    99.9,
-    99.0,
-    help="Target probability of not stocking out. Higher values increase the Z-score and therefore Safety Stock — reduces stockouts but raises inventory holdings."
-) / 100
-z = norm.ppf(service_level)
+# ----------------------
+# SIDEBAR: collapsible sections (all collapsed by default except Data Sources)
+# ----------------------
+
+with st.sidebar.expander("⚙️ Parameters", expanded=False):
+    service_level = st.slider(
+        "Service Level (%)",
+        50.0,
+        99.9,
+        99.0,
+        help="Target probability of not stocking out. Higher values increase the Z-score and therefore Safety Stock — reduces stockouts but raises inventory holdings."
+    ) / 100
+    z = norm.ppf(service_level)
+
+with st.sidebar.expander("🛡️ Safety Stock Rules", expanded=False):
+    # Extended explanation:
+    # - zero_if_no_net_fcst: when enabled, nodes with zero aggregated network demand are forced to have 0 Safety Stock.
+    #   This avoids retaining inventory at inactive or decommissioned nodes.
+    # - apply_cap + cap_range: allow business to limit extreme statistical SS values by clipping the computed SS
+    #   within a configurable percentage of node's total network demand (e.g., 0–200%).
+    zero_if_no_net_fcst = st.checkbox(
+        "Force Zero SS if No Network Demand",
+        value=True,
+        help="When enabled, nodes with zero aggregated network demand will have Safety Stock forced to zero."
+    )
+    apply_cap = st.checkbox(
+        "Enable SS Capping (% of Network Demand)",
+        value=True,
+        help="Enable clipping of calculated Safety Stock within a percentage range of the node's total network demand."
+    )
+    cap_range = st.slider(
+        "Cap Range (%)",
+        0,
+        500,
+        (0, 200),
+        help="Lower and upper bounds (as % of total network demand) applied to Safety Stock. For example, 0–200% allows SS up to twice the node's network demand."
+    )
+
+with st.sidebar.expander("⚙️ Aggregation & Uncertainty Controls", expanded=False):
+    # Controls for how downstream demand/variance and lead-time variance are handled.
+    agg_mode = st.selectbox(
+        "Network Aggregation Mode",
+        ["Transitive (full downstream)", "Direct children only"],
+        index=0,
+        help="Choose how downstream demand is aggregated: 'Transitive' includes all downstream nodes recursively; 'Direct' uses only immediate children."
+    )
+    use_transitive = True if agg_mode.startswith("Transitive") else False
+
+    var_rho = st.slider(
+        "Variance damping factor (ρ)",
+        0.0,
+        1.0,
+        1.0,
+        help="Scales how much downstream nodes' variance contributes to a parent's variance (0 = ignore downstream variance; 1 = full add)."
+    )
+
+    lt_mode = st.selectbox(
+        "Lead-time variance handling",
+        ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"],
+        index=0,
+        help="How lead-time uncertainty is included: 'Apply' uses each node's LT variance; 'Ignore' omits LT variance from SS; 'Average' uses the mean LT Std of downstream nodes to smooth local LT noise."
+    )
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🛡️ Safety Stock Rules")
-zero_if_no_net_fcst = st.sidebar.checkbox(
-    "Force Zero SS if No Network Demand",
-    value=True,
-    help="When enabled, nodes with zero aggregated network demand will have Safety Stock forced to zero. Use to avoid holding inventory at inactive nodes."
-)
-apply_cap = st.sidebar.checkbox(
-    "Enable SS Capping (% of Network Demand)",
-    value=True,
-    help="Enable clipping of calculated Safety Stock within a percentage range of the node's total network demand to limit extreme policies."
-)
-cap_range = st.sidebar.slider(
-    "Cap Range (%)",
-    0,
-    500,
-    (0, 200),
-    help="Lower and upper bounds (as % of total network demand) applied to Safety Stock. For example, 0–200% allows SS up to twice the node's network demand."
-)
-st.sidebar.markdown("---")
-
-# NEW: Aggregation / variance / LT controls
-st.sidebar.subheader("⚙️ Aggregation & Uncertainty Controls")
-agg_mode = st.sidebar.selectbox(
-    "Network Aggregation Mode",
-    ["Transitive (full downstream)", "Direct children only"],
-    index=0,
-    help="Choose how downstream demand is aggregated: 'Transitive' includes all downstream nodes recursively; 'Direct' uses only immediate children. Affects aggregated demand and variance contributing to Safety Stock."
-)
-use_transitive = True if agg_mode.startswith("Transitive") else False
-
-var_rho = st.sidebar.slider(
-    "Variance damping factor (ρ)",
-    0.0,
-    1.0,
-    1.0,
-    help="Scales how much downstream nodes' variance contributes to a parent's variance (0 = ignore downstream variance; 1 = full add). Lower values damp downstream uncertainty."
-)
-
-lt_mode = st.sidebar.selectbox(
-    "Lead-time variance handling",
-    ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"],
-    index=0,
-    help="How lead-time uncertainty is included: 'Apply' uses each node's LT variance; 'Ignore' omits LT variance from SS; 'Average' uses the mean LT Std of downstream nodes to smooth local LT noise."
-)
-
-st.sidebar.markdown("---")
-
-# Comparison section removed per request.
-
 st.sidebar.subheader("📂 Data Sources (CSV)")
 DEFAULT_FILES = {"sales": "sales.csv", "demand": "demand.csv", "lt": "leadtime.csv"}
 s_upload = st.sidebar.file_uploader("1. Sales Data (Historical: sales.csv)", type="csv")
@@ -376,87 +341,105 @@ if s_file: st.sidebar.success(f"✅ Sales Loaded: {getattr(s_file,'name', s_file
 if d_file: st.sidebar.success(f"✅ Demand Loaded: {getattr(d_file,'name', d_file)}")
 if lt_file: st.sidebar.success(f"✅ Lead Time Loaded: {getattr(lt_file,'name', lt_file)}")
 
-# -------------------------------
+# ----------------------
 # MAIN LOGIC
-# -------------------------------
+# ----------------------
 DEFAULT_PRODUCT_CHOICE = "NOKANDO2"
 DEFAULT_LOCATION_CHOICE = "DEW1"
 CURRENT_MONTH_TS = pd.Timestamp.now().to_period('M').to_timestamp()
 
 def run_pipeline(transitive, rho, lt_mode_param):
     """
-    Run the aggregation -> stats -> SS pipeline with the provided parameters.
-    Note: Conversion mode removed; LT-term uses daily conversion by default (D_for_LT = daily demand).
-    Returns final results DataFrame (with Safety_Stock and related columns) and reachable_map.
+    Run aggregation -> stats -> safety-stock pipeline.
+
+    Steps (high level):
+    1. Aggregate downstream demand and historical variance via aggregate_network_stats.
+    2. Map per-node lead time statistics (mean and std).
+    3. Merge aggregates with forecasts and LT info, ensuring sensible defaults.
+    4. Convert monthly aggregates into daily equivalents for the statistical model.
+    5. Apply low-demand floor logic to avoid underestimating variance at very low volumes.
+    6. Compute the demand-component variance and lead-time component variance (modes supported).
+    7. Combine variances, compute Z * sqrt(variance) as statistical SS, apply minimum floor.
+    8. Apply business rules: zero suppression, capping, and location-specific overrides.
+
+    Parameters:
+    - transitive: bool controlling subtree inclusion
+    - rho: downstream variance damping factor
+    - lt_mode_param: string controlling LT handling ('Ignore LT variance', 'Apply LT variance', 'Average LT Std across downstream')
     """
+    # 1) aggregate demand & historical variance through the network
     network_stats, reachable_map = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt, transitive=transitive, rho=rho)
+
+    # 2) per-node lead time averages (map To_Location -> node LT)
     node_lt_local = df_lt.groupby(['Product', 'To_Location'])[['Lead_Time_Days', 'Lead_Time_Std_Dev']].mean().reset_index()
     node_lt_local.columns = ['Product', 'Location', 'LT_Mean', 'LT_Std']
 
+    # 3) merge aggregated stats with forecasts and LT info
     res = pd.merge(network_stats, df_d[['Product', 'Location', 'Period', 'Forecast']], on=['Product', 'Location', 'Period'], how='left')
     res = pd.merge(res, node_lt_local, on=['Product', 'Location'], how='left')
+
+    # sensible defaults to avoid NaNs in downstream calculations
     res = res.fillna({'Forecast': 0, 'Agg_Std_Hist': np.nan, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
+
+    # if Agg_Std_Hist is missing, fall back to product median, then global median
     product_median_localstd = stats.groupby('Product')['Local_Std'].median().to_dict()
     res['Agg_Std_Hist'] = res.apply(lambda r: product_median_localstd.get(r['Product'], global_median_std) if pd.isna(r['Agg_Std_Hist']) else r['Agg_Std_Hist'], axis=1)
 
-    # Ensure numeric types
+    # Ensure numeric types for calculations
     res['Agg_Std_Hist'] = res['Agg_Std_Hist'].astype(float)
     res['LT_Mean'] = res['LT_Mean'].astype(float)
     res['LT_Std'] = res['LT_Std'].astype(float)
     res['Agg_Future_Demand'] = res['Agg_Future_Demand'].astype(float)
     res['Forecast'] = res['Forecast'].astype(float)
 
-    # Daily conversions
+    # 4) Convert monthly to daily values for demand variance modelling
     res['Sigma_D_Day'] = res['Agg_Std_Hist'] / np.sqrt(float(days_per_month))
     res['D_day'] = res['Agg_Future_Demand'] / float(days_per_month)
     res['Var_D_Day'] = res['Sigma_D_Day']**2
 
-    # Low-demand floor behaviour kept
+    # 5) Low-demand guard: at very small demand, ensure variance is not unrealistically tiny
     low_demand_monthly_threshold = 20.0
     low_mask = res['Agg_Future_Demand'] < low_demand_monthly_threshold
     res.loc[low_mask, 'Var_D_Day'] = res.loc[low_mask, 'Var_D_Day'].where(res.loc[low_mask, 'Var_D_Day'] >= res.loc[low_mask, 'D_day'], res.loc[low_mask, 'D_day'])
 
-    # demand component
+    # demand component (per-day variance scaled by lead time)
     demand_component = res['Var_D_Day'] * res['LT_Mean']
 
-    # LT component - conditional per mode; conversion is daily by default (D_for_LT = d_day)
+    # 6) Lead-time component — support different handling modes.
     lt_component_list = []
     for idx, row in res.iterrows():
         d_day = float(row['D_day'])
         D_for_LT = d_day  # daily conversion fixed
-
         if lt_mode_param == 'Ignore LT variance':
             lt_comp = 0.0
         elif lt_mode_param == 'Apply LT variance':
+            # classical term: Var(L) * D^2
             lt_comp = (float(row['LT_Std'])**2) * (D_for_LT**2)
         elif lt_mode_param == 'Average LT Std across downstream':
-            # compute reachable set (product, location, period key)
+            # Use reachable_map to compute the average downstream LT Std then apply Var(L_avg) * D^2
             reachable = reachable_map.get((row['Product'], row['Location'], row['Period']), set())
-            # include the node itself
             if not reachable:
                 lt_used = float(row['LT_Std'])
             else:
-                # compute mean LT_Std across reachable nodes (map to node_lt_local)
                 vals = []
                 for rn in reachable:
                     match = node_lt_local[(node_lt_local['Product'] == row['Product']) & (node_lt_local['Location'] == rn)]
                     if not match.empty:
                         vals.append(float(match['LT_Std'].iloc[0]))
-                if len(vals) == 0:
-                    lt_used = float(row['LT_Std'])
-                else:
-                    lt_used = float(np.mean(vals))
+                lt_used = float(np.mean(vals)) if len(vals) > 0 else float(row['LT_Std'])
             lt_comp = (lt_used**2) * (D_for_LT**2)
         else:
             lt_comp = (float(row['LT_Std'])**2) * (D_for_LT**2)
-
         lt_component_list.append(lt_comp)
 
     res['lt_component'] = np.array(lt_component_list)
 
+    # 7) Combine variance components; ensure non-negative, compute statistical safety stock
     combined_variance = demand_component + res['lt_component']
     combined_variance = combined_variance.clip(lower=0)
     res['SS_stat'] = z * np.sqrt(combined_variance)
+
+    # Minimum floor: 1% of mean LT demand (small safeguard)
     min_floor_fraction_of_LT_demand = 0.01
     res['Mean_Demand_LT'] = res['D_day'] * res['LT_Mean']
     res['SS_floor'] = res['Mean_Demand_LT'] * min_floor_fraction_of_LT_demand
@@ -464,6 +447,7 @@ def run_pipeline(transitive, rho, lt_mode_param):
     res['Adjustment_Status'] = 'Optimal (Statistical)'
     res['Safety_Stock'] = res['Pre_Rule_SS']
 
+    # 8) Business rules
     if zero_if_no_net_fcst:
         zero_mask = (res['Agg_Future_Demand'] <= 0)
         res.loc[zero_mask, 'Adjustment_Status'] = 'Forced to Zero'
@@ -479,13 +463,15 @@ def run_pipeline(transitive, rho, lt_mode_param):
         res.loc[high_mask, 'Adjustment_Status'] = 'Capped (High)'
         res.loc[low_mask, 'Adjustment_Status'] = 'Capped (Low)'
         res['Safety_Stock'] = res['Safety_Stock'].clip(lower=l_lim, upper=u_lim)
+
+    # Final rounding & overrides
     res['Safety_Stock'] = res['Safety_Stock'].round(0)
-    # keep B616 override behavior
     res.loc[res['Location'] == 'B616', 'Safety_Stock'] = 0
     res['Max_Corridor'] = res['Safety_Stock'] + res['Forecast']
 
     return res, reachable_map
 
+# Data loading and validation
 if s_file and d_file and lt_file:
     try:
         df_s = pd.read_csv(s_file)
@@ -512,6 +498,7 @@ if s_file and d_file and lt_file:
     df_s['Period'] = pd.to_datetime(df_s['Period'], errors='coerce'); df_d['Period'] = pd.to_datetime(df_d['Period'], errors='coerce')
     df_s['Period'] = df_s['Period'].dt.to_period('M').dt.to_timestamp(); df_d['Period'] = df_d['Period'].dt.to_period('M').dt.to_timestamp()
 
+    # Clean numeric columns
     df_s['Consumption'] = clean_numeric(df_s['Consumption']); df_s['Forecast'] = clean_numeric(df_s['Forecast'])
     df_d['Forecast'] = clean_numeric(df_d['Forecast'])
     df_lt['Lead_Time_Days'] = clean_numeric(df_lt['Lead_Time_Days']); df_lt['Lead_Time_Std_Dev'] = clean_numeric(df_lt['Lead_Time_Std_Dev'])
@@ -529,12 +516,10 @@ if s_file and d_file and lt_file:
         return pm if not pd.isna(pm) else global_median_std
     stats['Local_Std'] = stats.apply(fill_local_std, axis=1)
 
-    # Run base pipeline with user-selected params
+    # Run the main pipeline
     results, reachable_map = run_pipeline(transitive=use_transitive, rho=var_rho, lt_mode_param=lt_mode)
 
-    # Comparison mode removed — no alternative scenario calculation.
-
-    # Historical accuracy
+    # Historical accuracy table
     hist = df_s[['Product', 'Location', 'Period', 'Consumption', 'Forecast']].copy()
     hist.rename(columns={'Forecast': 'Forecast_Hist'}, inplace=True)
     hist['Deviation'] = hist['Consumption'] - hist['Forecast_Hist']
@@ -544,13 +529,11 @@ if s_file and d_file and lt_file:
     hist['Accuracy_%'] = (1 - hist['APE_%'] / 100) * 100
     hist_net = df_s.groupby(['Product', 'Period'], as_index=False).agg(Network_Consumption=('Consumption', 'sum'), Network_Forecast_Hist=('Forecast', 'sum'))
 
-    # -------------------------------
-    # FILTERS: only show "meaningful" materials & locations
-    # -------------------------------
+    # Filters: show only meaningful (non-zero) rows where appropriate
     meaningful_mask = results[['Agg_Future_Demand', 'Forecast', 'Safety_Stock', 'Pre_Rule_SS']].fillna(0).abs().sum(axis=1) > 0
     meaningful_results = results[meaningful_mask].copy()
 
-    # Defaults & lists (use meaningful sets; fallback to full results if none)
+    # Defaults & lists
     all_products = sorted(meaningful_results['Product'].unique().tolist())
     if not all_products:
         all_products = sorted(results['Product'].unique().tolist())
@@ -574,21 +557,15 @@ if s_file and d_file and lt_file:
         "📦 By Material"
     ])
 
-    # -------------------------------
     # TAB 1: Inventory Corridor
-    # -------------------------------
     with tab1:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
-            # Logo before parameters, 1.5x size
             render_logo_above_parameters(scale=1.5)
-
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
-            # Standardized label: MATERIAL
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key='tab1_sku')
 
-            # Standardized label: LOCATION
             loc_opts = sorted(meaningful_results[meaningful_results['Product'] == sku]['Location'].unique().tolist())
             if not loc_opts:
                 loc_opts = sorted(results[results['Product'] == sku]['Location'].unique().tolist())
@@ -614,14 +591,11 @@ if s_file and d_file and lt_file:
             fig.update_layout(legend=dict(orientation="h"), xaxis_title='Period', yaxis_title='Units')
             st.plotly_chart(fig, use_container_width=True)
 
-    # -------------------------------
     # TAB 2: Network Topology
-    # -------------------------------
     with tab2:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             render_logo_above_parameters(scale=1.5)
-
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="network_sku")
@@ -734,14 +708,11 @@ if s_file and d_file and lt_file:
                 html_text = html_text + injection_js
             components.html(html_text, height=750)
 
-    # -------------------------------
     # TAB 3: Full Plan
-    # -------------------------------
     with tab3:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             render_logo_above_parameters(scale=1.5)
-
             st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
             prod_choices = sorted(meaningful_results['Product'].unique()) if not meaningful_results.empty else sorted(results['Product'].unique())
             loc_choices = sorted(meaningful_results['Location'].unique()) if not meaningful_results.empty else sorted(results['Location'].unique())
@@ -750,7 +721,6 @@ if s_file and d_file and lt_file:
             default_prod_list = [default_product] if default_product in prod_choices else []
             default_period_list = [default_period] if (default_period in period_choices) else []
 
-            # multiselects with standardized labels
             f_prod = st.multiselect("MATERIAL", prod_choices, default=default_prod_list, key="full_f_prod")
             f_loc = st.multiselect("LOCATION", loc_choices, default=[], key="full_f_loc")
             f_period = st.multiselect("PERIOD", period_choices, default=default_period_list, key="full_f_period")
@@ -771,8 +741,6 @@ if s_file and d_file and lt_file:
             filtered_display = hide_zero_rows(filtered)
 
             display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
-
-            # Prepare formatting columns (ensure they exist)
             fmt_cols = [c for c in ['Forecast','Agg_Future_Demand','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
             disp = df_format_for_display(filtered_display[display_cols].copy(), cols=fmt_cols, two_decimals_cols=fmt_cols)
             st.dataframe(disp, use_container_width=True, height=700)
@@ -780,14 +748,11 @@ if s_file and d_file and lt_file:
             csv_buf = filtered[display_cols].to_csv(index=False)
             st.download_button("📥 Download Filtered Plan (CSV)", data=csv_buf, file_name="filtered_plan.csv", mime="text/csv")
 
-    # -------------------------------
     # TAB 4: Efficiency Analysis
-    # -------------------------------
     with tab4:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             render_logo_above_parameters(scale=1.5)
-
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="eff_sku")
@@ -845,14 +810,11 @@ if s_file and d_file and lt_file:
                     use_container_width=True
                 )
 
-    # -------------------------------
     # TAB 5: Forecast Accuracy
-    # -------------------------------
     with tab5:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             render_logo_above_parameters(scale=1.5)
-
             h_sku_default = default_product
             h_sku_index = all_products.index(h_sku_default) if h_sku_default in all_products else 0
             h_sku = st.selectbox("MATERIAL", all_products, index=h_sku_index, key="h1")
@@ -918,14 +880,11 @@ if s_file and d_file and lt_file:
                     c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                     st.metric("Network WAPE (%)", c_val)
 
-    # -------------------------------
     # TAB 6: Calculation Trace & Simulation
-    # -------------------------------
     with tab6:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             render_logo_above_parameters(scale=1.5)
-
             calc_sku_default = default_product
             calc_sku_index = all_products.index(calc_sku_default) if calc_sku_default in all_products else 0
             calc_sku = st.selectbox("MATERIAL", all_products, index=calc_sku_index, key="c_sku")
@@ -998,7 +957,7 @@ if s_file and d_file and lt_file:
     """)
                 st.info(f"🧮 **Resulting Pre-rule SS:** {euro_format(max(raw_ss_calc, ss_floor), True)} units")
 
-                # Scenario planning (unchanged mechanics)
+                # Scenario planning (analysis-only, does not alter implemented policy)
                 with st.expander("Scenario Planning (expand to configure scenarios)", expanded=False):
                     st.write("Use scenarios to test sensitivity to Service Level or Lead Time. Scenarios do not change implemented policy — they are analysis-only.")
                     if 'n_scen' not in st.session_state:
@@ -1072,7 +1031,6 @@ if s_file and d_file and lt_file:
                     fig_curve.update_layout(title="SS Sensitivity to Service Level (Scenario 1 LT assumptions)", xaxis_title="Service Level (%)", yaxis_title="Simulated SS (units)")
                     st.plotly_chart(fig_curve, use_container_width=True)
 
-                # Business rules & diagnostics (unchanged)
                 st.subheader("4. Business Rules & Diagnostics — explanation & diagnostics")
                 st.markdown(r"""
                 Background & explanation of the calculation steps and business-rule adjustments.
@@ -1090,14 +1048,11 @@ if s_file and d_file and lt_file:
                 - Explicit overrides (e.g., specific locations such as B616) may force 0
                 """)
 
-    # -------------------------------
     # TAB 7: By Material
-    # -------------------------------
     with tab7:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             render_logo_above_parameters(scale=1.5)
-
             sel_prod_default = default_product
             sel_prod_index = all_products.index(sel_prod_default) if sel_prod_default in all_products else 0
             selected_product = st.selectbox("MATERIAL", all_products, index=sel_prod_index, key="mat_sel")
@@ -1178,7 +1133,7 @@ if s_file and d_file and lt_file:
                                                   two_decimals_cols=['Pct_of_raw_sum']),
                              use_container_width=True)
 
-                # B. SS Attribution (unchanged)
+                # B. SS Attribution — mutually exclusive components that sum to total SS
                 st.markdown("---")
                 st.markdown("#### B. SS Attribution — Mutually exclusive components that SUM EXACTLY to Total Safety Stock")
                 per_node = mat.copy()
