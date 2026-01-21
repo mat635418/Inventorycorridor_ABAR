@@ -1064,9 +1064,11 @@ if s_file and d_file and lt_file:
                 st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
+                # remove the automatic index column so the content fits the space
+                eff_top_display = eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10).reset_index(drop=True)
                 st.dataframe(
                     df_format_for_display(
-                        eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10),
+                        eff_top_display,
                         cols=['Safety_Stock'],
                         two_decimals_cols=['Safety_Stock']
                     ),
@@ -1198,14 +1200,14 @@ if s_file and d_file and lt_file:
 
                 # Show the hop->SL mapping as an HTML table and highlight the row used
                 mapping_rows = [
-                    (0, "99%", "End-node (e.g. DEH1)"),
-                    (1, "95%", "e.g. DEW1 (internal + external demand)"),
-                    (2, "90%", "e.g. LUEX (level-1 hub)"),
-                    (3, "85%", "e.g. BEEX (level-2 hub)")
+                    (0, "99%", "End-node"),
+                    (1, "95%", "Internal + external demand"),
+                    (2, "90%", "Level-1 hub"),
+                    (3, "85%", "Level-2 hub")
                 ]
                 table_html = """
-                <div style="max-width:640px;">
-                  <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <div style="max-width:640px; font-family:inherit;">
+                  <table style="width:100%; border-collapse:collapse; font-size:13px; font-family:inherit;">
                     <thead>
                       <tr style="background:#f3f6fb;">
                         <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;">Hop</th>
@@ -1439,7 +1441,7 @@ if s_file and d_file and lt_file:
             k1, k2, k3, k4, k5 = st.columns(5)
             k1.metric("Total Local Forecast", euro_format(total_forecast, True)); k2.metric("Total Network Demand", euro_format(total_net, True))
             k3.metric("Total Safety Stock (sum nodes)", euro_format(total_ss, True)); k4.metric("Nodes", f"{nodes_count}"); k5.metric("Avg SS per Node", euro_format(avg_ss_per_node, True))
-
+            st.markdown("---")
             st.markdown("### Why do we carry this SS? — 8 Reasons breakdown (aggregated for selected material)")
             if mat_period_df_display.empty:
                 st.warning("No data for this material/period (non-zero rows filtered).")
@@ -1590,7 +1592,7 @@ if s_file and d_file and lt_file:
                 <div style="margin-top:12px;">
                   <table style="border-collapse:collapse;">
                     <tr>
-                      <td style="padding:2px 12px;font-size:12px;">Grand Totals</td>
+                      <td style="padding:2px 12px;font-size:12px;"> </td>
                       <td style="padding:2px 12px;font-size:12px;">Local Demand</td>
                       <td style="padding:2px 12px;font-size:12px;">Total Network Demand</td>
                       <td style="padding:2px 12px;font-size:12px;">Safety Stock</td>                      
