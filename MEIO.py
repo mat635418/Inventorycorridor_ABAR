@@ -330,7 +330,7 @@ with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
     enable_tiering = st.checkbox(
         "Enable Strategic Service Level Tiering (reduce upstream SL)",
         value=False,
-        help="When enabled, nodes that are internal (not customer-facing leaves) will use lower service levels depending on their 'distance' (hops) from customer-facing nodes. This keeps customer-facing nodes at the selected Service Level while reducing inventory upstream."
+        help="When enabled, nodes that are internal (not customer-facing leaves) will use lower service levels depending on their 'distance' (hops) from customer-facing nodes. This keeps customer-facing nodes prioritized with higher service levels while progressively reducing the upstream targets the further away a node is from demand. Use the per-hop reduction and minimum upstream service level to control how aggressive the reduction is."
     )
     per_hop_reduction_pct = st.slider(
         "Per-hop SL reduction (percentage points)",
@@ -846,7 +846,7 @@ if s_file and d_file and lt_file:
                     else:
                         bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
 
-                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), [...]
+                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}"
                 lbl = lbl.replace("\\n", "\n")
                 net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
 
