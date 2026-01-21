@@ -1,5 +1,7 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — Jan 2026
+# Updated: 2026-01-21 — Improved hop-distance orientation detection and revised tiering per-hop reductions.
+# Also removed specific location names from the service-level explanation table (sidebar).
 
 import streamlit as st
 import pandas as pd
@@ -326,28 +328,28 @@ with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
     ) / 100
 
     # Compacted description + small example table (user-provided mapping)
+    # NOTE: Removed specific location identifiers from the example per request.
     st.markdown(
         """
         <small>
         Automatic tiering: leaf (customer-facing) nodes use the chosen Service Level; upstream nodes get deterministic reductions per hop.
-        Below is an example mapping (recommended): 
+        Below is an example mapping (recommended):
         </small>
         <div style="margin-top:8px;"></div>
         <table style="width:100%; border-collapse:collapse; font-size:12px;">
           <thead>
             <tr style="background:#f3f6fb">
-              <th style="padding:6px 8px; text-align:left;">Location</th>
               <th style="padding:6px 8px; text-align:left;">Role in Network</th>
               <th style="padding:6px 8px; text-align:left;">Distance to Customer</th>
               <th style="padding:6px 8px; text-align:left;">Recommended SL</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td style="padding:6px 8px;">DEH1</td><td style="padding:6px 8px;">Customer Facing</td><td style="padding:6px 8px;">-</td><td style="padding:6px 8px;">99%</td></tr>
-            <tr><td style="padding:6px 8px;">DEW1</td><td style="padding:6px 8px;">Regional Hub</td><td style="padding:6px 8px;">1 Hop</td><td style="padding:6px 8px;">95%</td></tr>
-            <tr><td style="padding:6px 8px;">LUEX</td><td style="padding:6px 8px;">Central Hub</td><td style="padding:6px 8px;">2 Hops</td><td style="padding:6px 8px;">85–90%</td></tr>
-            <tr><td style="padding:6px 8px;">BEEX</td><td style="padding:6px 8px;">Global Hub</td><td style="padding:6px 8px;">3 Hops</td><td style="padding:6px 8px;">80%</td></tr>
-            <tr><td style="padding:6px 8px;">B616</td><td style="padding:6px 8px;">Oversea Supplier</td><td style="padding:6px 8px;">4 Hops</td><td style="padding:6px 8px;">50%</td></tr>
+            <tr><td style="padding:6px 8px;">Customer Facing</td><td style="padding:6px 8px;">0 Hops</td><td style="padding:6px 8px;">99%</td></tr>
+            <tr><td style="padding:6px 8px;">Regional Hub</td><td style="padding:6px 8px;">1 Hop</td><td style="padding:6px 8px;">95%</td></tr>
+            <tr><td style="padding:6px 8px;">Central Hub</td><td style="padding:6px 8px;">2 Hops</td><td style="padding:6px 8px;">85–90%</td></tr>
+            <tr><td style="padding:6px 8px;">Global Hub</td><td style="padding:6px 8px;">3 Hops</td><td style="padding:6px 8px;">~80%</td></tr>
+            <tr><td style="padding:6px 8px;">Oversea Supplier</td><td style="padding:6px 8px;">4+ Hops</td><td style="padding:6px 8px;">50% (example)</td></tr>
           </tbody>
         </table>
         """,
@@ -419,13 +421,11 @@ def run_pipeline(df_d, stats, df_lt, service_level,
     - Identify customer-facing nodes (leafs) as nodes without outgoing edges.
     - For each product compute the network depth (max hops).
     - Determine a per-hop reduction (pp) based on depth with safeguards:
-        * per-hop reduction increases moderately with depth (2–6 percentage points typical)
-        * total reduction capped (e.g., 20 percentage points)
+        * per-hop reduction increases with depth (heuristic values tuned to give ~80% at ~3 hops).
+        * total reduction capped (e.g., 25 percentage points).
         * minimum upstream SL bounded (>= 50%)
     - Apply SL_node = base_sl - per_hop_reduction * hop_distance
       clipped to [min_upstream_sl, 0.9999] to ensure consistent, auditable reductions.
-    - This logic follows the reference table provided and has been tuned to reduce upstream SL
-      progressively while protecting customer-facing nodes.
     """
 
     base_sl = float(service_level)
@@ -504,43 +504,84 @@ def run_pipeline(df_d, stats, df_lt, service_level,
 
     # Build children mapping per product (used to compute hops to customer-facing nodes)
     def compute_hop_distances_for_product(p_lt_df, prod_nodes):
-        children = {}
-        for _, r in p_lt_df.iterrows():
-            f = r.get('From_Location', None)
-            t = r.get('To_Location', None)
-            if pd.isna(f) or pd.isna(t):
-                continue
-            children.setdefault(f, set()).add(t)
+        """
+        Compute hop distances to nearest customer-facing node (leaf = node with no outgoing edges).
+        Robustness:
+        - Try using the 'From->To' orientation first (expected normal).
+        - If that produces trivial distances (e.g., all 0/1), try the reversed orientation and pick the
+          orientation that yields larger max distance (more likely correct for deeper upstream hubs).
+        - This is defensive: it solves cases where CSVs unintentionally have reversed semantics.
+        Returns dictionary: node -> distance (int)
+        """
+        def build_children(df, forward=True):
+            children_map = {}
+            for _, r in df.iterrows():
+                f = r.get('From_Location', None)
+                t = r.get('To_Location', None)
+                if pd.isna(f) or pd.isna(t):
+                    continue
+                if forward:
+                    children_map.setdefault(f, set()).add(t)
+                else:
+                    # reversed orientation: treat To as parent -> From as child
+                    children_map.setdefault(t, set()).add(f)
+            return children_map
+
+        def bfs_distances(children, all_nodes):
+            # leaf nodes: nodes that do not appear as From_Location in the children map (no outgoing edges)
+            leaf_nodes = set([n for n in all_nodes if n not in children or len(children.get(n, set())) == 0])
+            distances = {}
+            # If there are no leaves (cycled or malformed), treat every node as leaf (distance 0)
+            if not leaf_nodes:
+                for n in all_nodes:
+                    distances[n] = 0
+                return distances, 0
+            # For each node run BFS forward to nearest leaf
+            max_h = 0
+            for n in all_nodes:
+                if n in leaf_nodes:
+                    distances[n] = 0
+                    continue
+                q = collections.deque()
+                q.append((n, 0))
+                visited = set([n])
+                found = False
+                while q:
+                    cur, depth = q.popleft()
+                    kids = children.get(cur, set())
+                    if not kids:
+                        # reached a leaf
+                        distances[n] = depth
+                        max_h = max(max_h, depth)
+                        found = True
+                        break
+                    for k in kids:
+                        if k not in visited:
+                            visited.add(k)
+                            q.append((k, depth + 1))
+                if not found:
+                    # fallback: if we couldn't find a leaf via forward traversal, mark as 0
+                    distances[n] = 0
+            return distances, max_h
+
         all_nodes = set(prod_nodes)
         if not p_lt_df.empty:
             all_nodes = all_nodes.union(set(p_lt_df['From_Location'].dropna().unique())).union(set(p_lt_df['To_Location'].dropna().unique()))
-        # leaf nodes: nodes that do not appear as From_Location in the children map (no outgoing edges)
-        leaf_nodes = set([n for n in all_nodes if n not in children or len(children.get(n, set())) == 0])
-        distances = {}
-        for n in all_nodes:
-            if n in leaf_nodes:
-                distances[n] = 0
-                continue
-            # BFS to nearest leaf
-            q = collections.deque()
-            q.append((n, 0))
-            visited = set([n])
-            found = False
-            while q:
-                cur, depth = q.popleft()
-                kids = children.get(cur, set())
-                if not kids:
-                    distances[n] = depth
-                    found = True
-                    break
-                for k in kids:
-                    if k not in visited:
-                        visited.add(k)
-                        q.append((k, depth + 1))
-            if not found:
-                # fallback: treat as leaf (0) if no downstream leaf found (isolated or cyclic)
-                distances[n] = 0
-        return distances
+
+        # forward orientation (From -> To)
+        children_fwd = build_children(p_lt_df, forward=True)
+        distances_fwd, max_fwd = bfs_distances(children_fwd, all_nodes)
+
+        # reversed orientation (To -> From)
+        children_rev = build_children(p_lt_df, forward=False)
+        distances_rev, max_rev = bfs_distances(children_rev, all_nodes)
+
+        # Pick the orientation that yields the larger max hop distance (more informative for upstream depth)
+        # If equal, prefer forward (the expected orientation).
+        if max_rev > max_fwd:
+            return distances_rev
+        else:
+            return distances_fwd
 
     # Prepare lookups by product to avoid repeated building
     products = res['Product'].unique()
@@ -569,15 +610,25 @@ def run_pipeline(df_d, stats, df_lt, service_level,
             min_upstream_sl = base_sl
             max_tier_hops = 0
         else:
-            # REFINED HEURISTIC:
-            # - Base per-hop reduction starts at 2 percentage points (0.02).
-            # - For deeper networks we increase per-hop reduction slightly (up to 6pp).
-            # - Total reduction (per_hop * max_hops) is capped at 20 percentage points.
-            # This produces progressive reductions like: leaf 99 -> 1-hop 97 -> 2-hop 95 -> 3-hop 92 (example)
-            per_hop_reduction = 0.02 + 0.01 * min(max_hops - 1, 4)  # increases with depth but capped
-            per_hop_reduction = float(np.clip(per_hop_reduction, 0.02, 0.06))
+            # NEW HEURISTIC (tuned to customer's expectation, e.g., ~80% @ 3 hops from 99% base):
+            # - Small networks: gentle reductions; deeper networks: stronger per-hop reductions.
+            # - Per-hop values chosen to map typical depths to reasonable SLs:
+            #     1 hop -> ~95%, 2 hops -> ~85-90%, 3 hops -> ~80%, 4+ hops -> stronger reductions
+            if max_hops == 1:
+                per_hop_reduction = 0.02
+            elif max_hops == 2:
+                per_hop_reduction = 0.04
+            elif max_hops == 3:
+                per_hop_reduction = 0.063  # ~19pp total -> 99% -> ~80%
+            elif max_hops == 4:
+                per_hop_reduction = 0.07
+            else:
+                per_hop_reduction = 0.08
+
+            # Cap per-hop sensibly and total reduction
+            per_hop_reduction = float(np.clip(per_hop_reduction, 0.02, 0.08))
             total_reduction = per_hop_reduction * max_hops
-            total_reduction = float(min(total_reduction, 0.20))  # cap total reduction to 20pp
+            total_reduction = float(min(total_reduction, 0.25))  # cap total reduction to 25pp
             # ensure minimum upstream allowed SL not below 50%
             min_upstream_sl = float(np.clip(base_sl - total_reduction, 0.5, 0.9999))
             max_tier_hops = max_hops
