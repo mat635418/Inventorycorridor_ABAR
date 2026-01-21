@@ -24,7 +24,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.798 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.81 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -321,14 +321,10 @@ with st.sidebar.expander("⚙️ Service Level Configuration", expanded=False):
         99.0,
         help="Target probability of not stocking out. Higher values increase the Z-score and therefore Safety Stock — reduces stockouts but raises inventory holdings."
     ) / 100
+    # keep z for backward compatibility but prefer computing local z where needed
     z = norm.ppf(service_level)
 
 with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=False):
-    # Extended explanation:
-    # - zero_if_no_net_fcst: when enabled, nodes with zero aggregated network demand are forced to have 0 Safety Stock.
-    #   This avoids retaining inventory at inactive or decommissioned nodes.
-    # - apply_cap + cap_range: allow business to limit extreme statistical SS values by clipping the computed SS
-    #   within a configurable percentage of node's total network demand (e.g., 0–200%).
     zero_if_no_net_fcst = st.checkbox(
         "Force Zero SS if No Network Demand",
         value=True,
@@ -348,7 +344,6 @@ with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=False):
     )
 
 with st.sidebar.expander("⚙️ Aggregation & Uncertainty", expanded=False):
-    # Controls for how downstream demand/variance and lead-time variance are handled.
     agg_mode = st.selectbox(
         "Network Aggregation Mode",
         ["Transitive (full downstream)", "Direct children only"],
@@ -392,25 +387,22 @@ DEFAULT_PRODUCT_CHOICE = "NOKANDO2"
 DEFAULT_LOCATION_CHOICE = "DEW1"
 CURRENT_MONTH_TS = pd.Timestamp.now().to_period('M').to_timestamp()
 
-def run_pipeline(transitive, rho, lt_mode_param):
+# Modified run_pipeline to accept explicit data and parameters so it is pure (no hidden globals).
+def run_pipeline(df_d, stats, df_lt, service_level,
+                 transitive=True, rho=1.0, lt_mode_param='Apply LT variance',
+                 zero_if_no_net_fcst=True, apply_cap=True, cap_range=(0,200)):
     """
     Run aggregation -> stats -> safety-stock pipeline.
 
-    Steps (high level):
-    1. Aggregate downstream demand and historical variance via aggregate_network_stats.
-    2. Map per-node lead time statistics (mean and std).
-    3. Merge aggregates with forecasts and LT info, ensuring sensible defaults.
-    4. Convert monthly aggregates into daily equivalents for the statistical model.
-    5. Apply low-demand floor logic to avoid underestimating variance at very low volumes.
-    6. Compute the demand-component variance and lead-time component variance (modes supported).
-    7. Combine variances, compute Z * sqrt(variance) as statistical SS, apply minimum floor.
-    8. Apply business rules: zero suppression, capping, and location-specific overrides.
-
     Parameters:
-    - transitive: bool controlling subtree inclusion
-    - rho: downstream variance damping factor
-    - lt_mode_param: string controlling LT handling ('Ignore LT variance', 'Apply LT variance', 'Average LT Std across downstream')
+    - df_d: forecast dataframe
+    - stats: historical stats dataframe (Product, Location, Local_Mean, Local_Std)
+    - df_lt: lead time dataframe
+    - service_level: float in (0,1) used to compute Z
+    - transitive, rho, lt_mode_param, zero_if_no_net_fcst, apply_cap, cap_range: business params
     """
+    z_local = norm.ppf(service_level)
+
     # 1) aggregate demand & historical variance through the network
     network_stats, reachable_map = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt, transitive=transitive, rho=rho)
 
@@ -427,6 +419,9 @@ def run_pipeline(transitive, rho, lt_mode_param):
 
     # if Agg_Std_Hist is missing, fall back to product median, then global median
     product_median_localstd = stats.groupby('Product')['Local_Std'].median().to_dict()
+    global_median_std = stats['Local_Std'].median(skipna=True)
+    if pd.isna(global_median_std) or global_median_std == 0:
+        global_median_std = 1.0
     res['Agg_Std_Hist'] = res.apply(lambda r: product_median_localstd.get(r['Product'], global_median_std) if pd.isna(r['Agg_Std_Hist']) else r['Agg_Std_Hist'], axis=1)
 
     # Ensure numeric types for calculations
@@ -457,10 +452,8 @@ def run_pipeline(transitive, rho, lt_mode_param):
         if lt_mode_param == 'Ignore LT variance':
             lt_comp = 0.0
         elif lt_mode_param == 'Apply LT variance':
-            # classical term: Var(L) * D^2
             lt_comp = (float(row['LT_Std'])**2) * (D_for_LT**2)
         elif lt_mode_param == 'Average LT Std across downstream':
-            # Use reachable_map to compute the average downstream LT Std then apply Var(L_avg) * D^2
             reachable = reachable_map.get((row['Product'], row['Location'], row['Period']), set())
             if not reachable:
                 lt_used = float(row['LT_Std'])
@@ -481,7 +474,7 @@ def run_pipeline(transitive, rho, lt_mode_param):
     # 7) Combine variance components; ensure non-negative, compute statistical safety stock
     combined_variance = demand_component + res['lt_component']
     combined_variance = combined_variance.clip(lower=0)
-    res['SS_stat'] = z * np.sqrt(combined_variance)
+    res['SS_stat'] = z_local * np.sqrt(combined_variance)
 
     # Minimum floor: 1% of mean LT demand (small safeguard)
     min_floor_fraction_of_LT_demand = 0.01
@@ -551,7 +544,8 @@ if s_file and d_file and lt_file:
     stats = df_s.groupby(['Product', 'Location'])['Consumption'].agg(['mean', 'std']).reset_index()
     stats.columns = ['Product', 'Location', 'Local_Mean', 'Local_Std']
     global_median_std = stats['Local_Std'].median(skipna=True)
-    if pd.isna(global_median_std) or global_median_std == 0: global_median_std = 1.0
+    if pd.isna(global_median_std) or global_median_std == 0:
+        global_median_std = 1.0
     prod_medians = stats.groupby('Product')['Local_Std'].median().to_dict()
     def fill_local_std(row):
         if not pd.isna(row['Local_Std']) and row['Local_Std'] > 0:
@@ -560,8 +554,19 @@ if s_file and d_file and lt_file:
         return pm if not pd.isna(pm) else global_median_std
     stats['Local_Std'] = stats.apply(fill_local_std, axis=1)
 
-    # Run the main pipeline
-    results, reachable_map = run_pipeline(transitive=use_transitive, rho=var_rho, lt_mode_param=lt_mode)
+    # Run the main pipeline with explicit parameters (ensures updates when sidebar changes)
+    results, reachable_map = run_pipeline(
+        df_d=df_d,
+        stats=stats,
+        df_lt=df_lt,
+        service_level=service_level,
+        transitive=use_transitive,
+        rho=var_rho,
+        lt_mode_param=lt_mode,
+        zero_if_no_net_fcst=zero_if_no_net_fcst,
+        apply_cap=apply_cap,
+        cap_range=cap_range
+    )
 
     # Historical accuracy table
     hist = df_s[['Product', 'Location', 'Period', 'Consumption', 'Forecast']].copy()
@@ -727,9 +732,7 @@ if s_file and d_file and lt_file:
                     else:
                         bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
 
-                # consistent naming: LDD (Local Direct Demand), TND (Total Network Demand), SS (Safety Stock)
                 lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}"
-                # pyvis expects newline as '\n'
                 lbl = lbl.replace("\\n", "\n")
                 net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
 
@@ -786,7 +789,6 @@ if s_file and d_file and lt_file:
                 html_text = html_text + injection_js
             components.html(html_text, height=750)
 
-            # Move legend/agenda below graph and center it (previously above the graph)
             st.markdown("""
                 <div style="text-align:center; font-size:12px; padding:8px 0;">
                   <div style="display:inline-block; background:#f7f9fc; padding:8px 12px; border-radius:8px;">
@@ -807,11 +809,9 @@ if s_file and d_file and lt_file:
             prod_choices = sorted(meaningful_results['Product'].unique()) if not meaningful_results.empty else sorted(results['Product'].unique())
             loc_choices = sorted(meaningful_results['Location'].unique()) if not meaningful_results.empty else sorted(results['Location'].unique())
 
-            # human-friendly period labels for multiselect
             period_choices_labels = period_labels
             period_choices_ts = [period_label_map[lbl] for lbl in period_choices_labels]
 
-            # Ensure current month is selected by default (if present)
             default_prod_list = [default_product] if default_product in prod_choices else []
             default_period_list = []
             cur_label = period_label(CURRENT_MONTH_TS)
@@ -823,7 +823,6 @@ if s_file and d_file and lt_file:
                     if dp_label in period_choices_labels:
                         default_period_list = [dp_label]
 
-            # Additional CSS override here to remove any red-highlighted selected chips (user request)
             st.markdown(
                 """
                 <style>
@@ -842,7 +841,6 @@ if s_file and d_file and lt_file:
             f_loc = st.multiselect("LOCATION", loc_choices, default=[], key="full_f_loc")
             f_period_labels = st.multiselect("PERIOD", period_choices_labels, default=default_period_list, key="full_f_period")
 
-            # Map selected labels back to timestamps for filtering
             f_period = [period_label_map[lbl] for lbl in f_period_labels] if f_period_labels else []
 
             badge_product = f_prod[0] if f_prod else (default_product if default_product in all_products else (all_products[0] if all_products else ""))
@@ -877,7 +875,6 @@ if s_file and d_file and lt_file:
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="eff_sku")
 
-            # period selection with labels
             if period_labels:
                 try:
                     default_label = period_label(default_period) if default_period is not None else period_labels[-1]
@@ -1002,7 +999,7 @@ if s_file and d_file and lt_file:
                     c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                     st.metric("Network WAPE (%)", c_val)
 
-    # TAB 6: Calculation Trace & Simulation
+    # TAB 6: Calculation Trace & Simulation — now always built from the freshly computed `results`
     with tab6:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1031,11 +1028,9 @@ if s_file and d_file and lt_file:
             else:
                 calc_period = CURRENT_MONTH_TS
 
-            # IMPORTANT: recompute pipeline here so the calc tab always shows values for the current sidebar params
-            # (service level, caps, zero_if_no_net_fcst, agg mode, var_rho, lt_mode, ...)
-            results, reachable_map = run_pipeline(transitive=use_transitive, rho=var_rho, lt_mode_param=lt_mode)
-
-            # Small selection badge must use the freshly computed results slice
+            # IMPORTANT: ensure the calculation view uses the up-to-date pipeline output.
+            # The full `results` DataFrame is already computed above with the current sidebar params,
+            # so we use it here directly to build the step-by-step view shown to the user.
             row_df_small = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
             render_selection_badge(product=calc_sku, location=calc_loc if calc_loc != "(no location)" else None, df_context=row_df_small)
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
@@ -1045,7 +1040,10 @@ if s_file and d_file and lt_file:
             st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
             st.write("See how changing service level or lead-time assumptions affects safety stock. The scenario planning area below is collapsed by default.")
 
-            # Use the freshly computed results (ensures calculation steps match current sidebar settings)
+            # Always read the current service_level and recompute the z used in displays
+            z_current = norm.ppf(service_level)
+
+            # Use the freshly computed results DataFrame slice (reflects current sidebar params)
             row_df = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
             if row_df.empty:
                 st.warning("Selection not found in results.")
@@ -1055,8 +1053,6 @@ if s_file and d_file and lt_file:
                 st.markdown("---")
                 st.subheader("1. Frozen Inputs (current)")
                 i1, i2, i3, i4, i5 = st.columns(5)
-                # recompute z here from service_level to be explicit / consistent
-                z_current = norm.ppf(service_level)
                 i1.metric("Service Level", f"{service_level*100:.2f}%", help=f"Z-Score: {z_current:.4f}")
                 i2.metric("Network Demand (D, monthly)", euro_format(row['Agg_Future_Demand'], True), help="Aggregated Future Demand (monthly)")
                 i3.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True), help="Aggregated Historical Std Dev (monthly totals)")
@@ -1089,7 +1085,6 @@ if s_file and d_file and lt_file:
     6. Floor applied (1% of mean LT demand) = {ss_floor:.2f} units
     7. Pre-rule SS (max of raw vs floor) = {max(raw_ss_calc, ss_floor):.2f} units
     """)
-                # Show the PRE-RULE SS using the freshly computed Pre_Rule_SS (from run_pipeline)
                 st.info(f"🧮 **Resulting Pre-rule SS:** {euro_format(row['Pre_Rule_SS'], True)} units")
                 st.info(f"📦 **Implemented Safety Stock (after business rules):** {euro_format(row['Safety_Stock'], True)} units")
 
@@ -1185,7 +1180,6 @@ if s_file and d_file and lt_file:
                 - If D == 0 and zero suppression rule is enabled -> Safety_Stock = 0
                 - Explicit overrides (e.g., specific locations such as B616) may force 0
                 """)
-                # add some vertical space for clarity before the checks
                 st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
                 st.markdown("---")
@@ -1214,7 +1208,6 @@ if s_file and d_file and lt_file:
                     else:
                         st.write("Capping logic disabled.")
 
-    
     # TAB 7: By Material
     with tab7:
         col_main, col_badge = st.columns([17, 3])
@@ -1224,7 +1217,6 @@ if s_file and d_file and lt_file:
             sel_prod_index = all_products.index(sel_prod_default) if sel_prod_default in all_products else 0
             selected_product = st.selectbox("MATERIAL", all_products, index=sel_prod_index, key="mat_sel")
 
-            # period selection with labels
             if period_labels:
                 try:
                     sel_label = period_label(default_period) if default_period is not None else period_labels[-1]
@@ -1261,8 +1253,10 @@ if s_file and d_file and lt_file:
                 mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0)
                 mat['term1'] = (mat['Agg_Std_Hist']**2 / float(days_per_month)) * mat['LT_Mean']
                 mat['term2'] = (mat['LT_Std']**2) * (mat['Agg_Future_Demand'] / float(days_per_month))**2
-                mat['demand_uncertainty_raw'] = z * np.sqrt(mat['term1'].clip(lower=0))
-                mat['lt_uncertainty_raw'] = z * np.sqrt(mat['term2'].clip(lower=0))
+                # use current service level z
+                z_current = norm.ppf(service_level)
+                mat['demand_uncertainty_raw'] = z_current * np.sqrt(mat['term1'].clip(lower=0))
+                mat['lt_uncertainty_raw'] = z_current * np.sqrt(mat['term2'].clip(lower=0))
                 mat['direct_forecast_raw'] = mat['Forecast'].clip(lower=0)
                 mat['indirect_network_raw'] = (mat['Agg_Future_Demand'] - mat['Forecast']).clip(lower=0)
                 mat['cap_reduction_raw'] = ((mat['Pre_Rule_SS'] - mat['Safety_Stock']).clip(lower=0)).fillna(0)
