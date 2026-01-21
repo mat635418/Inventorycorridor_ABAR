@@ -313,7 +313,8 @@ def period_label(ts):
 # SIDEBAR: collapsible sections
 # ----------------------
 
-# Make the first two expanders visible (expanded) by default; remove the third and move its controls into the second.
+# Make the first two expanders visible (expanded) by default.
+# Aggregation & Uncertainty has been removed entirely per request.
 with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
     service_level = st.slider(
         "Service Level (%)",
@@ -348,31 +349,11 @@ with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
         help="Lower and upper bounds (as % of total network demand) applied to Safety Stock. For example, 0–200% allows SS up to twice the node's network demand."
     )
 
-    st.markdown("---")
-    # Moved aggregation & uncertainty controls here so the left sidebar has only two expanders.
-    st.subheader("Aggregation & Uncertainty")
-    agg_mode = st.selectbox(
-        "Network Aggregation Mode",
-        ["Transitive (full downstream)", "Direct children only"],
-        index=0,
-        help="Choose how downstream demand is aggregated: 'Transitive' includes all downstream nodes recursively; 'Direct' uses only immediate children."
-    )
-    use_transitive = True if agg_mode.startswith("Transitive") else False
-
-    var_rho = st.slider(
-        "Variance damping factor (ρ)",
-        0.0,
-        1.0,
-        1.0,
-        help="Scales how much downstream nodes' variance contributes to a parent's variance (0 = ignore downstream variance; 1 = full add)."
-    )
-
-    lt_mode = st.selectbox(
-        "Lead-time variance handling",
-        ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"],
-        index=0,
-        help="How lead-time uncertainty is included: 'Apply LT variance' uses each node's lead-time variance; 'Ignore LT variance' omits lead-time uncertainty from the SS calculation; 'Average LT Std across downstream' computes the mean LT std across reachable downstream nodes and uses that."
-    )
+# Aggregation & Uncertainty controls removed.
+# Provide sensible defaults so the rest of the app continues to work.
+use_transitive = True
+var_rho = 1.0
+lt_mode = "Apply LT variance"
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Sources (CSV)")
