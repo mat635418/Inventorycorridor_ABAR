@@ -290,7 +290,7 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
         <div style="font-size:14px;font-weight:700;text-align:right;">{euro_format(total_ss, show_zero=True)}</div>
       </div>
       <div style="background:#e3f2fd;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;margin-bottom:8px;display:block;">
-        <div style="font-size:10px;opacity:0.85;">Local Demand</div>
+        <div style="font-size:10px;opacity:0.85;">Local Direct Demand</div>
         <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(local_demand, show_zero=True)}</div>
       </div>
       <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;display:block;">
@@ -301,6 +301,13 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     """
 
     st.markdown(badge_html, unsafe_allow_html=True)
+
+# small utility to format Period labels: "JAN 2026"
+def period_label(ts):
+    try:
+        return pd.to_datetime(ts).strftime('%b %Y').upper()
+    except Exception:
+        return str(ts)
 
 # ----------------------
 # SIDEBAR: collapsible sections (all collapsed by default except Data Sources)
@@ -583,6 +590,10 @@ if s_file and d_file and lt_file:
     all_periods = sorted(results['Period'].unique().tolist())
     default_period = CURRENT_MONTH_TS if CURRENT_MONTH_TS in all_periods else (all_periods[-1] if all_periods else None)
 
+    # Prepare human-friendly period labels mapping for right-side filters (e.g., "JAN 2026")
+    period_label_map = {period_label(p): p for p in all_periods}
+    period_labels = list(period_label_map.keys())
+
     # TABS
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📈 Inventory Corridor",
@@ -627,14 +638,20 @@ if s_file and d_file and lt_file:
 
         with col_main:
             st.markdown(f"**Selected**: {sku} — {loc}")
+            # show all months in the graph: create a Period axis covering all_periods and merge selection data onto it
             plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
+            # create DataFrame covering all periods (even if zeros)
+            df_all_periods = pd.DataFrame({'Period': all_periods})
+            plot_full = pd.merge(df_all_periods, plot_df[['Period','Max_Corridor','Safety_Stock','Forecast','Agg_Future_Demand']], on='Period', how='left')
+            # fill missing with zeros so months with no data are shown explicitly
+            plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Demand']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Demand']].fillna(0)
             fig = go.Figure([
-                go.Scatter(x=plot_df['Period'], y=plot_df['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=1, color='rgba(0,0,0,0.1)')),
-                go.Scatter(x=plot_df['Period'], y=plot_df['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
-                go.Scatter(x=plot_df['Period'], y=plot_df['Forecast'], name='Local Direct Forecast', line=dict(color='black', dash='dot')),
-                go.Scatter(x=plot_df['Period'], y=plot_df['Agg_Future_Demand'], name='Total Network Demand', line=dict(color='blue', dash='dash'))
+                go.Scatter(x=plot_full['Period'], y=plot_full['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=1, color='rgba(0,0,0,0.1)')),
+                go.Scatter(x=plot_full['Period'], y=plot_full['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
+                go.Scatter(x=plot_full['Period'], y=plot_full['Forecast'], name='Local Direct Demand', line=dict(color='black', dash='dot')),
+                go.Scatter(x=plot_full['Period'], y=plot_full['Agg_Future_Demand'], name='Total Network Demand', line=dict(color='blue', dash='dash'))
             ])
-            fig.update_layout(legend=dict(orientation="h"), xaxis_title='Period', yaxis_title='Units')
+            fig.update_layout(legend=dict(orientation="h"), xaxis_title='Period', yaxis_title='Units', xaxis=dict(tickformat="%b\n%Y"))
             st.plotly_chart(fig, use_container_width=True)
 
     # TAB 2: Network Topology
@@ -646,15 +663,27 @@ if s_file and d_file and lt_file:
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="network_sku")
 
-            period_choices = all_periods
-            if period_choices:
+            # use human-readable period labels
+            if period_labels:
                 try:
-                    period_index = period_choices.index(default_period)
+                    default_label = period_label(default_period) if default_period is not None else period_labels[-1]
+                    period_index = period_labels.index(default_label) if default_label in period_labels else len(period_labels)-1
                 except Exception:
-                    period_index = len(period_choices) - 1
-                chosen_period = st.selectbox("PERIOD", period_choices, index=period_index, key="network_period")
+                    period_index = len(period_labels)-1
+                chosen_label = st.selectbox("PERIOD", period_labels, index=period_index, key="network_period")
+                chosen_period = period_label_map.get(chosen_label, default_period)
             else:
-                chosen_period = st.selectbox("PERIOD", [CURRENT_MONTH_TS], index=0, key="network_period")
+                chosen_period = CURRENT_MONTH_TS
+
+            # legend for abbreviations (LDD, TND, SS)
+            st.markdown("""
+                <div style="font-size:12px;padding:6px;border-radius:6px;background:#f7f9fc;">
+                  <strong>Legend:</strong><br/>
+                  LDD = Local Direct Demand (local forecast)<br/>
+                  TND = Total Network Demand (aggregated downstream + local)<br/>
+                  SS  = Safety Stock (final policy value)
+                </div>
+            """, unsafe_allow_html=True)
 
             render_selection_badge(product=sku, location=None, df_context=results[(results['Product']==sku)&(results['Period']==chosen_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
@@ -686,7 +715,9 @@ if s_file and d_file and lt_file:
 
             for n in sorted(all_nodes):
                 m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
-                used = (m['Agg_Future_Demand'] > 0) or (m['Forecast'] > 0)
+                # Now show zeros explicitly in labels by forcing show_zero=True
+                # Node considered 'used' visually if any of the metrics are > 0
+                used = (float(m.get('Agg_Future_Demand', 0)) > 0) or (float(m.get('Forecast', 0)) > 0)
 
                 if n == 'B616':
                     bg = '#dcedc8'; border = '#8bc34a'; font_color = '#0b3d91'; size = 14
@@ -698,7 +729,10 @@ if s_file and d_file and lt_file:
                     else:
                         bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
 
-                lbl = f"{n}\nFcst: {euro_format(m['Forecast'])}\nNet: {euro_format(m['Agg_Future_Demand'])}\nSS: {euro_format(m['Safety_Stock'])}"
+                # consistent naming: LDD (Local Direct Demand), TND (Total Network Demand), SS (Safety Stock)
+                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}"
+                # pyvis expects newline as '\n'
+                lbl = lbl.replace("\\n", "\n")
                 net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
 
             for _, r in sku_lt.iterrows():
@@ -762,14 +796,24 @@ if s_file and d_file and lt_file:
             st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
             prod_choices = sorted(meaningful_results['Product'].unique()) if not meaningful_results.empty else sorted(results['Product'].unique())
             loc_choices = sorted(meaningful_results['Location'].unique()) if not meaningful_results.empty else sorted(results['Location'].unique())
-            period_choices = sorted(results['Period'].unique())
+
+            # human-friendly period labels for multiselect
+            period_choices_labels = period_labels
+            period_choices_ts = [period_label_map[lbl] for lbl in period_choices_labels]
 
             default_prod_list = [default_product] if default_product in prod_choices else []
-            default_period_list = [default_period] if (default_period in period_choices) else []
+            default_period_list = []
+            if default_period is not None:
+                dp_label = period_label(default_period)
+                if dp_label in period_choices_labels:
+                    default_period_list = [dp_label]
 
             f_prod = st.multiselect("MATERIAL", prod_choices, default=default_prod_list, key="full_f_prod")
             f_loc = st.multiselect("LOCATION", loc_choices, default=[], key="full_f_loc")
-            f_period = st.multiselect("PERIOD", period_choices, default=default_period_list, key="full_f_period")
+            f_period_labels = st.multiselect("PERIOD", period_choices_labels, default=default_period_list, key="full_f_period")
+
+            # Map selected labels back to timestamps for filtering
+            f_period = [period_label_map[lbl] for lbl in f_period_labels] if f_period_labels else []
 
             badge_product = f_prod[0] if f_prod else (default_product if default_product in all_products else (all_products[0] if all_products else ""))
             badge_df = results[results['Product'] == badge_product] if badge_product else None
@@ -803,15 +847,17 @@ if s_file and d_file and lt_file:
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="eff_sku")
 
-            period_choices = all_periods
-            if period_choices:
+            # period selection with labels
+            if period_labels:
                 try:
-                    period_index = period_choices.index(default_period)
+                    default_label = period_label(default_period) if default_period is not None else period_labels[-1]
+                    period_index = period_labels.index(default_label) if default_label in period_labels else len(period_labels)-1
                 except Exception:
-                    period_index = len(period_choices)-1
-                eff_period = st.selectbox("PERIOD", period_choices, index=period_index, key="eff_period")
+                    period_index = len(period_labels)-1
+                chosen_label = st.selectbox("PERIOD", period_labels, index=period_index, key="eff_period")
+                eff_period = period_label_map.get(chosen_label, default_period)
             else:
-                eff_period = st.selectbox("PERIOD", [CURRENT_MONTH_TS], index=0, key="eff_period")
+                eff_period = CURRENT_MONTH_TS
 
             render_selection_badge(product=sku, location=None, df_context=results[(results['Product'] == sku)&(results['Period'] == eff_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
@@ -943,15 +989,17 @@ if s_file and d_file and lt_file:
             calc_loc_index = avail_locs.index(calc_loc_default) if calc_loc_default in avail_locs else 0
             calc_loc = st.selectbox("LOCATION", avail_locs, index=calc_loc_index, key="c_loc")
 
-            avail_periods = all_periods
-            if avail_periods:
+            # period selection with labels
+            if period_labels:
                 try:
-                    calc_period_index = avail_periods.index(default_period)
+                    default_label = period_label(default_period) if default_period is not None else period_labels[-1]
+                    calc_period_index = period_labels.index(default_label) if default_label in period_labels else len(period_labels)-1
                 except Exception:
-                    calc_period_index = len(avail_periods)-1
-                calc_period = st.selectbox("PERIOD", avail_periods, index=calc_period_index, key="c_period")
+                    calc_period_index = len(period_labels)-1
+                chosen_label = st.selectbox("PERIOD", period_labels, index=calc_period_index, key="c_period")
+                calc_period = period_label_map.get(chosen_label, default_period)
             else:
-                calc_period = st.selectbox("PERIOD", [CURRENT_MONTH_TS], index=0, key="c_period")
+                calc_period = CURRENT_MONTH_TS
 
             row_df_small = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
             render_selection_badge(product=calc_sku, location=calc_loc if calc_loc != "(no location)" else None, df_context=row_df_small)
@@ -1103,15 +1151,17 @@ if s_file and d_file and lt_file:
             sel_prod_index = all_products.index(sel_prod_default) if sel_prod_default in all_products else 0
             selected_product = st.selectbox("MATERIAL", all_products, index=sel_prod_index, key="mat_sel")
 
-            period_choices = all_periods
-            if period_choices:
+            # period selection with labels
+            if period_labels:
                 try:
-                    sel_period_index = period_choices.index(default_period)
+                    sel_label = period_label(default_period) if default_period is not None else period_labels[-1]
+                    sel_period_index = period_labels.index(sel_label) if sel_label in period_labels else len(period_labels)-1
                 except Exception:
-                    sel_period_index = len(period_choices)-1
-                selected_period = st.selectbox("PERIOD", period_choices, index=sel_period_index, key="mat_period")
+                    sel_period_index = len(period_labels)-1
+                chosen_label = st.selectbox("PERIOD", period_labels, index=sel_period_index, key="mat_period")
+                selected_period = period_label_map.get(chosen_label, default_period)
             else:
-                selected_period = st.selectbox("PERIOD", [CURRENT_MONTH_TS], index=0, key="mat_period")
+                selected_period = CURRENT_MONTH_TS
 
             render_selection_badge(product=selected_product, location=None, df_context=results[(results['Product']==selected_product)&(results['Period']==selected_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
