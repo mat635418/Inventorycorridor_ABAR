@@ -1,13 +1,5 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — Jan 2026
-# Modified: apply fixed hop->service-level mapping and remove sidebar explanatory text (Jan 2026)
-# Updated: hop mapping set per user request:
-#   hop 0 (end-node) = 99%
-#   hop 1 = 95%
-#   hop 2 = 90%
-#   hop 3 = 85%
-#   hop 4+ = 50%  (B616 is treated specially and set to zero SS by override)
-# Jan 2026
 
 import streamlit as st
 import pandas as pd
@@ -33,7 +25,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.88 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.89 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -91,7 +83,6 @@ def euro_format(x, always_two_decimals=True, show_zero=False):
         if math.isclose(xv, 0.0, abs_tol=1e-9):
             if not show_zero:
                 return ""
-            # if show_zero, continue and format zero as '0' (or '0.00' if requested)
         neg = xv < 0
         rounded = int(round(abs(xv)))
         s = f"{rounded:,}"
@@ -333,15 +324,10 @@ with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
         help="Target probability of not stocking out for end-nodes (hop 0). Upstream nodes get fixed SLs by hop-distance."
     ) / 100
 
-    # compute Z for customer-facing nodes (kept for some displays)
+    # compute Z for display purposes
     z = norm.ppf(service_level)
 
 with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
-    # Extended explanation:
-    # - zero_if_no_net_fcst: when enabled, nodes with zero aggregated network demand are forced to have 0 Safety Stock.
-    #   This avoids retaining inventory at inactive or decommissioned nodes.
-    # - apply_cap + cap_range: allow business to limit extreme statistical SS values by clipping the computed SS
-    #   within a configurable percentage of node's total network demand (e.g., 0–200%).
     zero_if_no_net_fcst = st.checkbox(
         "Force Zero SS if No Network Demand",
         value=True,
@@ -361,7 +347,6 @@ with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
     )
 
 # Aggregation & Uncertainty controls removed.
-# Provide sensible defaults so the rest of the app continues to work.
 use_transitive = True
 var_rho = 1.0
 lt_mode = "Apply LT variance"
@@ -387,33 +372,31 @@ DEFAULT_LOCATION_CHOICE = "DEW1"
 CURRENT_MONTH_TS = pd.Timestamp.now().to_period('M').to_timestamp()
 
 # Modified run_pipeline to accept explicit data and parameters so it is pure (no hidden globals).
-# Tiering parameters changed: fixed hop -> SL mapping (no per-hop reduction).
+# Tiering parameters changed: fixed hop -> SL mapping (hops 0..3). Hops > 3 map to hop 3 SL.
 def run_pipeline(df_d, stats, df_lt, service_level,
                  transitive=True, rho=1.0, lt_mode_param='Apply LT variance',
                  zero_if_no_net_fcst=True, apply_cap=True, cap_range=(0,200)):
     """
     Run aggregation -> stats -> safety-stock pipeline.
 
-    Tiering rules (fixed mapping, NOT per-hop reduction):
-    - Hop distance is measured as number of forward edges to reach an end-node (leaf).
-    - The service level applied is a fixed mapping by hop:
-        hop 0 (end-node): 99.0%   (e.g. DEH1)
-        hop 1: 95.0%              (e.g. DEW1 or any location with internal+external demand)
-        hop 2: 90.0%              (e.g. LUEX, level-1 hub with no internal demand)
-        hop 3: 85.0%              (e.g. BEEX, level-2 hub with no internal demand)
-        hop 4+: 50.0%             (e.g. B616 / oversea supplier; additionally B616 is overridden to zero SS)
-    - This mapping is independent of the slider base SL for end-node; the slider continues to control the
-      "base" value used in some scenario comparisons, but the implemented policy uses the fixed hop mapping above.
+    Tiering rules (fixed mapping):
+    - Hop distance measured forward to nearest end-node.
+    - Service level mapping (fixed):
+        hop 0 (end-node): 99.0%
+        hop 1: 95.0%
+        hop 2: 90.0%
+        hop 3 and above: 85.0%
+    - B616 special override: Safety_Stock forced to 0 (policy).
+    - The slider 'service_level' remains for ad-hoc scenario comparisons but the implemented policy uses the fixed mapping above.
     """
 
     # explicit hop->SL mapping (values as fractions)
-    hop_to_sl = {0: 0.99, 1: 0.95, 2: 0.90, 3: 0.85, 4: 0.50}
+    hop_to_sl = {0: 0.99, 1: 0.95, 2: 0.90, 3: 0.85}
     def sl_for_hop(h):
         if h in hop_to_sl:
             return hop_to_sl[h]
-        if h > 4:
-            return hop_to_sl[4]
-        return hop_to_sl[0]
+        # any hops > 3 use hop 3 SL
+        return hop_to_sl[3]
 
     base_sl = float(service_level)
 
@@ -559,12 +542,11 @@ def run_pipeline(df_d, stats, df_lt, service_level,
         nodes = prod_to_nodes.get(p, set())
         prod_distances[p] = compute_hop_distances_for_product(p_routes, nodes)
 
-    # Dynamic tiering engine replaced by fixed mapping; prepare per-product diagnostics summary
+    # Prepare per-product diagnostics summary (fixed mapping)
     product_tiering_params = {}
     for p, distances in prod_distances.items():
         max_hops = int(max(distances.values())) if distances else 0
-        # store the fixed mapping as percentages (for diagnostics)
-        tier_map_pct = {f"SL_hop_{h}_pct": float(sl_for_hop(h) * 100.0) for h in range(0,5)}
+        tier_map_pct = {f"SL_hop_{h}_pct": float(sl_for_hop(h) * 100.0) for h in range(0,4)}
         tier_map_pct['max_tier_hops'] = max_hops
         product_tiering_params[p] = tier_map_pct
 
@@ -576,7 +558,6 @@ def run_pipeline(df_d, stats, df_lt, service_level,
         loc = row['Location']
         distances = prod_distances.get(prod, {})
         dist = int(distances.get(loc, 0))
-        # select SL from mapping (hops >4 mapped to hop 4 SL)
         sl_node = sl_for_hop(dist)
         sl_list.append(sl_node)
         hop_distance_list.append(dist)
@@ -627,7 +608,6 @@ def run_pipeline(df_d, stats, df_lt, service_level,
             'SL_hop_1_pct': params.get('SL_hop_1_pct', 95.0),
             'SL_hop_2_pct': params.get('SL_hop_2_pct', 90.0),
             'SL_hop_3_pct': params.get('SL_hop_3_pct', 85.0),
-            'SL_hop_4_pct': params.get('SL_hop_4_pct', 50.0),
             'max_tier_hops': params.get('max_tier_hops', 0)
         })
     tier_df = pd.DataFrame(tier_summary)
@@ -727,16 +707,15 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
-    # TABS (added Tiering Diagnostics tab)
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    # TABS (removed Tiering Diagnostics tab)
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📈 Inventory Corridor",
         "🕸️ Network Topology",
         "📋 Full Plan",
         "⚖️ Efficiency Analysis",
         "📉 Forecast Accuracy",
         "🧮 Calculation Trace & Sim",
-        "📦 By Material",
-        "🔍 Tiering Diagnostics"
+        "📦 By Material"
     ])
 
     # TAB 1: Inventory Corridor
@@ -1155,7 +1134,7 @@ if s_file and d_file and lt_file:
                     c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                     st.metric("Network WAPE (%)", c_val)
 
-    # TAB 6: Calculation Trace & Simulation — now always built from the freshly computed `results`
+    # TAB 6: Calculation Trace & Simulation — show mapping table and highlight values used
     with tab6:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1184,13 +1163,10 @@ if s_file and d_file and lt_file:
             else:
                 calc_period = CURRENT_MONTH_TS
 
-            # IMPORTANT: ensure the calculation view uses the up-to-date pipeline output.
-            # The full `results` DataFrame is already computed above with the current sidebar params,
-            # so we use it here directly to build the step-by-step view shown to the user.
+            # Use the freshly computed results DataFrame slice (reflects current sidebar params)
             row_df_small = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
             render_selection_badge(product=calc_sku, location=calc_loc if calc_loc != "(no location)" else None, df_context=row_df_small)
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-
 
         with col_main:
             st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
@@ -1206,48 +1182,86 @@ if s_file and d_file and lt_file:
             else:
                 row = row_df.iloc[0]
 
-                # NODE-SPECIFIC SERVICE LEVEL diagnostics (fixed):
-                # show both Base SL and the node-level SL that was used to compute SS.
+                # NODE-SPECIFIC SERVICE LEVEL diagnostics (fixed mapping)
                 node_sl = float(row.get('Service_Level_Node', service_level))
                 node_z = float(row.get('Z_node', norm.ppf(node_sl)))
+                hops = int(row.get('Tier_Hops', 0))
 
-                # pull per-product tiering params for explanation (if available)
-                tier_df = results.attrs.get('tiering_params', pd.DataFrame())
-                sl_hop_0 = sl_hop_1 = sl_hop_2 = sl_hop_3 = sl_hop_4 = None
-                max_hops = None
-                if not tier_df.empty:
-                    tt = tier_df[tier_df['Product'] == calc_sku]
-                    if not tt.empty:
-                        sl_hop_0 = float(tt['SL_hop_0_pct'].iloc[0])
-                        sl_hop_1 = float(tt['SL_hop_1_pct'].iloc[0])
-                        sl_hop_2 = float(tt['SL_hop_2_pct'].iloc[0])
-                        sl_hop_3 = float(tt['SL_hop_3_pct'].iloc[0])
-                        sl_hop_4 = float(tt['SL_hop_4_pct'].iloc[0])
-                        max_hops = int(tt['max_tier_hops'].iloc[0])
+                # Show the hop->SL mapping as an HTML table and highlight the row used
+                mapping_rows = [
+                    (0, "99%", "End-node (e.g. DEH1)"),
+                    (1, "95%", "e.g. DEW1 (internal + external demand)"),
+                    (2, "90%", "e.g. LUEX (level-1 hub)"),
+                    (3, "85%", "e.g. BEEX (level-2 hub)")
+                ]
+                table_html = """
+                <div style="max-width:640px;">
+                  <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                    <thead>
+                      <tr style="background:#f3f6fb;">
+                        <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;">Hop</th>
+                        <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;">Service Level</th>
+                        <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;">Example / Role</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                """
+                for h, sl, example in mapping_rows:
+                    if h == hops:
+                        row_style = "background:#FFF59D; font-weight:700;"
+                    else:
+                        row_style = ""
+                    table_html += f"""
+                      <tr style="{row_style}">
+                        <td style="padding:8px 10px;border:1px solid #eef6ff;">{h}</td>
+                        <td style="padding:8px 10px;border:1px solid #eef6ff;">{sl}</td>
+                        <td style="padding:8px 10px;border:1px solid #eef6ff;">{example}</td>
+                      </tr>
+                    """
+                table_html += """
+                    </tbody>
+                  </table>
+                </div>
+                """
+                st.markdown("**Applied Hop → Service Level mapping (highlight shows which row was used for this node):**")
+                st.markdown(table_html, unsafe_allow_html=True)
+
+                # Highlight the exact values used for the calculation in a compact summary box
+                # Build HTML summary with key inputs and highlight
+                summary_html = f"""
+                <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
+                  <div style="flex:0 0 48%;background:#e8f0ff;border-radius:8px;padding:12px;">
+                    <div style="font-size:12px;color:#0b3d91;font-weight:600;">Applied Node SL</div>
+                    <div style="font-size:18px;font-weight:800;color:#0b3d91;">{node_sl*100:.2f}%</div>
+                    <div style="font-size:11px;color:#444;margin-top:6px;">(hops = {hops})</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#fff3e0;border-radius:8px;padding:12px;">
+                    <div style="font-size:12px;color:#a64d00;font-weight:600;">Applied Z</div>
+                    <div style="font-size:18px;font-weight:800;color:#a64d00;">{node_z:.4f}</div>
+                    <div style="font-size:11px;color:#444;margin-top:6px;">(for SL {node_sl*100:.2f}%)</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#e8f8f0;border-radius:8px;padding:12px;">
+                    <div style="font-size:12px;color:#00695c;font-weight:600;">Network Demand (monthly)</div>
+                    <div style="font-size:18px;font-weight:800;color:#00695c;">{euro_format(row['Agg_Future_Demand'], True)}</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#fbeff2;border-radius:8px;padding:12px;">
+                    <div style="font-size:12px;color:#880e4f;font-weight:600;">Network Std Dev (monthly)</div>
+                    <div style="font-size:18px;font-weight:800;color:#880e4f;">{euro_format(row['Agg_Std_Hist'], True)}</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#f0f4c3;border-radius:8px;padding:12px;">
+                    <div style="font-size:12px;color:#827717;font-weight:600;">Avg LT (days)</div>
+                    <div style="font-size:18px;font-weight:800;color:#827717;">{row['LT_Mean']}</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#e1f5fe;border-radius:8px;padding:12px;">
+                    <div style="font-size:12px;color:#01579b;font-weight:600;">LT Std Dev (days)</div>
+                    <div style="font-size:18px;font-weight:800;color:#01579b;">{row['LT_Std']}</div>
+                  </div>
+                </div>
+                """
+                st.markdown("**Values used for the calculation (highlighted above):**")
+                st.markdown(summary_html, unsafe_allow_html=True)
 
                 st.markdown("---")
-                st.subheader("1. Frozen Inputs (current)")
-                # show both base & node SL as explicit metrics
-                i1, i2, i3, i4, i5, i6 = st.columns(6)
-                i1.metric("Base Service Level (slider)", f"{service_level*100:.2f}%", help=f"Base Z: {z_current:.4f}")
-                i2.metric("Node Service Level (applied)", f"{node_sl*100:.2f}%", help=f"Node Z: {node_z:.4f}")
-                i3.metric("Network Demand (D, monthly)", euro_format(row['Agg_Future_Demand'], True), help="Aggregated Future Demand (monthly)")
-                i4.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True), help="Aggregated Historical Std Dev (monthly totals)")
-                i5.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days"); i6.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
-
-                # Show tiering diagnostics (which SL was used)
-                st.markdown("**Tiering diagnostics (which SL was used):**")
-                hops = int(row.get('Tier_Hops', 0))
-                # Construct human explanation of the fixed mapping with examples
-                mapping_explain = "- Applied fixed hop -> SL mapping (examples):\n"
-                mapping_explain += "  - hop 0 (end-node): 99% (e.g., DEH1)\n"
-                mapping_explain += "  - hop 1: 95% (e.g., DEW1 or any location that has internal + external demand from child nodes)\n"
-                mapping_explain += "  - hop 2: 90% (e.g., LUEX — a lev-1 hub with no internal demand)\n"
-                mapping_explain += "  - hop 3: 85% (e.g., BEEX — a lev-2 hub with no internal demand)\n"
-                mapping_explain += "  - hop 4+: 50% (e.g., B616 — oversea supplier; note B616 is overridden to zero SS by policy)\n\n"
-                mapping_explain += f"- This node has hops = {hops}, therefore SL applied = {node_sl*100:.2f}%."
-                st.markdown(mapping_explain)
-
                 st.subheader("2. Statistical Calculation (Actual — uses node-level SL/Z)")
                 # Recompute the same steps shown in the pipeline but using node_z (the node-specific Z) to reflect implemented SS
                 sigma_d_day = float(row['Agg_Std_Hist']) / math.sqrt(float(days_per_month))
@@ -1265,13 +1279,13 @@ if s_file and d_file and lt_file:
                 st.markdown("Where σ_D and D are daily values (converted from monthly inputs in the dataset).")
                 st.markdown("**Step-by-Step Substitution (values used):**")
                 st.code(f"""
-    1. σ_D_daily = {sigma_d_day:.4f} (monthly σ / sqrt(days_per_month))
-       Demand component variance = σ_D_daily^2 * L = {term1_demand_var:.4f}
-    2. Supply component variance = σ_L^2 * D_daily^2 = ({row['LT_Std']:.4f})^2 * ({d_day:.4f})^2
-       = {term2_supply_var:.4f}
-    3. Combined variance = {term1_demand_var:.4f} + {term2_supply_var:.4f} = {term1_demand_var + term2_supply_var:.4f}
-    4. Combined Std Dev = sqrt(Combined Variance) = {combined_sd:.4f}
-    5. Raw SS = Z(node: {node_sl*100:.2f}%) * {combined_sd:.4f} = {raw_ss_calc:.2f} units
+    1. σ_D_daily = {sigma_d_day:.6f} (monthly σ / sqrt(days_per_month))
+       Demand component variance = σ_D_daily^2 * L = {term1_demand_var:.6f}
+    2. Supply component variance = σ_L^2 * D_daily^2 = ({row['LT_Std']:.6f})^2 * ({d_day:.6f})^2
+       = {term2_supply_var:.6f}
+    3. Combined variance = {term1_demand_var:.6f} + {term2_supply_var:.6f} = {term1_demand_var + term2_supply_var:.6f}
+    4. Combined Std Dev = sqrt(Combined Variance) = {combined_sd:.6f}
+    5. Raw SS = Z(node: {node_sl*100:.2f}%) * {combined_sd:.6f} = {raw_ss_calc:.2f} units
     6. Floor applied (1% of mean LT demand) = {ss_floor:.2f} units
     7. Pre-rule SS (max of raw vs floor) = {max(raw_ss_calc, ss_floor):.2f} units
     """)
@@ -1333,26 +1347,6 @@ if s_file and d_file and lt_file:
                     fig_bar.add_trace(go.Bar(x=display_comp['Scenario'], y=display_comp['Simulated_SS'], marker_color=colors[:len(display_comp)]))
                     fig_bar.update_layout(title="Scenario SS Comparison", yaxis_title="SS (units)")
                     st.plotly_chart(fig_bar, use_container_width=True)
-
-                    sel_lt = scenarios[0]['LT_mean'] if len(scenarios)>0 else row['LT_Mean']
-                    sel_lt_std = scenarios[0]['LT_std'] if len(scenarios)>0 else row['LT_Std']
-                    sl_range = np.linspace(50.0, 99.9, 100)
-                    ss_curve = []
-                    for slev in sl_range:
-                        zz = norm.ppf(slev/100.0)
-                        sigma_d_day = float(row['Agg_Std_Hist']) / math.sqrt(float(days_per_month))
-                        d_day = float(row['Agg_Future_Demand']) / float(days_per_month)
-                        var_d = sigma_d_day**2
-                        if row['Agg_Future_Demand'] < 20.0:
-                            var_d = max(var_d, d_day)
-                        val = zz * math.sqrt(var_d * sel_lt + (sel_lt_std**2) * (d_day**2))
-                        ss_curve.append(val)
-                    fig_curve = go.Figure()
-                    fig_curve.add_trace(go.Scatter(x=sl_range, y=ss_curve, mode='lines', line=dict(color='#0b3d91')))
-                    if len(scenarios)>0:
-                        fig_curve.add_vline(x=scenarios[0]['SL_pct'], line_dash="dash", line_color="red", annotation_text=f"Scenario SL {scenarios[0]['SL_pct']:.1f}%", annotation_position="top right")
-                    fig_curve.update_layout(title="SS Sensitivity to Service Level (Scenario 1 LT assumptions)", xaxis_title="Service Level (%)", yaxis_title="Simulated SS (units)")
-                    st.plotly_chart(fig_curve, use_container_width=True)
 
                 st.subheader("4. Business Rules & Diagnostics — explanation & diagnostics")
                 st.markdown(r"""
@@ -1598,72 +1592,5 @@ if s_file and d_file and lt_file:
                 """
                 st.markdown(summary_html, unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.subheader("Top Locations by Safety Stock (snapshot)")
-        top_nodes = mat_period_df.sort_values('Safety_Stock', ascending=False)[['Location','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status']]
-        top_nodes_display = hide_zero_rows(top_nodes)
-        st.dataframe(
-            df_format_for_display(
-                top_nodes_display.head(25).copy(),
-                cols=['Forecast','Agg_Future_Demand','Safety_Stock'],
-                two_decimals_cols=['Forecast']
-            ),
-            use_container_width=True,
-            height=400
-        )
-
-        st.markdown("---")
-        st.subheader("Export — Material Snapshot")
-        if not mat_period_df.empty:
-            try:
-                filename = f"material_{selected_product}_{pd.to_datetime(selected_period).strftime('%Y-%m')}.csv"
-            except Exception:
-                filename = f"material_{selected_product}_snapshot.csv"
-            st.download_button("📥 Download Material Snapshot (CSV)", data=mat_period_df.to_csv(index=False), file_name=filename, mime="text/csv")
-        else:
-            st.write("No snapshot available to download for this selection.")
-
-    # TAB 8: Tiering Diagnostics (new)
-    with tab8:
-        st.header("🔍 Tiering Diagnostics — per-product & per-node audit")
-        tier_df = results.attrs.get('tiering_params', pd.DataFrame())
-        if not tier_df.empty:
-            st.subheader("Per-product computed tiering parameters (fixed hop -> SL mapping used)")
-            # present tidy mapping table
-            st.dataframe(df_format_for_display(tier_df.rename(columns={
-                'SL_hop_0_pct': 'Hop 0 SL (%)',
-                'SL_hop_1_pct': 'Hop 1 SL (%)',
-                'SL_hop_2_pct': 'Hop 2 SL (%)',
-                'SL_hop_3_pct': 'Hop 3 SL (%)',
-                'SL_hop_4_pct': 'Hop 4+ SL (%)',
-                'max_tier_hops': 'Max Hops'
-            }), cols=['Hop 0 SL (%)','Hop 1 SL (%)','Hop 2 SL (%)','Hop 3 SL (%)','Hop 4+ SL (%)','Max Hops'], two_decimals_cols=['Hop 0 SL (%)','Hop 1 SL (%)','Hop 2 SL (%)','Hop 3 SL (%)','Hop 4+ SL (%)']))
-        else:
-            st.write("No tiering parameters were computed (empty).")
-
-        st.subheader("Per-node hops and applied service levels (sample snapshot — current periods)")
-        node_tiers = results[['Product','Location','Period','Tier_Hops','Service_Level_Node','Z_node','Safety_Stock','Agg_Future_Demand']].copy()
-        # show latest period(s) first
-        node_tiers = node_tiers.sort_values(['Product','Period','Tier_Hops'], ascending=[True, False, True])
-        # format SL as percent for readable audit
-        node_tiers['Service_Level_Node_%'] = (node_tiers['Service_Level_Node'] * 100).round(2)
-        node_tiers['Z_node'] = node_tiers['Z_node'].round(4)
-        display_cols = ['Product','Location','Period','Tier_Hops','Service_Level_Node_%','Z_node','Agg_Future_Demand','Safety_Stock']
-        st.dataframe(df_format_for_display(node_tiers[display_cols].copy(), cols=['Agg_Future_Demand','Safety_Stock'], two_decimals_cols=['Agg_Future_Demand']))
-
-        st.markdown("""
-        Notes:
-        - 'Tier_Hops' = distance (hops) to nearest end-node (0 = end-node).
-        - The service level applied is chosen from the fixed mapping below (independent of the slider 'Base Service Level'):
-            * hop 0 (end-node): 99% (e.g., DEH1)
-            * hop 1: 95% (e.g., DEW1 or any location with internal + external demand)
-            * hop 2: 90% (e.g., LUEX — level-1 hub)
-            * hop 3: 85% (e.g., BEEX — level-2 hub)
-            * hop 4+: 50% (e.g., B616 — oversea supplier; B616 is overridden to zero SS by policy)
-        - If you expect an internal node (e.g., DEW1) to have reduced SL but still see the base SL, verify:
-           1) leadtime.csv path and product column matches (identical Product strings),
-           2) From_Location/To_Location identifiers exactly match Location values in demand/sales (trim spaces/case),
-           3) If product-specific routes don't exist, the algorithm falls back to the global network to compute hops.
-        """)
 else:
     st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
