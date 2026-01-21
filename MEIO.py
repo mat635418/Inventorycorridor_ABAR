@@ -1,6 +1,5 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — Jan 2026
-# Updated 2026-01-21 — Refined automatic tiering (per attached reference), diagnostics tab added
 
 import streamlit as st
 import pandas as pd
@@ -67,7 +66,7 @@ def euro_format(x, always_two_decimals=True, show_zero=False):
     """
     Format numeric values using '.' as thousands separator (e.g. 1.234)
     Default behaviour: hide zeros (return empty string) to preserve prior app UI.
-    If show_zero=True, zeros will be shown as '0' (or '0' formatted).
+    If show_zero=True, zeros will be shown as '0' (or '0.00' if requested)
     """
     try:
         if x is None:
@@ -319,20 +318,38 @@ def period_label(ts):
 # We removed the manual tiering sliders and replaced them with an automatic, data-driven tiering engine.
 with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
     service_level = st.slider(
-        "Service Level (%) — applied to customer-facing nodes (leafs)",
+        "Service Level (%) — customer-facing nodes (leafs)",
         50.0,
         99.9,
         99.0,
-        help="Target probability of not stocking out for customer-facing locations. Upstream/internal nodes will have reduced service levels computed automatically by the optimizer."
+        help="Target probability of not stocking out for customer-facing locations. Upstream/internal nodes will have reduced service levels computed automatically."
     ) / 100
 
+    # Compacted description + small example table (user-provided mapping)
     st.markdown(
         """
         <small>
-        Strategic service-level tiering is automatic: the app identifies customer-facing nodes (leafs) from your lead-time
-        routes and computes reduced per-node service levels for upstream/internal hubs. The tiering parameters are derived
-        from network depth and demand mix and are deterministic for auditability.
+        Automatic tiering: leaf (customer-facing) nodes use the chosen Service Level; upstream nodes get deterministic reductions per hop.
+        Below is an example mapping (recommended): 
         </small>
+        <div style="margin-top:8px;"></div>
+        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+          <thead>
+            <tr style="background:#f3f6fb">
+              <th style="padding:6px 8px; text-align:left;">Location</th>
+              <th style="padding:6px 8px; text-align:left;">Role in Network</th>
+              <th style="padding:6px 8px; text-align:left;">Distance to Customer</th>
+              <th style="padding:6px 8px; text-align:left;">Recommended SL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td style="padding:6px 8px;">DEH1</td><td style="padding:6px 8px;">Customer Facing</td><td style="padding:6px 8px;">-</td><td style="padding:6px 8px;">99%</td></tr>
+            <tr><td style="padding:6px 8px;">DEW1</td><td style="padding:6px 8px;">Regional Hub</td><td style="padding:6px 8px;">1 Hop</td><td style="padding:6px 8px;">95%</td></tr>
+            <tr><td style="padding:6px 8px;">LUEX</td><td style="padding:6px 8px;">Central Hub</td><td style="padding:6px 8px;">2 Hops</td><td style="padding:6px 8px;">85–90%</td></tr>
+            <tr><td style="padding:6px 8px;">BEEX</td><td style="padding:6px 8px;">Global Hub</td><td style="padding:6px 8px;">3 Hops</td><td style="padding:6px 8px;">80%</td></tr>
+            <tr><td style="padding:6px 8px;">B616</td><td style="padding:6px 8px;">Oversea Supplier</td><td style="padding:6px 8px;">4 Hops</td><td style="padding:6px 8px;">50%</td></tr>
+          </tbody>
+        </table>
         """,
         unsafe_allow_html=True,
     )
@@ -863,7 +880,7 @@ if s_file and d_file and lt_file:
                     else:
                         bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
 
-                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}"
+                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), [...]
                 lbl = lbl.replace("\\n", "\n")
                 net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
 
@@ -1181,16 +1198,46 @@ if s_file and d_file and lt_file:
             else:
                 row = row_df.iloc[0]
 
+                # NODE-SPECIFIC SERVICE LEVEL diagnostics (fixed):
+                # show both Base SL and the node-level SL that was used to compute SS.
+                node_sl = float(row.get('Service_Level_Node', service_level))
+                node_z = float(row.get('Z_node', norm.ppf(node_sl)))
+
+                # pull per-product tiering params for explanation (if available)
+                tier_df = results.attrs.get('tiering_params', pd.DataFrame())
+                per_hop_pp = None; min_up_pct = None; max_hops = None
+                if not tier_df.empty:
+                    tt = tier_df[tier_df['Product'] == calc_sku]
+                    if not tt.empty:
+                        per_hop_pp = float(tt['computed_per_hop_reduction_pp'].iloc[0])
+                        min_up_pct = float(tt['computed_min_upstream_sl_pct'].iloc[0])
+                        max_hops = int(tt['max_tier_hops'].iloc[0])
+
                 st.markdown("---")
                 st.subheader("1. Frozen Inputs (current)")
-                i1, i2, i3, i4, i5 = st.columns(5)
-                i1.metric("Service Level", f"{service_level*100:.2f}%", help=f"Z-Score: {z_current:.4f}")
-                i2.metric("Network Demand (D, monthly)", euro_format(row['Agg_Future_Demand'], True), help="Aggregated Future Demand (monthly)")
-                i3.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True), help="Aggregated Historical Std Dev (monthly totals)")
-                i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days"); i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
+                # show both base & node SL as explicit metrics
+                i1, i2, i3, i4, i5, i6 = st.columns(6)
+                i1.metric("Base Service Level", f"{service_level*100:.2f}%", help=f"Base Z: {z_current:.4f}")
+                i2.metric("Node Service Level", f"{node_sl*100:.2f}%", help=f"Node Z: {node_z:.4f}")
+                i3.metric("Network Demand (D, monthly)", euro_format(row['Agg_Future_Demand'], True), help="Aggregated Future Demand (monthly)")
+                i4.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True), help="Aggregated Historical Std Dev (monthly totals)")
+                i5.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days"); i6.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
 
-                st.subheader("2. Statistical Calculation (Actual)")
-                # Recompute the same steps shown in the pipeline but using current service_level / z_current
+                # Show tiering diagnostics (why node SL differs)
+                st.markdown("**Tiering diagnostics (why this node SL):**")
+                hops = int(row.get('Tier_Hops', 0))
+                tier_explain = f"- Hops to customer-facing node: {hops}"
+                if per_hop_pp is not None:
+                    tier_explain += f"  | per-hop reduction = {per_hop_pp:.2f} pp"
+                if min_up_pct is not None:
+                    tier_explain += f"  | min upstream SL = {min_up_pct:.2f}%"
+                if max_hops is not None:
+                    tier_explain += f"  | network max hops = {max_hops}"
+                tier_explain += f"  \n\nApplied formula: SL_node = Base_SL - per_hop_reduction * hops (clipped to min_upstream_SL)"
+                st.markdown(tier_explain)
+
+                st.subheader("2. Statistical Calculation (Actual — uses node-level SL/Z)")
+                # Recompute the same steps shown in the pipeline but using node_z (the node-specific Z) to reflect implemented SS
                 sigma_d_day = float(row['Agg_Std_Hist']) / math.sqrt(float(days_per_month))
                 d_day = float(row['Agg_Future_Demand']) / float(days_per_month)
                 demand_var_day = sigma_d_day**2
@@ -1199,7 +1246,7 @@ if s_file and d_file and lt_file:
                 term1_demand_var = demand_var_day * float(row['LT_Mean'])
                 term2_supply_var = (float(row['LT_Std'])**2) * (d_day**2)
                 combined_sd = math.sqrt(max(term1_demand_var + term2_supply_var, 0.0))
-                raw_ss_calc = float(z_current) * combined_sd
+                raw_ss_calc = float(node_z) * combined_sd
                 ss_floor = (d_day * float(row['LT_Mean'])) * 0.01
 
                 st.latex(r"SS = Z \times \sqrt{\sigma_D^2 \cdot L \;+\; \sigma_L^2 \cdot D^2}")
@@ -1212,11 +1259,11 @@ if s_file and d_file and lt_file:
        = {term2_supply_var:.4f}
     3. Combined variance = {term1_demand_var:.4f} + {term2_supply_var:.4f} = {term1_demand_var + term2_supply_var:.4f}
     4. Combined Std Dev = sqrt(Combined Variance) = {combined_sd:.4f}
-    5. Raw SS = Z({service_level*100:.2f}%) * {combined_sd:.4f} = {raw_ss_calc:.2f} units
+    5. Raw SS = Z(node: {node_sl*100:.2f}%) * {combined_sd:.4f} = {raw_ss_calc:.2f} units
     6. Floor applied (1% of mean LT demand) = {ss_floor:.2f} units
     7. Pre-rule SS (max of raw vs floor) = {max(raw_ss_calc, ss_floor):.2f} units
     """)
-                st.info(f"🧮 **Resulting Pre-rule SS:** {euro_format(row['Pre_Rule_SS'], True)} units")
+                st.info(f"🧮 **Resulting Pre-rule SS (node-level):** {euro_format(row['Pre_Rule_SS'], True)} units")
                 st.info(f"📦 **Implemented Safety Stock (after business rules):** {euro_format(row['Safety_Stock'], True)} units")
 
                 # Scenario planning (analysis-only, does not alter implemented policy)
