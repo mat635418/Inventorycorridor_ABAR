@@ -1,5 +1,13 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — Jan 2026
+# Modified: apply fixed hop->service-level mapping and remove sidebar explanatory text (Jan 2026)
+# Updated: hop mapping set per user request:
+#   hop 0 (end-node) = 99%
+#   hop 1 = 95%
+#   hop 2 = 90%
+#   hop 3 = 85%
+#   hop 4+ = 50%  (B616 is treated specially and set to zero SS by override)
+# Jan 2026
 
 import streamlit as st
 import pandas as pd
@@ -389,17 +397,17 @@ def run_pipeline(df_d, stats, df_lt, service_level,
     Tiering rules (fixed mapping, NOT per-hop reduction):
     - Hop distance is measured as number of forward edges to reach an end-node (leaf).
     - The service level applied is a fixed mapping by hop:
-        hop 0 (end-node): 99.0%
-        hop 1: 95.0%
-        hop 2: 87.5%  (between 85% and 90% as requested; midpoint used)
-        hop 3: 80.0%
-        hop 4+: 50.0%
+        hop 0 (end-node): 99.0%   (e.g. DEH1)
+        hop 1: 95.0%              (e.g. DEW1 or any location with internal+external demand)
+        hop 2: 90.0%              (e.g. LUEX, level-1 hub with no internal demand)
+        hop 3: 85.0%              (e.g. BEEX, level-2 hub with no internal demand)
+        hop 4+: 50.0%             (e.g. B616 / oversea supplier; additionally B616 is overridden to zero SS)
     - This mapping is independent of the slider base SL for end-node; the slider continues to control the
       "base" value used in some scenario comparisons, but the implemented policy uses the fixed hop mapping above.
     """
 
     # explicit hop->SL mapping (values as fractions)
-    hop_to_sl = {0: 0.99, 1: 0.95, 2: 0.875, 3: 0.80, 4: 0.50}
+    hop_to_sl = {0: 0.99, 1: 0.95, 2: 0.90, 3: 0.85, 4: 0.50}
     def sl_for_hop(h):
         if h in hop_to_sl:
             return hop_to_sl[h]
@@ -606,6 +614,7 @@ def run_pipeline(df_d, stats, df_lt, service_level,
 
     # Final rounding & overrides
     res['Safety_Stock'] = res['Safety_Stock'].round(0)
+    # B616 override: zero SS by default (overseas supplier / GOCPL)
     res.loc[res['Location'] == 'B616', 'Safety_Stock'] = 0
     res['Max_Corridor'] = res['Safety_Stock'] + res['Forecast']
 
@@ -616,8 +625,8 @@ def run_pipeline(df_d, stats, df_lt, service_level,
             'Product': p,
             'SL_hop_0_pct': params.get('SL_hop_0_pct', 99.0),
             'SL_hop_1_pct': params.get('SL_hop_1_pct', 95.0),
-            'SL_hop_2_pct': params.get('SL_hop_2_pct', 87.5),
-            'SL_hop_3_pct': params.get('SL_hop_3_pct', 80.0),
+            'SL_hop_2_pct': params.get('SL_hop_2_pct', 90.0),
+            'SL_hop_3_pct': params.get('SL_hop_3_pct', 85.0),
             'SL_hop_4_pct': params.get('SL_hop_4_pct', 50.0),
             'max_tier_hops': params.get('max_tier_hops', 0)
         })
@@ -1226,16 +1235,16 @@ if s_file and d_file and lt_file:
                 i4.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True), help="Aggregated Historical Std Dev (monthly totals)")
                 i5.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days"); i6.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
 
-                # Show tiering diagnostics (why node SL differs)
+                # Show tiering diagnostics (which SL was used)
                 st.markdown("**Tiering diagnostics (which SL was used):**")
                 hops = int(row.get('Tier_Hops', 0))
-                # Construct human explanation of the fixed mapping
-                mapping_explain = "- Applied fixed hop -> SL mapping:\n"
-                mapping_explain += "  - hop 0 (end-node): 99%\n"
-                mapping_explain += "  - hop 1: 95%\n"
-                mapping_explain += "  - hop 2: 85%–90% (implemented: 87.5%)\n"
-                mapping_explain += "  - hop 3: 80%\n"
-                mapping_explain += "  - hop 4+: 50%\n\n"
+                # Construct human explanation of the fixed mapping with examples
+                mapping_explain = "- Applied fixed hop -> SL mapping (examples):\n"
+                mapping_explain += "  - hop 0 (end-node): 99% (e.g., DEH1)\n"
+                mapping_explain += "  - hop 1: 95% (e.g., DEW1 or any location that has internal + external demand from child nodes)\n"
+                mapping_explain += "  - hop 2: 90% (e.g., LUEX — a lev-1 hub with no internal demand)\n"
+                mapping_explain += "  - hop 3: 85% (e.g., BEEX — a lev-2 hub with no internal demand)\n"
+                mapping_explain += "  - hop 4+: 50% (e.g., B616 — oversea supplier; note B616 is overridden to zero SS by policy)\n\n"
                 mapping_explain += f"- This node has hops = {hops}, therefore SL applied = {node_sl*100:.2f}%."
                 st.markdown(mapping_explain)
 
@@ -1646,11 +1655,11 @@ if s_file and d_file and lt_file:
         Notes:
         - 'Tier_Hops' = distance (hops) to nearest end-node (0 = end-node).
         - The service level applied is chosen from the fixed mapping below (independent of the slider 'Base Service Level'):
-            * hop 0 (end-node): 99%
-            * hop 1: 95%
-            * hop 2: 85%–90% (implemented as 87.5%)
-            * hop 3: 80%
-            * hop 4+: 50%
+            * hop 0 (end-node): 99% (e.g., DEH1)
+            * hop 1: 95% (e.g., DEW1 or any location with internal + external demand)
+            * hop 2: 90% (e.g., LUEX — level-1 hub)
+            * hop 3: 85% (e.g., BEEX — level-2 hub)
+            * hop 4+: 50% (e.g., B616 — oversea supplier; B616 is overridden to zero SS by policy)
         - If you expect an internal node (e.g., DEW1) to have reduced SL but still see the base SL, verify:
            1) leadtime.csv path and product column matches (identical Product strings),
            2) From_Location/To_Location identifiers exactly match Location values in demand/sales (trim spaces/case),
