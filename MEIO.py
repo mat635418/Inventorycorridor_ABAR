@@ -25,7 +25,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.89 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.92 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -1000,6 +1000,10 @@ if s_file and d_file and lt_file:
             if f_period: filtered = filtered[filtered['Period'].isin(f_period)]
             filtered = filtered.sort_values('Safety_Stock', ascending=False)
 
+            # Bold summary for SS values (filtered)
+            total_ss_filtered = filtered['Safety_Stock'].sum() if not filtered.empty else 0.0
+            st.markdown(f"**Total Safety Stock (filtered selection): {euro_format(total_ss_filtered, True)}**")
+
             filtered_display = hide_zero_rows(filtered)
 
             display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
@@ -1052,7 +1056,8 @@ if s_file and d_file and lt_file:
             m1.metric(f"Network Ratio ({sku})", f"{sku_ratio:.2f}"); m2.metric("Global Network Ratio (All Items)", f"{global_ratio:.2f}")
             m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
             st.markdown("---")
-            c1, c2 = st.columns([2,1])
+            # give more column space to the right panel (Status Breakdown + Top Nodes)
+            c1, c2 = st.columns([3,2])
             with c1:
                 fig_eff = px.scatter(eff_display, x="Agg_Future_Demand", y="Safety_Stock", color="Adjustment_Status",
                                      size="SS_to_FCST_Ratio", hover_name="Location",
@@ -1061,6 +1066,7 @@ if s_file and d_file and lt_file:
                 st.plotly_chart(fig_eff, use_container_width=True)
             with c2:
                 st.markdown("**Status Breakdown**")
+                # Use table (st.table) or st.dataframe; keep it compact but ensure more width available now
                 st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
@@ -1199,6 +1205,7 @@ if s_file and d_file and lt_file:
                 hops = int(row.get('Tier_Hops', 0))
 
                 # Show the hop->SL mapping as an HTML table and highlight the row used
+                # Use explicit system font stack and same font-size as dataframes so the table font exactly matches below tables
                 mapping_rows = [
                     (0, "99%", "End-node"),
                     (1, "95%", "Internal + external demand"),
@@ -1206,8 +1213,8 @@ if s_file and d_file and lt_file:
                     (3, "85%", "Level-2 hub")
                 ]
                 table_html = """
-                <div style="max-width:640px; font-family:inherit;">
-                  <table style="width:100%; border-collapse:collapse; font-size:13px; font-family:inherit;">
+                <div style="max-width:640px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif; font-size:13px;">
+                  <table style="width:100%; border-collapse:collapse;">
                     <thead>
                       <tr style="background:#f3f6fb;">
                         <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;">Hop</th>
@@ -1235,7 +1242,7 @@ if s_file and d_file and lt_file:
                 </div>
                 """
                 st.markdown("**Applied Hop → Service Level mapping (highlight shows which row was used for this node):**")
-                # Use components.html to ensure the HTML table is rendered (avoids Markdown escaping in some envs)
+                # Use components.html to ensure the HTML table is rendered and font matches dataframes
                 try:
                     components.html(table_html, height=180)
                 except Exception:
@@ -1435,13 +1442,17 @@ if s_file and d_file and lt_file:
             st.header("📦 View by Material (Single Material Focus + 8 Reasons for Inventory)")
             mat_period_df = results[(results['Product'] == selected_product) & (results['Period'] == selected_period)].copy()
             mat_period_df_display = hide_zero_rows(mat_period_df)
-            total_forecast = mat_period_df['Forecast'].sum(); total_net = mat_period_df['Agg_Future_Demand'].sum()
+            total_forecast = mat_period_df['Forecast'].sum()
+            # Fix: report network total demand as the SUM of raw forecasts across the network
+            # (previously showing sum of aggregated per-node agg demands could double-count downstream)
+            network_total_forecast = df_d[(df_d['Product'] == selected_product) & (df_d['Period'] == selected_period)]['Forecast'].sum()
+            total_net = network_total_forecast
             total_ss = mat_period_df['Safety_Stock'].sum(); nodes_count = mat_period_df['Location'].nunique()
             avg_ss_per_node = (mat_period_df['Safety_Stock'].mean() if nodes_count > 0 else 0)
             k1, k2, k3, k4, k5 = st.columns(5)
             k1.metric("Total Local Forecast", euro_format(total_forecast, True)); k2.metric("Total Network Demand", euro_format(total_net, True))
             k3.metric("Total Safety Stock (sum nodes)", euro_format(total_ss, True)); k4.metric("Nodes", f"{nodes_count}"); k5.metric("Avg SS per Node", euro_format(avg_ss_per_node, True))
-            st.markdown("---")
+
             st.markdown("### Why do we carry this SS? — 8 Reasons breakdown (aggregated for selected material)")
             if mat_period_df_display.empty:
                 st.warning("No data for this material/period (non-zero rows filtered).")
@@ -1592,7 +1603,7 @@ if s_file and d_file and lt_file:
                 <div style="margin-top:12px;">
                   <table style="border-collapse:collapse;">
                     <tr>
-                      <td style="padding:2px 12px;font-size:12px;"> </td>
+                      <td style="padding:2px 12px;font-size:12px;">Grand Totals</td>
                       <td style="padding:2px 12px;font-size:12px;">Local Demand</td>
                       <td style="padding:2px 12px;font-size:12px;">Total Network Demand</td>
                       <td style="padding:2px 12px;font-size:12px;">Safety Stock</td>                      
@@ -1600,7 +1611,7 @@ if s_file and d_file and lt_file:
                     <tr style="color:#666">
                       <td style="padding:6px 12px;"><strong>Grand Totals</strong></td>
                       <td style="padding:6px 12px;"><strong>{euro_format(grand_forecast, True)}</strong></td>
-                      <td style="padding:6px 12px;"><strong>{euro_format(grand_net, True)}</strong></td>
+                      <td style="padding:6px 12px;"><strong>{euro_format(total_net, True)}</strong></td>
                       <td style="padding:6px 12px;"><strong>{euro_format(grand_ss, True)}</strong></td>
                     </tr>
                   </table>
