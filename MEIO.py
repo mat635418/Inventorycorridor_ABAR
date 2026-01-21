@@ -24,7 +24,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.79 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.795 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -1174,8 +1174,7 @@ if s_file and d_file and lt_file:
                 # add some vertical space for clarity before the checks
                 st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
-                # Shadowed separator
-                st.markdown("""<div style="height:12px;background:#f0f0f2;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,0.07);margin:12px 0;"></div>""", unsafe_allow_html=True)
+                st.markdown("---")
                 
                 c1, c2 = st.columns(2)
                 with c1:
