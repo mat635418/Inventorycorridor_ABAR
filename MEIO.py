@@ -25,7 +25,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.93 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.94 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -747,7 +747,7 @@ if s_file and d_file and lt_file:
             df_all_periods = pd.DataFrame({'Period': all_periods})
             plot_full = pd.merge(df_all_periods, plot_df[['Period','Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']], on='Period', how='left')
             # fill missing with zeros so months with no data are shown explicitly
-            plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']].fillna(0)
+            plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_Ex[...]
 
             # New: Allow toggling Max Corridor visibility (default OFF)
             show_max_corridor = st.checkbox("Show Max Corridor", value=False, key="show_max_corridor")
@@ -845,18 +845,12 @@ if s_file and d_file and lt_file:
                         sl_label = str(sl_node)
 
                 # Build the label with explicit newlines, then replace the escaped newlines for pyvis rendering
-                d_day_val = m.get('D_day', 0.0)
-                days_cov_val = m.get('Days_Covered_by_SS', np.nan)
-                d_day_txt = f"{d_day_val:.2f}/day" if (d_day_val is not None and not pd.isna(d_day_val)) else "-"
-                days_cov_txt = f"{days_cov_val:.1f}d" if (days_cov_val is not None and not pd.isna(days_cov_val)) else "-"
-
+                # Avg/day and Days covered removed from the topology labels as requested.
                 lbl = (
                     f"{n}\\n"
                     f"LDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\n"
                     f"EXT: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\\n"
                     f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\\n"
-                    f"Avg/day: {d_day_txt}\\n"
-                    f"DaysCov: {days_cov_txt}\\n"
                     f"Hops: {int(hops) if (hops is not None and not pd.isna(hops)) else '-'}\\n"
                     f"SL: {sl_label}"
                 )
@@ -997,8 +991,8 @@ if s_file and d_file and lt_file:
 
             filtered_display = hide_zero_rows(filtered)
 
-            display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Adjustment_Status','Max_Corridor']
-            fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
+            display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Adjustment_Status','Ma[...]
+            fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Max_Corridor'] if c in filtered_display.colu[...]
 
             # Removed the "TOTAL" header row above the table as requested (no totals in Tab 3)
 
@@ -1492,7 +1486,7 @@ if s_file and d_file and lt_file:
                 mat['LT_Mean'] = mat['LT_Mean'].fillna(0); mat['LT_Std'] = mat['LT_Std'].fillna(0)
                 mat['Agg_Std_Hist'] = mat['Agg_Std_Hist'].fillna(0); mat['Pre_Rule_SS'] = mat['Pre_Rule_SS'].fillna(0)
                 mat['Safety_Stock'] = mat['Safety_Stock'].fillna(0); mat['Forecast'] = mat['Forecast'].fillna(0)
-                mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0); mat['Agg_Future_Internal'] = mat['Agg_Future_Internal'].fillna(0); mat['Agg_Future_External'] = mat['Agg_Future_External'].fillna(0)
+                mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0); mat['Agg_Future_Internal'] = mat['Agg_Future_Internal'].fillna(0); mat['Agg_Future_External'] = mat['Agg_Future_External'...]
                 mat['D_day'] = mat['D_day'].fillna(0); mat['Days_Covered_by_SS'] = mat['Days_Covered_by_SS'].fillna(0)
 
                 mat['term1'] = (mat['Agg_Std_Hist']**2 / float(days_per_month)) * mat['LT_Mean']
