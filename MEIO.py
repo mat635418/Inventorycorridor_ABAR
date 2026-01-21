@@ -857,15 +857,20 @@ if s_file and d_file and lt_file:
             net = Network(height="700px", width="100%", directed=True, bgcolor="#ffffff", font_color="#222222")
 
             hubs = {"B616", "BEEX", "LUEX"}
-            all_nodes = set(sku_lt['From_Location']).union(set(sku_lt['To_Location']))
-            all_nodes = set(all_nodes).union(hubs)
+            # build node set safely (drop NA)
+            if not sku_lt.empty:
+                froms = set(sku_lt['From_Location'].dropna().unique().tolist())
+                tos = set(sku_lt['To_Location'].dropna().unique().tolist())
+                all_nodes = froms.union(tos).union(hubs)
+            else:
+                all_nodes = set(hubs)
 
             demand_lookup = {}
             for n in all_nodes:
-                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
+                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan})
 
             for n in sorted(all_nodes):
-                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0})
+                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan})
                 # Now show zeros explicitly in labels by forcing show_zero=True
                 # Node considered 'used' visually if any of the metrics are > 0
                 used = (float(m.get('Agg_Future_Demand', 0)) > 0) or (float(m.get('Forecast', 0)) > 0)
@@ -880,17 +885,39 @@ if s_file and d_file and lt_file:
                     else:
                         bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
 
-                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), [...]
+                # Try to display hops and node SL where available
+                hops = m.get('Tier_Hops', None)
+                sl_node = m.get('Service_Level_Node', None)
+                sl_label = "-"
+                if pd.notna(sl_node):
+                    try:
+                        sl_label = f"{float(sl_node) * 100:.2f}%"
+                    except Exception:
+                        sl_label = str(sl_node)
+
+                # Build the label with explicit newlines, then replace the escaped newlines for pyvis rendering
+                lbl = (
+                    f"{n}\\n"
+                    f"LDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\n"
+                    f"TND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\n"
+                    f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\\n"
+                    f"Hops: {int(hops) if (hops is not None and not pd.isna(hops)) else '-'}\\n"
+                    f"SL: {sl_label}"
+                )
                 lbl = lbl.replace("\\n", "\n")
                 net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
 
-            for _, r in sku_lt.iterrows():
-                from_n, to_n = r['From_Location'], r['To_Location']
-                from_used = (demand_lookup.get(from_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(from_n, {}).get('Forecast', 0) > 0)
-                to_used = (demand_lookup.get(to_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(to_n, {}).get('Forecast', 0) > 0)
-                edge_color = '#dddddd' if not from_used and not to_used else '#888888'
-                label = f"{int(r.get('Lead_Time_Days', 0))}d" if not pd.isna(r.get('Lead_Time_Days', 0)) else ""
-                net.add_edge(from_n, to_n, label=label, color=edge_color)
+            # add edges
+            if not sku_lt.empty:
+                for _, r in sku_lt.iterrows():
+                    from_n, to_n = r['From_Location'], r['To_Location']
+                    if pd.isna(from_n) or pd.isna(to_n):
+                        continue
+                    from_used = (demand_lookup.get(from_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(from_n, {}).get('Forecast', 0) > 0)
+                    to_used = (demand_lookup.get(to_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(to_n, {}).get('Forecast', 0) > 0)
+                    edge_color = '#dddddd' if not from_used and not to_used else '#888888'
+                    label = f"{int(r.get('Lead_Time_Days', 0))}d" if not pd.isna(r.get('Lead_Time_Days', 0)) else ""
+                    net.add_edge(from_n, to_n, label=label, color=edge_color)
 
             net.set_options("""
             {
