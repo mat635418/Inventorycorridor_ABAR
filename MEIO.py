@@ -313,7 +313,7 @@ def period_label(ts):
 # SIDEBAR: collapsible sections (all collapsed by default except Data Sources)
 # ----------------------
 
-with st.sidebar.expander("⚙️ Service Level Configuration", expanded=False):
+with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
     service_level = st.slider(
         "Service Level (%)",
         50.0,
@@ -324,7 +324,7 @@ with st.sidebar.expander("⚙️ Service Level Configuration", expanded=False):
     # keep z for backward compatibility but prefer computing local z where needed
     z = norm.ppf(service_level)
 
-with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=False):
+with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
     zero_if_no_net_fcst = st.checkbox(
         "Force Zero SS if No Network Demand",
         value=True,
@@ -341,30 +341,6 @@ with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=False):
         500,
         (0, 200),
         help="Lower and upper bounds (as % of total network demand) applied to Safety Stock. For example, 0–200% allows SS up to twice the node's network demand."
-    )
-
-with st.sidebar.expander("⚙️ Aggregation & Uncertainty", expanded=False):
-    agg_mode = st.selectbox(
-        "Network Aggregation Mode",
-        ["Transitive (full downstream)", "Direct children only"],
-        index=0,
-        help="Choose how downstream demand is aggregated: 'Transitive' includes all downstream nodes recursively; 'Direct' uses only immediate children."
-    )
-    use_transitive = True if agg_mode.startswith("Transitive") else False
-
-    var_rho = st.slider(
-        "Variance damping factor (ρ)",
-        0.0,
-        1.0,
-        1.0,
-        help="Scales how much downstream nodes' variance contributes to a parent's variance (0 = ignore downstream variance; 1 = full add)."
-    )
-
-    lt_mode = st.selectbox(
-        "Lead-time variance handling",
-        ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"],
-        index=0,
-        help="How lead-time uncertainty is included: 'Apply LT variance' uses each node's lead-time variance; 'Ignore LT variance' omits lead-time uncertainty from the SS calculation; 'Average LT Std across downstream' computes the mean LT std across reachable downstream nodes and uses that."
     )
 
 st.sidebar.markdown("---")
