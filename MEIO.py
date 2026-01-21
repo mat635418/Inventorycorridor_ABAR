@@ -965,28 +965,41 @@ if s_file and d_file and lt_file:
             display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
             fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
 
-            # --- New: show totals row ABOVE the main table so totals are directly aligned with columns ---
-            # Build a one-row totals DataFrame matching display columns, place 'TOTALS' in 'Product' and numeric sums in numeric columns.
-            totals_row = {c: "" for c in display_cols}
-            totals_row['Product'] = "TOTALS"
-            for c in fmt_cols:
-                try:
-                    totals_row[c] = filtered[c].sum() if not filtered.empty else 0.0
-                except Exception:
-                    totals_row[c] = ""
-            totals_df = pd.DataFrame([totals_row])
-            # Format totals for display
+            # --- New: display ONLY TOTAL for Safety Stock above the same column in the table ---
+            # We'll create a row of empty columns and place a bold, larger "TOTAL" label + value above the Safety_Stock column
             try:
-                totals_disp = df_format_for_display(totals_df.copy(), cols=fmt_cols, two_decimals_cols=fmt_cols)
-                st.dataframe(totals_disp[display_cols], use_container_width=True, height=60)
+                # Find index of Safety_Stock in display columns
+                if 'Safety_Stock' in display_cols:
+                    idx_ss = display_cols.index('Safety_Stock')
+                else:
+                    idx_ss = None
+
+                # Create top-aligned empty columns matching the table columns, put TOTAL only in Safety_Stock column
+                top_cols = st.columns([1]*len(display_cols))
+                for i, colname in enumerate(display_cols):
+                    if i == idx_ss:
+                        # big bold total value centered
+                        total_val = filtered['Safety_Stock'].sum() if not filtered.empty else 0.0
+                        top_cols[i].markdown(f"<div style='text-align:center;color:#222;font-weight:700;font-size:16px;'>TOTAL</div>", unsafe_allow_html=True)
+                        top_cols[i].markdown(f"<div style='text-align:center;color:#0b3d91;font-weight:800;font-size:20px;margin-top:4px;'>{euro_format(total_val, True)}</div>", unsafe_allow_html=True)
+                    else:
+                        # render a small placeholder to keep vertical spacing aligned
+                        top_cols[i].markdown("<div style='height:36px'></div>", unsafe_allow_html=True)
             except Exception:
-                # fallback: plain markdown separator + single-line totals
-                st.markdown("---")
-                totals_line = " | ".join([f"**{c}**: {euro_format(totals_row[c], True) if c in fmt_cols else ''}" for c in display_cols if c in ['Product','Forecast','Agg_Future_Demand','Safety_Stock']])
-                st.markdown(totals_line)
+                # fallback: simple totals line above table
+                st.markdown(f"**TOTAL Safety Stock:** {euro_format(total_ss_filtered, True)}")
 
             # Show main table below the totals row
-            disp = df_format_for_display(filtered_display[display_cols].copy(), cols=fmt_cols, two_decimals_cols=fmt_cols)
+            # Make Period human-friendly like the filters (e.g., "JAN 2026")
+            disp_df = filtered_display.copy()
+            if 'Period' in disp_df.columns:
+                try:
+                    disp_df['Period'] = disp_df['Period'].apply(period_label)
+                except Exception:
+                    # leave as-is on failure
+                    pass
+
+            disp = df_format_for_display(disp_df[display_cols].copy(), cols=fmt_cols, two_decimals_cols=fmt_cols)
             st.dataframe(disp, use_container_width=True, height=700)
 
             csv_buf = filtered[display_cols].to_csv(index=False)
