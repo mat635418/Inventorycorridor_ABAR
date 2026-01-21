@@ -98,7 +98,7 @@ def df_format_for_display(df, cols=None, two_decimals_cols=None):
     for c in cols:
         if c in d.columns:
             if two_decimals_cols and c in two_decimals_cols:
-                d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=True))
+                d[c] = d[c].apply(lambda v: ("{:.2f}".format(v) if (pd.notna(v) and isinstance(v, (int,float))) else euro_format(v, always_two_decimals=True)))
             else:
                 d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=False))
     return d
@@ -564,6 +564,17 @@ def run_pipeline(df_d, stats, df_lt, service_level,
     res.loc[res['Location'] == 'B616', 'Safety_Stock'] = 0
     res['Max_Corridor'] = res['Safety_Stock'] + res['Forecast']
 
+    # New diagnostics: Days covered by Safety Stock (safe handling)
+    def compute_days_covered(r):
+        try:
+            d = float(r.get('D_day', 0.0))
+            if d <= 0:
+                return np.nan
+            return float(r.get('Safety_Stock', 0.0)) / d
+        except Exception:
+            return np.nan
+    res['Days_Covered_by_SS'] = res.apply(compute_days_covered, axis=1)
+
     # Attach tiering diagnostics summary for transparency (one row per product)
     tier_summary = []
     for p, params in product_tiering_params.items():
@@ -712,6 +723,21 @@ if s_file and d_file and lt_file:
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
+            # Show avg daily demand and days covered for the current month if available
+            try:
+                summary_row = results[(results['Product'] == sku) & (results['Location'] == loc) & (results['Period'] == CURRENT_MONTH_TS)]
+                if not summary_row.empty:
+                    srow = summary_row.iloc[0]
+                    avg_daily = srow.get('D_day', np.nan)
+                    days_cov = srow.get('Days_Covered_by_SS', np.nan)
+                    avg_daily_txt = f"{avg_daily:.2f} units/day" if pd.notna(avg_daily) else "N/A"
+                    days_cov_txt = f"{days_cov:.1f} days" if pd.notna(days_cov) else "N/A"
+                    st.markdown(f"**Avg/day:** {avg_daily_txt}")
+                    st.markdown(f"**Days covered (SS):** {days_cov_txt}")
+            except Exception:
+                # silent fallback
+                pass
+
         with col_main:
             # Show the same compact selected text immediately at the start of the tab (as requested)
             st.markdown(f"**Selected**: {sku} — {loc}")
@@ -721,7 +747,7 @@ if s_file and d_file and lt_file:
             df_all_periods = pd.DataFrame({'Period': all_periods})
             plot_full = pd.merge(df_all_periods, plot_df[['Period','Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']], on='Period', how='left')
             # fill missing with zeros so months with no data are shown explicitly
-            plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_Ex[...]
+            plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']].fillna(0)
 
             # New: Allow toggling Max Corridor visibility (default OFF)
             show_max_corridor = st.checkbox("Show Max Corridor", value=False, key="show_max_corridor")
@@ -791,10 +817,10 @@ if s_file and d_file and lt_file:
 
             demand_lookup = {}
             for n in all_nodes:
-                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan})
+                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': np.nan})
 
             for n in sorted(all_nodes):
-                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan})
+                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': np.nan})
                 # Node considered 'used' visually if any of the metrics are > 0
                 used = (float(m.get('Agg_Future_External', 0)) > 0) or (float(m.get('Forecast', 0)) > 0)
 
@@ -819,11 +845,18 @@ if s_file and d_file and lt_file:
                         sl_label = str(sl_node)
 
                 # Build the label with explicit newlines, then replace the escaped newlines for pyvis rendering
+                d_day_val = m.get('D_day', 0.0)
+                days_cov_val = m.get('Days_Covered_by_SS', np.nan)
+                d_day_txt = f"{d_day_val:.2f}/day" if (d_day_val is not None and not pd.isna(d_day_val)) else "-"
+                days_cov_txt = f"{days_cov_val:.1f}d" if (days_cov_val is not None and not pd.isna(days_cov_val)) else "-"
+
                 lbl = (
                     f"{n}\\n"
                     f"LDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\n"
                     f"EXT: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\\n"
                     f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\\n"
+                    f"Avg/day: {d_day_txt}\\n"
+                    f"DaysCov: {days_cov_txt}\\n"
                     f"Hops: {int(hops) if (hops is not None and not pd.isna(hops)) else '-'}\\n"
                     f"SL: {sl_label}"
                 )
@@ -964,8 +997,8 @@ if s_file and d_file and lt_file:
 
             filtered_display = hide_zero_rows(filtered)
 
-            display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
-            fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
+            display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Adjustment_Status','Max_Corridor']
+            fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
 
             # Removed the "TOTAL" header row above the table as requested (no totals in Tab 3)
 
@@ -979,7 +1012,7 @@ if s_file and d_file and lt_file:
                     # leave as-is on failure
                     pass
 
-            disp = df_format_for_display(disp_df[display_cols].copy(), cols=fmt_cols, two_decimals_cols=fmt_cols)
+            disp = df_format_for_display(disp_df[display_cols].copy(), cols=fmt_cols, two_decimals_cols=['D_day','Days_Covered_by_SS'])
             st.dataframe(disp, use_container_width=True, height=700)
 
             csv_buf = filtered[display_cols].to_csv(index=False)
@@ -1220,6 +1253,11 @@ if s_file and d_file and lt_file:
 
                 # Highlight the exact values used for the calculation in a compact summary box
                 # Build HTML summary with key inputs and highlight
+                avg_daily = row.get('D_day', np.nan)
+                days_cov = row.get('Days_Covered_by_SS', np.nan)
+                avg_daily_txt = f"{avg_daily:.2f}" if pd.notna(avg_daily) else "N/A"
+                days_cov_txt = f"{days_cov:.1f}" if pd.notna(days_cov) else "N/A"
+
                 summary_html = f"""
                 <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
                   <div style="flex:0 0 48%;background:#e8f0ff;border-radius:8px;padding:12px;">
@@ -1248,6 +1286,16 @@ if s_file and d_file and lt_file:
                     <div style="font-size:12px;color:#01579b;font-weight:600;">LT Std Dev (days)</div>
                     <div style="font-size:18px;font-weight:800;color:#01579b;">{row['LT_Std']}</div>
                   </div>
+
+                  <div style="flex:0 0 48%;background:#ffffff;border-radius:8px;padding:12px;border:1px solid #eaeaea;">
+                    <div style="font-size:12px;color:#333;font-weight:600;">Avg Daily Demand</div>
+                    <div style="font-size:16px;font-weight:800;color:#333;">{avg_daily_txt} units/day</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#ffffff;border-radius:8px;padding:12px;border:1px solid #eaeaea;">
+                    <div style="font-size:12px;color:#333;font-weight:600;">Days Covered by SS</div>
+                    <div style="font-size:16px;font-weight:800;color:#333;">{days_cov_txt} days</div>
+                  </div>
+
                 </div>
                 """
                 st.markdown("**Values used for the calculation (highlighted above):**")
@@ -1420,12 +1468,18 @@ if s_file and d_file and lt_file:
             total_ss = mat_period_df['Safety_Stock'].sum(); nodes_count = mat_period_df['Location'].nunique()
             avg_ss_per_node = (mat_period_df['Safety_Stock'].mean() if nodes_count > 0 else 0)
 
+            # compute avg days covered (across nodes) for KPI
+            try:
+                avg_days_covered = mat_period_df['Days_Covered_by_SS'].replace([np.inf, -np.inf], np.nan).mean()
+            except Exception:
+                avg_days_covered = np.nan
+
             # --- Removed the 'Total Network Demand' metric from the top KPIs as requested ---
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Total Local Forecast", euro_format(total_forecast, True))
             k2.metric("Total Safety Stock (sum nodes)", euro_format(total_ss, True))
             k3.metric("Nodes", f"{nodes_count}")
-            k4.metric("Avg SS per Node", euro_format(avg_ss_per_node, True))
+            k4.metric("Avg Days Covered (nodes)", f"{avg_days_covered:.1f}" if not pd.isna(avg_days_covered) else "N/A")
 
             # Insert a clear bar separator before the "Why do we carry this..." section to visually separate KPIs from the breakdown
             st.markdown("---")
@@ -1438,7 +1492,9 @@ if s_file and d_file and lt_file:
                 mat['LT_Mean'] = mat['LT_Mean'].fillna(0); mat['LT_Std'] = mat['LT_Std'].fillna(0)
                 mat['Agg_Std_Hist'] = mat['Agg_Std_Hist'].fillna(0); mat['Pre_Rule_SS'] = mat['Pre_Rule_SS'].fillna(0)
                 mat['Safety_Stock'] = mat['Safety_Stock'].fillna(0); mat['Forecast'] = mat['Forecast'].fillna(0)
-                mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0); mat['Agg_Future_Internal'] = mat['Agg_Future_Internal'].fillna(0); mat['Agg_Future_External'] = mat['Agg_Future_External'[...]
+                mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0); mat['Agg_Future_Internal'] = mat['Agg_Future_Internal'].fillna(0); mat['Agg_Future_External'] = mat['Agg_Future_External'].fillna(0)
+                mat['D_day'] = mat['D_day'].fillna(0); mat['Days_Covered_by_SS'] = mat['Days_Covered_by_SS'].fillna(0)
+
                 mat['term1'] = (mat['Agg_Std_Hist']**2 / float(days_per_month)) * mat['LT_Mean']
                 mat['term2'] = (mat['LT_Std']**2) * (mat['Agg_Future_Demand'] / float(days_per_month))**2
                 # use current service level z
