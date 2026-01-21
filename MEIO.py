@@ -127,7 +127,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
            contributes to the upstream node's variance.
 
     Returns:
-    - DataFrame with Product, Location, Period, Agg_Future_Demand, Agg_Std_Hist
+    - DataFrame with Product, Location, Period, Agg_Future_Demand, Agg_Future_Internal, Agg_Future_External, Agg_Std_Hist
     - reachable_map: mapping (product, start_location, period) -> set(reachable locations)
     """
     results = []
@@ -217,6 +217,8 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
                     'Location': n,
                     'Period': month,
                     'Agg_Future_Demand': agg_demand,
+                    'Agg_Future_Internal': local_fcst,
+                    'Agg_Future_External': child_fcst_sum,
                     'Agg_Std_Hist': agg_std
                 })
     return pd.DataFrame(results), reachable_map
@@ -239,6 +241,8 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
       the current month (CURRENT_MONTH_TS) for the badge numbers unless an explicit period is provided.
     - Badge calls euro_format(..., show_zero=True) so zeros are shown explicitly in the badge (blue box),
       while the rest of the app keeps the original zero-suppression behavior.
+
+    Updated to display Internal (local) and External (downstream) demand separately to avoid double-counting confusion.
     """
     if product is None or product == "":
         return
@@ -276,8 +280,11 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     except Exception:
         df_for_badge = df_context
 
-    local_demand = _sum_candidates(df_for_badge, ['Forecast', 'Forecast_Hist'])
-    total_demand = _sum_candidates(df_for_badge, ['Agg_Future_Demand'])
+    # Internal (local) demand = sum of Forecast
+    internal_demand = _sum_candidates(df_for_badge, ['Forecast', 'Forecast_Hist'])
+    # External = aggregated downstream forecasts (explicit column)
+    external_demand = _sum_candidates(df_for_badge, ['Agg_Future_External'])
+    total_demand = internal_demand + external_demand
     total_ss = _sum_candidates(df_for_badge, ['Safety_Stock'])
     title = f"{product}{(' — ' + location) if location else ''}"
 
@@ -290,12 +297,12 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
         <div style="font-size:14px;font-weight:700;text-align:right;">{euro_format(total_ss, show_zero=True)}</div>
       </div>
       <div style="background:#e3f2fd;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;margin-bottom:8px;display:block;">
-        <div style="font-size:10px;opacity:0.85;">Local Direct Demand</div>
-        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(local_demand, show_zero=True)}</div>
+        <div style="font-size:10px;opacity:0.85;">Internal (Local) Demand</div>
+        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(internal_demand, show_zero=True)}</div>
       </div>
       <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;display:block;">
-        <div style="font-size:10px;opacity:0.85;">Total Network Demand</div>
-        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(total_demand, show_zero=True)}</div>
+        <div style="font-size:10px;opacity:0.85;">External (Downstream) Demand</div>
+        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(external_demand, show_zero=True)}</div>
       </div>
     </div>
     """
@@ -412,7 +419,7 @@ def run_pipeline(df_d, stats, df_lt, service_level,
     res = pd.merge(res, node_lt_local, on=['Product', 'Location'], how='left')
 
     # sensible defaults to avoid NaNs in downstream calculations
-    res = res.fillna({'Forecast': 0, 'Agg_Std_Hist': np.nan, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0})
+    res = res.fillna({'Forecast': 0, 'Agg_Std_Hist': np.nan, 'LT_Mean': 7, 'LT_Std': 2, 'Agg_Future_Demand': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0})
 
     # if Agg_Std_Hist is missing, fall back to product median, then global median
     product_median_localstd = stats.groupby('Product')['Local_Std'].median().to_dict()
@@ -426,6 +433,8 @@ def run_pipeline(df_d, stats, df_lt, service_level,
     res['LT_Mean'] = res['LT_Mean'].astype(float)
     res['LT_Std'] = res['LT_Std'].astype(float)
     res['Agg_Future_Demand'] = res['Agg_Future_Demand'].astype(float)
+    res['Agg_Future_Internal'] = res['Agg_Future_Internal'].astype(float)
+    res['Agg_Future_External'] = res['Agg_Future_External'].astype(float)
     res['Forecast'] = res['Forecast'].astype(float)
 
     # 4) Convert monthly to daily values for demand variance modelling
@@ -764,9 +773,9 @@ if s_file and d_file and lt_file:
             plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
             # create DataFrame covering all periods (even if zeros)
             df_all_periods = pd.DataFrame({'Period': all_periods})
-            plot_full = pd.merge(df_all_periods, plot_df[['Period','Max_Corridor','Safety_Stock','Forecast','Agg_Future_Demand']], on='Period', how='left')
+            plot_full = pd.merge(df_all_periods, plot_df[['Period','Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']], on='Period', how='left')
             # fill missing with zeros so months with no data are shown explicitly
-            plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Demand']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Demand']].fillna(0)
+            plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']].fillna(0)
 
             # New: Allow toggling Max Corridor visibility (default OFF)
             show_max_corridor = st.checkbox("Show Max Corridor", value=False, key="show_max_corridor")
@@ -776,8 +785,8 @@ if s_file and d_file and lt_file:
                 traces.append(go.Scatter(x=plot_full['Period'], y=plot_full['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=1, color='rgba(0,0,0,0.1)')))
             traces.extend([
                 go.Scatter(x=plot_full['Period'], y=plot_full['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
-                go.Scatter(x=plot_full['Period'], y=plot_full['Forecast'], name='Local Direct Demand', line=dict(color='black', dash='dot')),
-                go.Scatter(x=plot_full['Period'], y=plot_full['Agg_Future_Demand'], name='Total Network Demand', line=dict(color='blue', dash='dash'))
+                go.Scatter(x=plot_full['Period'], y=plot_full['Forecast'], name='Local Direct Demand (Internal)', line=dict(color='black', dash='dot')),
+                go.Scatter(x=plot_full['Period'], y=plot_full['Agg_Future_External'], name='External Network Demand (Downstream)', line=dict(color='blue', dash='dash'))
             ])
 
             fig = go.Figure(traces)
@@ -836,13 +845,12 @@ if s_file and d_file and lt_file:
 
             demand_lookup = {}
             for n in all_nodes:
-                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan})
+                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan})
 
             for n in sorted(all_nodes):
-                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Demand': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan})
-                # Now show zeros explicitly in labels by forcing show_zero=True
+                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan})
                 # Node considered 'used' visually if any of the metrics are > 0
-                used = (float(m.get('Agg_Future_Demand', 0)) > 0) or (float(m.get('Forecast', 0)) > 0)
+                used = (float(m.get('Agg_Future_External', 0)) > 0) or (float(m.get('Forecast', 0)) > 0)
 
                 if n == 'B616':
                     bg = '#dcedc8'; border = '#8bc34a'; font_color = '#0b3d91'; size = 14
@@ -868,7 +876,7 @@ if s_file and d_file and lt_file:
                 lbl = (
                     f"{n}\\n"
                     f"LDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\n"
-                    f"TND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\n"
+                    f"EXT: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\\n"
                     f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\\n"
                     f"Hops: {int(hops) if (hops is not None and not pd.isna(hops)) else '-'}\\n"
                     f"SL: {sl_label}"
@@ -882,8 +890,8 @@ if s_file and d_file and lt_file:
                     from_n, to_n = r['From_Location'], r['To_Location']
                     if pd.isna(from_n) or pd.isna(to_n):
                         continue
-                    from_used = (demand_lookup.get(from_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(from_n, {}).get('Forecast', 0) > 0)
-                    to_used = (demand_lookup.get(to_n, {}).get('Agg_Future_Demand', 0) > 0) or (demand_lookup.get(to_n, {}).get('Forecast', 0) > 0)
+                    from_used = (demand_lookup.get(from_n, {}).get('Agg_Future_External', 0) > 0) or (demand_lookup.get(from_n, {}).get('Forecast', 0) > 0)
+                    to_used = (demand_lookup.get(to_n, {}).get('Agg_Future_External', 0) > 0) or (demand_lookup.get(to_n, {}).get('Forecast', 0) > 0)
                     edge_color = '#dddddd' if not from_used and not to_used else '#888888'
                     label = f"{int(r.get('Lead_Time_Days', 0))}d" if not pd.isna(r.get('Lead_Time_Days', 0)) else ""
                     net.add_edge(from_n, to_n, label=label, color=edge_color)
@@ -938,7 +946,7 @@ if s_file and d_file and lt_file:
                   <div style="display:inline-block; background:#f7f9fc; padding:8px 12px; border-radius:8px;">
                     <strong>Legend:</strong><br/>
                     LDD = Local Direct Demand (local forecast) &nbsp;&nbsp;|&nbsp;&nbsp;
-                    TND = Total Network Demand (aggregated downstream + local) &nbsp;&nbsp;|&nbsp;&nbsp;
+                    EXT = External Demand (downstream forecasts rolled-up) &nbsp;&nbsp;|&nbsp;&nbsp;
                     SS  = Safety Stock (final policy value)
                   </div>
                 </div>
@@ -1006,8 +1014,8 @@ if s_file and d_file and lt_file:
 
             filtered_display = hide_zero_rows(filtered)
 
-            display_cols = ['Product','Location','Period','Forecast','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
-            fmt_cols = [c for c in ['Forecast','Agg_Future_Demand','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
+            display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
+            fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
             disp = df_format_for_display(filtered_display[display_cols].copy(), cols=fmt_cols, two_decimals_cols=fmt_cols)
             st.dataframe(disp, use_container_width=True, height=700)
 
@@ -1461,7 +1469,7 @@ if s_file and d_file and lt_file:
                 mat['LT_Mean'] = mat['LT_Mean'].fillna(0); mat['LT_Std'] = mat['LT_Std'].fillna(0)
                 mat['Agg_Std_Hist'] = mat['Agg_Std_Hist'].fillna(0); mat['Pre_Rule_SS'] = mat['Pre_Rule_SS'].fillna(0)
                 mat['Safety_Stock'] = mat['Safety_Stock'].fillna(0); mat['Forecast'] = mat['Forecast'].fillna(0)
-                mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0)
+                mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0); mat['Agg_Future_Internal'] = mat['Agg_Future_Internal'].fillna(0); mat['Agg_Future_External'] = mat['Agg_Future_External'].fillna(0)
                 mat['term1'] = (mat['Agg_Std_Hist']**2 / float(days_per_month)) * mat['LT_Mean']
                 mat['term2'] = (mat['LT_Std']**2) * (mat['Agg_Future_Demand'] / float(days_per_month))**2
                 # use current service level z
@@ -1469,7 +1477,8 @@ if s_file and d_file and lt_file:
                 mat['demand_uncertainty_raw'] = z_current * np.sqrt(mat['term1'].clip(lower=0))
                 mat['lt_uncertainty_raw'] = z_current * np.sqrt(mat['term2'].clip(lower=0))
                 mat['direct_forecast_raw'] = mat['Forecast'].clip(lower=0)
-                mat['indirect_network_raw'] = (mat['Agg_Future_Demand'] - mat['Forecast']).clip(lower=0)
+                # use explicit Agg_Future_External for indirect/downstream amount
+                mat['indirect_network_raw'] = mat['Agg_Future_External'].clip(lower=0)
                 mat['cap_reduction_raw'] = ((mat['Pre_Rule_SS'] - mat['Safety_Stock']).clip(lower=0)).fillna(0)
                 mat['cap_increase_raw'] = ((mat['Safety_Stock'] - mat['Pre_Rule_SS']).clip(lower=0)).fillna(0)
                 mat['forced_zero_raw'] = mat.apply(lambda r: r['Pre_Rule_SS'] if r['Adjustment_Status'] == 'Forced to Zero' else 0, axis=1)
