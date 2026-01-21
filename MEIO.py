@@ -278,7 +278,7 @@ with st.sidebar.expander("⚙️ Service Level Configuration", expanded=False):
     ) / 100
     z = norm.ppf(service_level)
 
-with st.sidebar.expander("🛡️ Safety Stock Rules", expanded=False):
+with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=False):
     # Extended explanation:
     # - zero_if_no_net_fcst: when enabled, nodes with zero aggregated network demand are forced to have 0 Safety Stock.
     #   This avoids retaining inventory at inactive or decommissioned nodes.
