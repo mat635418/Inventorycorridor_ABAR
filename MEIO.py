@@ -24,7 +24,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.795 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.798 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -369,7 +369,7 @@ with st.sidebar.expander("⚙️ Aggregation & Uncertainty", expanded=False):
         "Lead-time variance handling",
         ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"],
         index=0,
-        help="How lead-time uncertainty is included: 'Apply LT variance' uses each node's lead-time variance; 'Ignore LT variance' omits lead-time uncertainty from the SS calculation; 'Average LT Std across downstream' uses the mean downstream LT std to smooth local LT uncertainty."
+        help="How lead-time uncertainty is included: 'Apply LT variance' uses each node's lead-time variance; 'Ignore LT variance' omits lead-time uncertainty from the SS calculation; 'Average LT Std across downstream' computes the mean LT std across reachable downstream nodes and uses that."
     )
 
 st.sidebar.markdown("---")
@@ -1031,14 +1031,21 @@ if s_file and d_file and lt_file:
             else:
                 calc_period = CURRENT_MONTH_TS
 
+            # IMPORTANT: recompute pipeline here so the calc tab always shows values for the current sidebar params
+            # (service level, caps, zero_if_no_net_fcst, agg mode, var_rho, lt_mode, ...)
+            results, reachable_map = run_pipeline(transitive=use_transitive, rho=var_rho, lt_mode_param=lt_mode)
+
+            # Small selection badge must use the freshly computed results slice
             row_df_small = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
             render_selection_badge(product=calc_sku, location=calc_loc if calc_loc != "(no location)" else None, df_context=row_df_small)
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
 
         with col_main:
             st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
             st.write("See how changing service level or lead-time assumptions affects safety stock. The scenario planning area below is collapsed by default.")
 
+            # Use the freshly computed results (ensures calculation steps match current sidebar settings)
             row_df = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
             if row_df.empty:
                 st.warning("Selection not found in results.")
@@ -1048,12 +1055,15 @@ if s_file and d_file and lt_file:
                 st.markdown("---")
                 st.subheader("1. Frozen Inputs (current)")
                 i1, i2, i3, i4, i5 = st.columns(5)
-                i1.metric("Service Level", f"{service_level*100:.2f}%", help=f"Z-Score: {z:.4f}")
+                # recompute z here from service_level to be explicit / consistent
+                z_current = norm.ppf(service_level)
+                i1.metric("Service Level", f"{service_level*100:.2f}%", help=f"Z-Score: {z_current:.4f}")
                 i2.metric("Network Demand (D, monthly)", euro_format(row['Agg_Future_Demand'], True), help="Aggregated Future Demand (monthly)")
                 i3.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True), help="Aggregated Historical Std Dev (monthly totals)")
                 i4.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days"); i5.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
 
                 st.subheader("2. Statistical Calculation (Actual)")
+                # Recompute the same steps shown in the pipeline but using current service_level / z_current
                 sigma_d_day = float(row['Agg_Std_Hist']) / math.sqrt(float(days_per_month))
                 d_day = float(row['Agg_Future_Demand']) / float(days_per_month)
                 demand_var_day = sigma_d_day**2
@@ -1062,7 +1072,7 @@ if s_file and d_file and lt_file:
                 term1_demand_var = demand_var_day * float(row['LT_Mean'])
                 term2_supply_var = (float(row['LT_Std'])**2) * (d_day**2)
                 combined_sd = math.sqrt(max(term1_demand_var + term2_supply_var, 0.0))
-                raw_ss_calc = float(norm.ppf(service_level)) * combined_sd
+                raw_ss_calc = float(z_current) * combined_sd
                 ss_floor = (d_day * float(row['LT_Mean'])) * 0.01
 
                 st.latex(r"SS = Z \times \sqrt{\sigma_D^2 \cdot L \;+\; \sigma_L^2 \cdot D^2}")
@@ -1079,7 +1089,9 @@ if s_file and d_file and lt_file:
     6. Floor applied (1% of mean LT demand) = {ss_floor:.2f} units
     7. Pre-rule SS (max of raw vs floor) = {max(raw_ss_calc, ss_floor):.2f} units
     """)
-                st.info(f"🧮 **Resulting Pre-rule SS:** {euro_format(max(raw_ss_calc, ss_floor), True)} units")
+                # Show the PRE-RULE SS using the freshly computed Pre_Rule_SS (from run_pipeline)
+                st.info(f"🧮 **Resulting Pre-rule SS:** {euro_format(row['Pre_Rule_SS'], True)} units")
+                st.info(f"📦 **Implemented Safety Stock (after business rules):** {euro_format(row['Safety_Stock'], True)} units")
 
                 # Scenario planning (analysis-only, does not alter implemented policy)
                 with st.expander("Scenario Planning (expand to configure scenarios)", expanded=False):
@@ -1094,8 +1106,10 @@ if s_file and d_file and lt_file:
                         with st.expander(f"Scenario {s+1} inputs", expanded=False):
                             sc_sl_default = float(service_level*100) if s==0 else min(99.9, float(service_level*100) + 0.5*s)
                             sc_sl = st.slider(f"Scenario {s+1} Service Level (%)", 50.0, 99.9, sc_sl_default, key=f"sc_sl_{s}")
-                            sc_lt = st.slider(f"Scenario {s+1} Service Level Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2), value=float(row['LT_Mean'] if s==0 else row['LT_Mean']), key=f"sc_lt_{s}")
-                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_lt_std_{s}")
+                            sc_lt_default = float(row['LT_Mean']) if s==0 else float(row['LT_Mean'])
+                            sc_lt = st.slider(f"Scenario {s+1} Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2), value=sc_lt_default, key=f"sc_lt_{s}")
+                            sc_lt_std_default = float(row['LT_Std']) if s==0 else float(row['LT_Std'])
+                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2), value=sc_lt_std_default, key=f"sc_lt_std_{s}")
                             scenarios.append({'SL_pct': sc_sl, 'LT_mean': sc_lt, 'LT_std': sc_lt_std})
 
                     scen_rows = []
