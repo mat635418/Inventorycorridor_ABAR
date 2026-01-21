@@ -61,7 +61,12 @@ def clean_numeric(series):
     out = pd.to_numeric(s, errors='coerce')
     return out
 
-def euro_format(x, always_two_decimals=True):
+def euro_format(x, always_two_decimals=True, show_zero=False):
+    """
+    Format numeric values using '.' as thousands separator (e.g. 1.234)
+    Default behaviour: hide zeros (return empty string) to preserve prior app UI.
+    If show_zero=True, zeros will be shown as '0' (or '0' formatted).
+    """
     try:
         if x is None:
             return ""
@@ -75,7 +80,9 @@ def euro_format(x, always_two_decimals=True):
         if math.isnan(xv):
             return ""
         if math.isclose(xv, 0.0, abs_tol=1e-9):
-            return ""
+            if not show_zero:
+                return ""
+            # if show_zero, continue and format zero as '0' (or '0.00' if requested)
         neg = xv < 0
         rounded = int(round(abs(xv)))
         s = f"{rounded:,}"
@@ -223,7 +230,16 @@ def render_logo_above_parameters(scale=1.5):
         except Exception:
             pass
 
-def render_selection_badge(product=None, location=None, df_context=None, small=False):
+def render_selection_badge(product=None, location=None, df_context=None, small=False, period=None):
+    """
+    Renders the compact selection badge.
+
+    Behavior change:
+    - If df_context contains a 'Period' column and contains multiple periods, we default to using
+      the current month (CURRENT_MONTH_TS) for the badge numbers unless an explicit period is provided.
+    - Badge calls euro_format(..., show_zero=True) so zeros are shown explicitly in the badge (blue box),
+      while the rest of the app keeps the original zero-suppression behavior.
+    """
     if product is None or product == "":
         return
 
@@ -238,9 +254,31 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
                     return 0.0
         return 0.0
 
-    local_demand = _sum_candidates(df_context, ['Forecast', 'Forecast_Hist'])
-    total_demand = _sum_candidates(df_context, ['Agg_Future_Demand'])
-    total_ss = _sum_candidates(df_context, ['Safety_Stock'])
+    # If df_context has Periods and no explicit period requested, prefer current month if present,
+    # otherwise show the latest period available.
+    df_for_badge = df_context
+    try:
+        if df_for_badge is not None and 'Period' in df_for_badge.columns:
+            if period is None:
+                # CURRENT_MONTH_TS is defined later in the script but exists at call time.
+                preferred = CURRENT_MONTH_TS
+            else:
+                preferred = period
+            if preferred in df_for_badge['Period'].values:
+                df_for_badge = df_for_badge[df_for_badge['Period'] == preferred]
+            else:
+                # fallback to the most recent period available in df_for_badge
+                try:
+                    max_p = df_for_badge['Period'].max()
+                    df_for_badge = df_for_badge[df_for_badge['Period'] == max_p]
+                except Exception:
+                    pass
+    except Exception:
+        df_for_badge = df_context
+
+    local_demand = _sum_candidates(df_for_badge, ['Forecast', 'Forecast_Hist'])
+    total_demand = _sum_candidates(df_for_badge, ['Agg_Future_Demand'])
+    total_ss = _sum_candidates(df_for_badge, ['Safety_Stock'])
     title = f"{product}{(' — ' + location) if location else ''}"
 
     badge_html = f"""
@@ -249,15 +287,15 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
       <div style="font-size:13px;font-weight:700;margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title}</div>
       <div style="background:#FFC107;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;margin-bottom:10px;display:block;">
         <div style="font-size:11px;font-weight:600;margin-bottom:4px;">Safety Stock</div>
-        <div style="font-size:14px;font-weight:700;text-align:right;">{euro_format(total_ss)}</div>
+        <div style="font-size:14px;font-weight:700;text-align:right;">{euro_format(total_ss, show_zero=True)}</div>
       </div>
       <div style="background:#e3f2fd;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;margin-bottom:8px;display:block;">
         <div style="font-size:10px;opacity:0.85;">Local Demand</div>
-        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(local_demand)}</div>
+        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(local_demand, show_zero=True)}</div>
       </div>
       <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;display:block;">
         <div style="font-size:10px;opacity:0.85;">Total Network Demand</div>
-        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(total_demand)}</div>
+        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(total_demand, show_zero=True)}</div>
       </div>
     </div>
     """
@@ -565,9 +603,17 @@ if s_file and d_file and lt_file:
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key='tab1_sku')
 
-            loc_opts = sorted(meaningful_results[meaningful_results['Product'] == sku]['Location'].unique().tolist())
+            # Prefer locations that are relevant in the CURRENT month
+            loc_opts = sorted(meaningful_results[(meaningful_results['Product'] == sku) & (meaningful_results['Period'] == CURRENT_MONTH_TS)]['Location'].unique().tolist())
+            if not loc_opts:
+                loc_opts = sorted(results[(results['Product'] == sku) & (results['Period'] == CURRENT_MONTH_TS)]['Location'].unique().tolist())
+            if not loc_opts:
+                loc_opts = sorted(meaningful_results[meaningful_results['Product'] == sku]['Location'].unique().tolist())
             if not loc_opts:
                 loc_opts = sorted(results[results['Product'] == sku]['Location'].unique().tolist())
+            if not loc_opts:
+                loc_opts = ["(no location)"]
+
             loc_default = DEFAULT_LOCATION_CHOICE if DEFAULT_LOCATION_CHOICE in loc_opts else (loc_opts[0] if loc_opts else "(no location)")
             loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
             if loc_opts:
@@ -575,6 +621,7 @@ if s_file and d_file and lt_file:
             else:
                 loc = st.selectbox("LOCATION", ["(no location)"], index=0, key='tab1_loc')
 
+            # Render badge using current month context (badge will internally filter to current month)
             render_selection_badge(product=sku, location=loc if loc != "(no location)" else None, df_context=results[(results['Product'] == sku) & (results['Location'] == loc)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
