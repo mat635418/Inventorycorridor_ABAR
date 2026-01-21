@@ -27,6 +27,9 @@ st.set_page_config(page_title="MEIO for RM", layout="wide")
 LOGO_FILENAME = "GY_logo.jpg"
 LOGO_BASE_WIDTH = 160  # previous size; we'll scale by 1.5 where requested
 
+# Fixed conversion: use 30 days/month (widget removed from sidebar)
+days_per_month = 30
+
 # Title is the top page element. Version bumped to 0.76
 st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.76 — Jan 2026</h1>", unsafe_allow_html=True)
 
@@ -302,32 +305,60 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
 # SIDEBAR & FILES
 # -------------------------------
 st.sidebar.header("⚙️ Parameters")
-service_level = st.sidebar.slider("Service Level (%)", 50.0, 99.9, 99.0) / 100
+service_level = st.sidebar.slider(
+    "Service Level (%)",
+    50.0,
+    99.9,
+    99.0,
+    help="Target probability of not stocking out. Higher values increase the Z-score and therefore Safety Stock — reduces stockouts but raises inventory holdings."
+) / 100
 z = norm.ppf(service_level)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("📐 Calculation Settings")
-# Days per month removed from sidebar per request; use default 30 days.
-days_per_month = 30
-st.sidebar.caption("Using fixed conversion: 30 days per month (default)")
-
-st.sidebar.markdown("---")
 st.sidebar.subheader("🛡️ Safety Stock Rules")
-zero_if_no_net_fcst = st.sidebar.checkbox("Force Zero SS if No Network Demand", value=True)
-apply_cap = st.sidebar.checkbox("Enable SS Capping (% of Network Demand)", value=True)
-cap_range = st.sidebar.slider("Cap Range (%)", 0, 500, (0, 200),
-                              help="Ensures SS stays between these % of total network demand for that node.")
+zero_if_no_net_fcst = st.sidebar.checkbox(
+    "Force Zero SS if No Network Demand",
+    value=True,
+    help="When enabled, nodes with zero aggregated network demand will have Safety Stock forced to zero. Use to avoid holding inventory at inactive nodes."
+)
+apply_cap = st.sidebar.checkbox(
+    "Enable SS Capping (% of Network Demand)",
+    value=True,
+    help="Enable clipping of calculated Safety Stock within a percentage range of the node's total network demand to limit extreme policies."
+)
+cap_range = st.sidebar.slider(
+    "Cap Range (%)",
+    0,
+    500,
+    (0, 200),
+    help="Lower and upper bounds (as % of total network demand) applied to Safety Stock. For example, 0–200% allows SS up to twice the node's network demand."
+)
 st.sidebar.markdown("---")
 
 # NEW: Aggregation / variance / LT controls
 st.sidebar.subheader("⚙️ Aggregation & Uncertainty Controls")
-agg_mode = st.sidebar.selectbox("Network Aggregation Mode", ["Transitive (full downstream)", "Direct children only"], index=0)
+agg_mode = st.sidebar.selectbox(
+    "Network Aggregation Mode",
+    ["Transitive (full downstream)", "Direct children only"],
+    index=0,
+    help="Choose how downstream demand is aggregated: 'Transitive' includes all downstream nodes recursively; 'Direct' uses only immediate children. Affects aggregated demand and variance contributing to Safety Stock."
+)
 use_transitive = True if agg_mode.startswith("Transitive") else False
 
-var_rho = st.sidebar.slider("Variance damping factor (ρ)", 0.0, 1.0, 1.0,
-                            help="Lower values damp downstream variance aggregation (0=no downstream variance, 1=full variance add).")
+var_rho = st.sidebar.slider(
+    "Variance damping factor (ρ)",
+    0.0,
+    1.0,
+    1.0,
+    help="Scales how much downstream nodes' variance contributes to a parent's variance (0 = ignore downstream variance; 1 = full add). Lower values damp downstream uncertainty."
+)
 
-lt_mode = st.sidebar.selectbox("Lead-time variance handling", ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"], index=0)
+lt_mode = st.sidebar.selectbox(
+    "Lead-time variance handling",
+    ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"],
+    index=0,
+    help="How lead-time uncertainty is included: 'Apply' uses each node's LT variance; 'Ignore' omits LT variance from SS; 'Average' uses the mean LT Std of downstream nodes to smooth local LT noise."
+)
 
 st.sidebar.markdown("---")
 
