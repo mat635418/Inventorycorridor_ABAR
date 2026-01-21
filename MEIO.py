@@ -25,7 +25,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.92 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.93 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -710,11 +710,10 @@ if s_file and d_file and lt_file:
             else:
                 loc = st.selectbox("LOCATION", ["(no location)"], index=0, key='tab1_loc')
 
-            # Render neutral selection indicator (no numeric blue box)
-            render_selection_badge(product=sku, location=loc if loc != "(no location)" else None, df_context=results[(results['Product'] == sku) & (results['Location'] == loc)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
+            # Show the same compact selected text immediately at the start of the tab (as requested)
             st.markdown(f"**Selected**: {sku} — {loc}")
             # show all months in the graph: create a Period axis covering all_periods and merge selection data onto it
             plot_df = results[(results['Product'] == sku) & (results['Location'] == loc)].sort_values('Period')
@@ -722,7 +721,7 @@ if s_file and d_file and lt_file:
             df_all_periods = pd.DataFrame({'Period': all_periods})
             plot_full = pd.merge(df_all_periods, plot_df[['Period','Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']], on='Period', how='left')
             # fill missing with zeros so months with no data are shown explicitly
-            plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']].fillna(0)
+            plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_External']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Internal','Agg_Future_Ex[...]
 
             # New: Allow toggling Max Corridor visibility (default OFF)
             show_max_corridor = st.checkbox("Show Max Corridor", value=False, key="show_max_corridor")
@@ -760,11 +759,11 @@ if s_file and d_file and lt_file:
             else:
                 chosen_period = CURRENT_MONTH_TS
 
-            # show neutral selection indicator (no numeric blue box)
-            render_selection_badge(product=sku, location=None, df_context=results[(results['Product']==sku)&(results['Period']==chosen_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
+            # Show selection at start of tab (product + period)
+            st.markdown(f"**Selected**: {sku} — {period_label(chosen_period)}")
             st.markdown("""
                 <style>
                     iframe {
@@ -942,13 +941,20 @@ if s_file and d_file and lt_file:
 
             f_period = [period_label_map[lbl] for lbl in f_period_labels] if f_period_labels else []
 
-            badge_product = f_prod[0] if f_prod else (default_product if default_product in all_products else (all_products[0] if all_products else ""))
-            badge_df = results[results['Product'] == badge_product] if badge_product else None
-            # neutral selection indicator in right column (no blue box numbers)
-            render_selection_badge(product=badge_product, location=None, df_context=badge_df)
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
+            # Show selection at the top of the tab (product(s) / locations / periods)
+            badge_product = f_prod[0] if f_prod else (default_product if default_product in all_products else (all_products[0] if all_products else ""))
+            badge_loc = ", ".join(f_loc) if f_loc else ""
+            badge_period = ", ".join(f_period_labels) if f_period_labels else ""
+            selected_text = badge_product
+            if badge_loc:
+                selected_text += f" — {badge_loc}"
+            elif badge_period:
+                selected_text += f" — {badge_period}"
+            st.markdown(f"**Selected**: {selected_text}")
+
             st.subheader("📋 Global Inventory Plan")
             filtered = results.copy()
             if f_prod: filtered = filtered[filtered['Product'].isin(f_prod)]
@@ -956,40 +962,14 @@ if s_file and d_file and lt_file:
             if f_period: filtered = filtered[filtered['Period'].isin(f_period)]
             filtered = filtered.sort_values('Safety_Stock', ascending=False)
 
-            # Bold summary for SS values (filtered)
-            total_ss_filtered = filtered['Safety_Stock'].sum() if not filtered.empty else 0.0
-            st.markdown(f"**Total Safety Stock (filtered selection): {euro_format(total_ss_filtered, True)}**")
-
             filtered_display = hide_zero_rows(filtered)
 
             display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
             fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
 
-            # --- New: display ONLY TOTAL for Safety Stock above the same column in the table ---
-            # We'll create a row of empty columns and place a bold, larger "TOTAL" label + value above the Safety_Stock column
-            try:
-                # Find index of Safety_Stock in display columns
-                if 'Safety_Stock' in display_cols:
-                    idx_ss = display_cols.index('Safety_Stock')
-                else:
-                    idx_ss = None
+            # Removed the "TOTAL" header row above the table as requested (no totals in Tab 3)
 
-                # Create top-aligned empty columns matching the table columns, put TOTAL only in Safety_Stock column
-                top_cols = st.columns([1]*len(display_cols))
-                for i, colname in enumerate(display_cols):
-                    if i == idx_ss:
-                        # big bold total value centered
-                        total_val = filtered['Safety_Stock'].sum() if not filtered.empty else 0.0
-                        top_cols[i].markdown(f"<div style='text-align:center;color:#222;font-weight:700;font-size:16px;'>TOTAL</div>", unsafe_allow_html=True)
-                        top_cols[i].markdown(f"<div style='text-align:center;color:#0b3d91;font-weight:800;font-size:20px;margin-top:4px;'>{euro_format(total_val, True)}</div>", unsafe_allow_html=True)
-                    else:
-                        # render a small placeholder to keep vertical spacing aligned
-                        top_cols[i].markdown("<div style='height:36px'></div>", unsafe_allow_html=True)
-            except Exception:
-                # fallback: simple totals line above table
-                st.markdown(f"**TOTAL Safety Stock:** {euro_format(total_ss_filtered, True)}")
-
-            # Show main table below the totals row
+            # Show main table below
             # Make Period human-friendly like the filters (e.g., "JAN 2026")
             disp_df = filtered_display.copy()
             if 'Period' in disp_df.columns:
@@ -1024,11 +1004,11 @@ if s_file and d_file and lt_file:
             else:
                 eff_period = CURRENT_MONTH_TS
 
-            # neutral selection indicator
-            render_selection_badge(product=sku, location=None, df_context=results[(results['Product'] == sku)&(results['Period'] == eff_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
+            # Show selection at the start of the tab
+            st.markdown(f"**Selected**: {sku} — {period_label(eff_period)}")
             st.subheader("⚖️ Efficiency & Policy Analysis")
             snapshot_period = eff_period if eff_period in all_periods else (all_periods[-1] if all_periods else None)
             if snapshot_period is None:
@@ -1089,15 +1069,11 @@ if s_file and d_file and lt_file:
             h_loc_index = h_loc_opts.index(h_loc_default) if h_loc_default in h_loc_opts else 0
             h_loc = st.selectbox("LOCATION", h_loc_opts, index=h_loc_index, key="h2")
 
-            # neutral indicator (no blue box)
-            if h_loc != "(no location)":
-                badge_df = results[(results['Product'] == h_sku) & (results['Location'] == h_loc)]
-            else:
-                badge_df = results[results['Product'] == h_sku]
-            render_selection_badge(product=h_sku, location=(h_loc if h_loc != "(no location)" else None), df_context=badge_df)
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
+            # Show selection at start of tab
+            st.markdown(f"**Selected**: {h_sku} — {h_loc if h_loc != '(no location)' else ''}")
             st.subheader("📉 Historical Forecast vs Actuals")
             hdf = hist.copy()
             if h_loc != "(no location)":
@@ -1174,13 +1150,11 @@ if s_file and d_file and lt_file:
             else:
                 calc_period = CURRENT_MONTH_TS
 
-            # Use the freshly computed results DataFrame slice (reflects current sidebar params)
-            row_df_small = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
-            # neutral selection indicator
-            render_selection_badge(product=calc_sku, location=calc_loc if calc_loc != "(no location)" else None, df_context=row_df_small)
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
+            # Show selection at the start of the tab
+            st.markdown(f"**Selected**: {calc_sku} — {calc_loc} — {period_label(calc_period)}")
             st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
             st.write("See how changing service level or lead-time assumptions affects safety stock. The scenario planning area below is collapsed by default.")
 
@@ -1430,11 +1404,11 @@ if s_file and d_file and lt_file:
             else:
                 selected_period = CURRENT_MONTH_TS
 
-            # neutral selection indicator (no large blue box)
-            render_selection_badge(product=selected_product, location=None, df_context=results[(results['Product']==selected_product)&(results['Period']==selected_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
+            # Show selection at the start of the tab
+            st.markdown(f"**Selected**: {selected_product} — {period_label(selected_period)}")
             st.header("📦 View by Material (Single Material Focus + 8 Reasons for Inventory)")
             mat_period_df = results[(results['Product'] == selected_product) & (results['Period'] == selected_period)].copy()
             mat_period_df_display = hide_zero_rows(mat_period_df)
@@ -1464,7 +1438,7 @@ if s_file and d_file and lt_file:
                 mat['LT_Mean'] = mat['LT_Mean'].fillna(0); mat['LT_Std'] = mat['LT_Std'].fillna(0)
                 mat['Agg_Std_Hist'] = mat['Agg_Std_Hist'].fillna(0); mat['Pre_Rule_SS'] = mat['Pre_Rule_SS'].fillna(0)
                 mat['Safety_Stock'] = mat['Safety_Stock'].fillna(0); mat['Forecast'] = mat['Forecast'].fillna(0)
-                mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0); mat['Agg_Future_Internal'] = mat['Agg_Future_Internal'].fillna(0); mat['Agg_Future_External'] = mat['Agg_Future_External'].fillna(0)
+                mat['Agg_Future_Demand'] = mat['Agg_Future_Demand'].fillna(0); mat['Agg_Future_Internal'] = mat['Agg_Future_Internal'].fillna(0); mat['Agg_Future_External'] = mat['Agg_Future_External'[...]
                 mat['term1'] = (mat['Agg_Std_Hist']**2 / float(days_per_month)) * mat['LT_Mean']
                 mat['term2'] = (mat['LT_Std']**2) * (mat['Agg_Future_Demand'] / float(days_per_month))**2
                 # use current service level z
