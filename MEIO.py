@@ -1016,6 +1016,28 @@ if s_file and d_file and lt_file:
 
             display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','Safety_Stock','Adjustment_Status','Max_Corridor']
             fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
+
+            # --- New: show totals row ABOVE the main table so totals are directly aligned with columns ---
+            # Build a one-row totals DataFrame matching display columns, place 'TOTALS' in 'Product' and numeric sums in numeric columns.
+            totals_row = {c: "" for c in display_cols}
+            totals_row['Product'] = "TOTALS"
+            for c in fmt_cols:
+                try:
+                    totals_row[c] = filtered[c].sum() if not filtered.empty else 0.0
+                except Exception:
+                    totals_row[c] = ""
+            totals_df = pd.DataFrame([totals_row])
+            # Format totals for display
+            try:
+                totals_disp = df_format_for_display(totals_df.copy(), cols=fmt_cols, two_decimals_cols=fmt_cols)
+                st.dataframe(totals_disp[display_cols], use_container_width=True, height=60)
+            except Exception:
+                # fallback: plain markdown separator + single-line totals
+                st.markdown("---")
+                totals_line = " | ".join([f"**{c}**: {euro_format(totals_row[c], True) if c in fmt_cols else ''}" for c in display_cols if c in ['Product','Forecast','Agg_Future_Demand','Safety_Stock']])
+                st.markdown(totals_line)
+
+            # Show main table below the totals row
             disp = df_format_for_display(filtered_display[display_cols].copy(), cols=fmt_cols, two_decimals_cols=fmt_cols)
             st.dataframe(disp, use_container_width=True, height=700)
 
@@ -1137,6 +1159,9 @@ if s_file and d_file and lt_file:
                 fig_hist = go.Figure([go.Scatter(x=hdf['Period'], y=hdf['Consumption'], name='Actuals', line=dict(color='black')),
                                       go.Scatter(x=hdf['Period'], y=hdf['Forecast_Hist'], name='Forecast', line=dict(color='blue', dash='dot'))])
                 st.plotly_chart(fig_hist, use_container_width=True)
+
+                # --- Added separator between the graph and the aggregated history table ---
+                st.markdown("---")
 
                 st.subheader("🌐 Aggregated Network History (Selected Product)")
                 net_table = (hist_net[hist_net['Product'] == h_sku].merge(hdf[['Period']].drop_duplicates(), on='Period', how='inner').sort_values('Period').drop(columns=['Product']))
@@ -1457,9 +1482,16 @@ if s_file and d_file and lt_file:
             total_net = network_total_forecast
             total_ss = mat_period_df['Safety_Stock'].sum(); nodes_count = mat_period_df['Location'].nunique()
             avg_ss_per_node = (mat_period_df['Safety_Stock'].mean() if nodes_count > 0 else 0)
-            k1, k2, k3, k4, k5 = st.columns(5)
-            k1.metric("Total Local Forecast", euro_format(total_forecast, True)); k2.metric("Total Network Demand", euro_format(total_net, True))
-            k3.metric("Total Safety Stock (sum nodes)", euro_format(total_ss, True)); k4.metric("Nodes", f"{nodes_count}"); k5.metric("Avg SS per Node", euro_format(avg_ss_per_node, True))
+
+            # --- Removed the 'Total Network Demand' metric from the top KPIs as requested ---
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Total Local Forecast", euro_format(total_forecast, True))
+            k2.metric("Total Safety Stock (sum nodes)", euro_format(total_ss, True))
+            k3.metric("Nodes", f"{nodes_count}")
+            k4.metric("Avg SS per Node", euro_format(avg_ss_per_node, True))
+
+            # Insert a clear bar separator before the "Why do we carry this..." section to visually separate KPIs from the breakdown
+            st.markdown("---")
 
             st.markdown("### Why do we carry this SS? — 8 Reasons breakdown (aggregated for selected material)")
             if mat_period_df_display.empty:
