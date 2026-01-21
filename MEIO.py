@@ -234,79 +234,26 @@ def render_logo_above_parameters(scale=1.5):
 
 def render_selection_badge(product=None, location=None, df_context=None, small=False, period=None):
     """
-    Renders the compact selection badge.
+    Compact selection indicator.
 
-    Behavior change:
-    - If df_context contains a 'Period' column and contains multiple periods, we default to using
-      the current month (CURRENT_MONTH_TS) for the badge numbers unless an explicit period is provided.
-    - Badge calls euro_format(..., show_zero=True) so zeros are shown explicitly in the badge (blue box),
-      while the rest of the app keeps the original zero-suppression behavior.
+    NOTE: previous "blue box" UI (with numeric tiles) was intentionally removed.
+    This function now renders a minimal, neutral selection indicator (light background)
+    showing only the current selection (product and optional location). It is safe
+    to call from each tab's right column; the heavy blue badge and numeric content
+    are no longer displayed as requested.
 
-    Updated to display Internal (local) and External (downstream) demand separately to avoid double-counting confusion.
+    This ensures the current selection is visible in every tab without the large
+    blue box and numbers to the right.
     """
     if product is None or product == "":
         return
-
-    def _sum_candidates(df, candidates):
-        if df is None or df.empty:
-            return 0.0
-        for c in candidates:
-            if c in df.columns:
-                try:
-                    return float(df[c].sum())
-                except Exception:
-                    return 0.0
-        return 0.0
-
-    # If df_context has Periods and no explicit period requested, prefer current month if present,
-    # otherwise show the latest period available.
-    df_for_badge = df_context
-    try:
-        if df_for_badge is not None and 'Period' in df_for_badge.columns:
-            if period is None:
-                # CURRENT_MONTH_TS is defined later in the script but exists at call time.
-                preferred = CURRENT_MONTH_TS
-            else:
-                preferred = period
-            if preferred in df_for_badge['Period'].values:
-                df_for_badge = df_for_badge[df_for_badge['Period'] == preferred]
-            else:
-                # fallback to the most recent period available in df_for_badge
-                try:
-                    max_p = df_for_badge['Period'].max()
-                    df_for_badge = df_for_badge[df_for_badge['Period'] == max_p]
-                except Exception:
-                    pass
-    except Exception:
-        df_for_badge = df_context
-
-    # Internal (local) demand = sum of Forecast
-    internal_demand = _sum_candidates(df_for_badge, ['Forecast', 'Forecast_Hist'])
-    # External = aggregated downstream forecasts (explicit column)
-    external_demand = _sum_candidates(df_for_badge, ['Agg_Future_External'])
-    total_demand = internal_demand + external_demand
-    total_ss = _sum_candidates(df_for_badge, ['Safety_Stock'])
     title = f"{product}{(' — ' + location) if location else ''}"
-
     badge_html = f"""
-    <div style="background:#0b3d91;padding:14px;border-radius:8px;color:white;max-width:100%;font-family:inherit;">
-      <div style="font-size:11px;opacity:0.95;margin-bottom:6px;">Selected</div>
-      <div style="font-size:13px;font-weight:700;margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title}</div>
-      <div style="background:#FFC107;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;margin-bottom:10px;display:block;">
-        <div style="font-size:11px;font-weight:600;margin-bottom:4px;">Safety Stock</div>
-        <div style="font-size:14px;font-weight:700;text-align:right;">{euro_format(total_ss, show_zero=True)}</div>
-      </div>
-      <div style="background:#e3f2fd;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;margin-bottom:8px;display:block;">
-        <div style="font-size:10px;opacity:0.85;">Internal (Local) Demand</div>
-        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(internal_demand, show_zero=True)}</div>
-      </div>
-      <div style="background:#90caf9;color:#0b3d91;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;display:block;">
-        <div style="font-size:10px;opacity:0.85;">External (Downstream) Demand</div>
-        <div style="font-size:13px;font-weight:700;text-align:right;">{euro_format(external_demand, show_zero=True)}</div>
-      </div>
+    <div style="background:#f3f6f9;padding:8px;border-radius:8px;color:#222;max-width:100%;font-family:inherit;">
+      <div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Selected</div>
+      <div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title}</div>
     </div>
     """
-
     st.markdown(badge_html, unsafe_allow_html=True)
 
 # small utility to format Period labels: "JAN 2026"
@@ -740,7 +687,7 @@ if s_file and d_file and lt_file:
     with tab1:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
-            render_logo_above_parameters(scale=1.5)
+            # minimal selection indicator only (removed previous blue box with numeric tiles)
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key='tab1_sku')
@@ -763,7 +710,7 @@ if s_file and d_file and lt_file:
             else:
                 loc = st.selectbox("LOCATION", ["(no location)"], index=0, key='tab1_loc')
 
-            # Render badge using current month context (badge will internally filter to current month)
+            # Render neutral selection indicator (no numeric blue box)
             render_selection_badge(product=sku, location=loc if loc != "(no location)" else None, df_context=results[(results['Product'] == sku) & (results['Location'] == loc)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -797,7 +744,6 @@ if s_file and d_file and lt_file:
     with tab2:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
-            render_logo_above_parameters(scale=1.5)
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="network_sku")
@@ -814,6 +760,7 @@ if s_file and d_file and lt_file:
             else:
                 chosen_period = CURRENT_MONTH_TS
 
+            # show neutral selection indicator (no numeric blue box)
             render_selection_badge(product=sku, location=None, df_context=results[(results['Product']==sku)&(results['Period']==chosen_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -997,6 +944,7 @@ if s_file and d_file and lt_file:
 
             badge_product = f_prod[0] if f_prod else (default_product if default_product in all_products else (all_products[0] if all_products else ""))
             badge_df = results[results['Product'] == badge_product] if badge_product else None
+            # neutral selection indicator in right column (no blue box numbers)
             render_selection_badge(product=badge_product, location=None, df_context=badge_df)
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1048,7 +996,6 @@ if s_file and d_file and lt_file:
     with tab4:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
-            render_logo_above_parameters(scale=1.5)
             sku_default = default_product
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="eff_sku")
@@ -1064,6 +1011,7 @@ if s_file and d_file and lt_file:
             else:
                 eff_period = CURRENT_MONTH_TS
 
+            # neutral selection indicator
             render_selection_badge(product=sku, location=None, df_context=results[(results['Product'] == sku)&(results['Period'] == eff_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1115,7 +1063,6 @@ if s_file and d_file and lt_file:
     with tab5:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
-            render_logo_above_parameters(scale=1.5)
             h_sku_default = default_product
             h_sku_index = all_products.index(h_sku_default) if h_sku_default in all_products else 0
             h_sku = st.selectbox("MATERIAL", all_products, index=h_sku_index, key="h1")
@@ -1129,6 +1076,7 @@ if s_file and d_file and lt_file:
             h_loc_index = h_loc_opts.index(h_loc_default) if h_loc_default in h_loc_opts else 0
             h_loc = st.selectbox("LOCATION", h_loc_opts, index=h_loc_index, key="h2")
 
+            # neutral indicator (no blue box)
             if h_loc != "(no location)":
                 badge_df = results[(results['Product'] == h_sku) & (results['Location'] == h_loc)]
             else:
@@ -1215,6 +1163,7 @@ if s_file and d_file and lt_file:
 
             # Use the freshly computed results DataFrame slice (reflects current sidebar params)
             row_df_small = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
+            # neutral selection indicator
             render_selection_badge(product=calc_sku, location=calc_loc if calc_loc != "(no location)" else None, df_context=row_df_small)
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1468,6 +1417,7 @@ if s_file and d_file and lt_file:
             else:
                 selected_period = CURRENT_MONTH_TS
 
+            # neutral selection indicator (no large blue box)
             render_selection_badge(product=selected_product, location=None, df_context=results[(results['Product']==selected_product)&(results['Period']==selected_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
