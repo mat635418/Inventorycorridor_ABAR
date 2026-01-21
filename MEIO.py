@@ -1594,16 +1594,14 @@ if s_file and d_file and lt_file:
                 <div style="margin-top:12px;">
                   <table style="border-collapse:collapse;">
                     <tr>
-                      <td style="padding:2px 12px;font-size:12px;">Grand Totals</td>
-                      <td style="padding:2px 12px;font-size:12px;">Local Demand</td>
-                      <td style="padding:2px 12px;font-size:12px;">Total Network Demand</td>
-                      <td style="padding:2px 12px;font-size:12px;">Safety Stock</td>                      
+                      <td style="padding:2px 12px;font-size:12px;">&nbsp;</td>
+                      <td style="padding:2px 12px;font-size:12px;">Total Local Demand</td>
+                      <td style="padding:2px 12px;font-size:12px;">Total Safety Stock</td>                      
                     </tr>
                     <tr style="color:#666">
-                      <td style="padding:6px 12px;"><strong>Grand Totals</strong></td>
-                      <td style="padding:6px 12px;"><strong>{euro_format(grand_forecast, True)}</strong></td>
-                      <td style="padding:6px 12px;"><strong>{euro_format(total_net, True)}</strong></td>
-                      <td style="padding:6px 12px;"><strong>{euro_format(grand_ss, True)}</strong></td>
+                      <td style="padding:6px 12px;font-size:14px;"><strong>Grand Totals</strong></td>
+                      <td style="padding:6px 12px;font-size:14px;"><strong>{euro_format(grand_forecast, True)}</strong></td>
+                      <td style="padding:6px 12px;font-size:14px;"><strong>{euro_format(grand_ss, True)}</strong></td>
                     </tr>
                   </table>
                 </div>
