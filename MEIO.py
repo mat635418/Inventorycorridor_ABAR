@@ -14,6 +14,7 @@ import math
 from io import StringIO
 from datetime import datetime
 import re
+import collections
 
 st.set_page_config(page_title="MEIO for RM", layout="wide")
 
@@ -24,7 +25,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.81 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.85 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -323,6 +324,30 @@ with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
         99.0,
         help="Target probability of not stocking out. Higher values increase the Z-score and therefore Safety Stock — reduces stockouts but raises inventory holdings."
     ) / 100
+
+    # New: Strategic tiering for upstream nodes (per feedback image)
+    st.markdown("#### Strategic Service Level Tiering (optional)")
+    enable_tiering = st.checkbox(
+        "Enable Strategic Service Level Tiering (reduce upstream SL)",
+        value=False,
+        help="When enabled, nodes that are internal (not customer-facing leaves) will use lower service levels depending on their 'distance' (hops) from customer-facing nodes. This keeps customer-facing nodes at the selected Service Level while reducing inventory upstream."
+    )
+    per_hop_reduction_pct = st.slider(
+        "Per-hop SL reduction (percentage points)",
+        0.0, 10.0, 2.0,
+        help="How many percentage points of service-level to reduce for each hop away from a customer-facing node (e.g., 2 => 99% -> 97% at 1 hop)."
+    )
+    min_upstream_service_level = st.slider(
+        "Minimum upstream Service Level (%)",
+        50.0, 99.9, 85.0,
+        help="Lower bound for upstream service levels when tiering is applied (prevents reducing SL too aggressively)."
+    )
+    max_tier_hops = st.slider(
+        "Max hops to apply tiering",
+        0, 10, 3,
+        help="Cap the number of hops used when reducing service level (further hops will use the min upstream service level)."
+    )
+
     z = norm.ppf(service_level)
 
 with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
@@ -378,18 +403,28 @@ CURRENT_MONTH_TS = pd.Timestamp.now().to_period('M').to_timestamp()
 # Modified run_pipeline to accept explicit data and parameters so it is pure (no hidden globals).
 def run_pipeline(df_d, stats, df_lt, service_level,
                  transitive=True, rho=1.0, lt_mode_param='Apply LT variance',
-                 zero_if_no_net_fcst=True, apply_cap=True, cap_range=(0,200)):
+                 zero_if_no_net_fcst=True, apply_cap=True, cap_range=(0,200),
+                 enable_tiering=False, per_hop_reduction_pct=2.0, min_upstream_service_level_pct=85.0, max_tier_hops=3):
     """
     Run aggregation -> stats -> safety-stock pipeline.
+
+    New: Strategic tiering of service level across network hops (per feedback image).
+    - enable_tiering: if True, compute a node-level service level based on distance (hops) to the nearest customer-facing node (leaf).
+    - per_hop_reduction_pct: how many percentage points to reduce per hop away from leaf.
+    - min_upstream_service_level_pct: lower bound for upstream nodes (in percent).
+    - max_tier_hops: cap number of hops used when computing reduction.
 
     Parameters:
     - df_d: forecast dataframe
     - stats: historical stats dataframe (Product, Location, Local_Mean, Local_Std)
     - df_lt: lead time dataframe
-    - service_level: float in (0,1) used to compute Z
+    - service_level: float in (0,1) used to compute Z for customer-facing nodes
     - transitive, rho, lt_mode_param, zero_if_no_net_fcst, apply_cap, cap_range: business params
     """
-    z_local = norm.ppf(service_level)
+    # NOTE: we no longer use a single global z for all nodes if tiering is enabled.
+    base_sl = float(service_level)
+    min_upstream_sl = float(min_upstream_service_level_pct) / 100.0
+    per_hop_reduction = float(per_hop_reduction_pct) / 100.0
 
     # 1) aggregate demand & historical variance through the network
     network_stats, reachable_map = aggregate_network_stats(df_forecast=df_d, df_stats=stats, df_lt=df_lt, transitive=transitive, rho=rho)
@@ -462,7 +497,94 @@ def run_pipeline(df_d, stats, df_lt, service_level,
     # 7) Combine variance components; ensure non-negative, compute statistical safety stock
     combined_variance = demand_component + res['lt_component']
     combined_variance = combined_variance.clip(lower=0)
-    res['SS_stat'] = z_local * np.sqrt(combined_variance)
+    # Previously used a single z for all nodes. To support strategic tiering we compute node-level service levels (and Z-scores).
+    # Build children mapping per product (used to compute hops to customer-facing nodes)
+    sl_list = []
+    hop_distance_list = []
+
+    # Helper to compute hop distance to nearest leaf (customer-facing node) using children mapping
+    def compute_hop_distances_for_product(p_lt_df, prod_nodes):
+        children = {}
+        # build children map from product-specific LT routes
+        for _, r in p_lt_df.iterrows():
+            f = r.get('From_Location', None)
+            t = r.get('To_Location', None)
+            if pd.isna(f) or pd.isna(t):
+                continue
+            children.setdefault(f, set()).add(t)
+        # nodes considered are prod_nodes union all nodes in p_lt_df
+        all_nodes = set(prod_nodes)
+        if not p_lt_df.empty:
+            all_nodes = all_nodes.union(set(p_lt_df['From_Location'].dropna().unique())).union(set(p_lt_df['To_Location'].dropna().unique()))
+        # leaf nodes: nodes with no children
+        leaf_nodes = set([n for n in all_nodes if n not in children or len(children.get(n, set())) == 0])
+        # BFS to nearest leaf
+        distances = {}
+        for n in all_nodes:
+            # if node itself is leaf => distance 0 (customer-facing)
+            if n in leaf_nodes:
+                distances[n] = 0
+                continue
+            # BFS
+            q = collections.deque()
+            q.append((n, 0))
+            visited = set([n])
+            found = False
+            while q:
+                cur, depth = q.popleft()
+                kids = children.get(cur, set())
+                # if current node has no children => reached leaf, distance = depth
+                if not kids:
+                    distances[n] = depth
+                    found = True
+                    break
+                for k in kids:
+                    if k not in visited:
+                        visited.add(k)
+                        q.append((k, depth + 1))
+            if not found:
+                # fallback: treat as leaf (0) if no downstream leaf found (isolated or cyclic)
+                distances[n] = 0
+        return distances
+
+    # Prepare lookups by product to avoid repeated building
+    products = res['Product'].unique()
+    prod_to_nodes = {p: set(res[res['Product'] == p]['Location'].unique().tolist()) for p in products}
+    prod_to_routes = {}
+    if 'Product' in df_lt.columns:
+        for p in df_lt['Product'].unique():
+            prod_to_routes[p] = df_lt[df_lt['Product'] == p].copy()
+    else:
+        prod_to_routes[None] = df_lt.copy()
+
+    prod_distances = {}
+    for p in products:
+        p_routes = prod_to_routes.get(p, pd.DataFrame(columns=df_lt.columns))
+        nodes = prod_to_nodes.get(p, set())
+        prod_distances[p] = compute_hop_distances_for_product(p_routes, nodes)
+
+    # Assign service level per row (customer-facing nodes: base SL; upstream: reduced SL per hop, clipped by min_upstream_sl)
+    for idx, row in res.iterrows():
+        prod = row['Product']
+        loc = row['Location']
+        distances = prod_distances.get(prod, {})
+        dist = int(distances.get(loc, 0))
+        # cap distance at max_tier_hops
+        dist_capped = min(dist, int(max_tier_hops))
+        if enable_tiering:
+            sl_node = max(min_upstream_sl, base_sl - per_hop_reduction * dist_capped)
+            # ensure bounds (0.5..0.999)
+            sl_node = min(max(sl_node, 0.5), 0.9999)
+        else:
+            sl_node = base_sl
+        sl_list.append(sl_node)
+        hop_distance_list.append(dist)
+    res['Tier_Hops'] = np.array(hop_distance_list)
+    res['Service_Level_Node'] = np.array(sl_list)
+    # compute z per-node
+    res['Z_node'] = res['Service_Level_Node'].apply(lambda x: float(norm.ppf(x)))
+
+    res['SS_stat'] = res.apply(lambda r: r['Z_node'] * math.sqrt(max(0.0, (demand_component.loc[r.name] + r['lt_component']))), axis=1)
 
     # Minimum floor: 1% of mean LT demand (small safeguard)
     min_floor_fraction_of_LT_demand = 0.01
@@ -553,7 +675,11 @@ if s_file and d_file and lt_file:
         lt_mode_param=lt_mode,
         zero_if_no_net_fcst=zero_if_no_net_fcst,
         apply_cap=apply_cap,
-        cap_range=cap_range
+        cap_range=cap_range,
+        enable_tiering=enable_tiering,
+        per_hop_reduction_pct=per_hop_reduction_pct,
+        min_upstream_service_level_pct=min_upstream_service_level,
+        max_tier_hops=max_tier_hops
     )
 
     # Historical accuracy table
@@ -720,7 +846,7 @@ if s_file and d_file and lt_file:
                     else:
                         bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
 
-                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}"
+                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), [...]
                 lbl = lbl.replace("\\n", "\n")
                 net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
 
