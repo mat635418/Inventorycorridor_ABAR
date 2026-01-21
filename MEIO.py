@@ -25,7 +25,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.85 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.88 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -315,44 +315,15 @@ def period_label(ts):
 # ----------------------
 
 # Make the first expander visible (expanded) by default.
-# We removed the manual tiering sliders and replaced them with an automatic, data-driven tiering engine.
+# We replaced the previous free-form example text with a compact slider-only control and kept z computation.
 with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
     service_level = st.slider(
-        "Service Level (%) — customer-facing nodes (leafs)",
+        "Service Level (%) — end-nodes (hop 0)",
         50.0,
         99.9,
         99.0,
-        help="Target probability of not stocking out for customer-facing locations. Upstream/internal nodes will have reduced service levels computed automatically."
+        help="Target probability of not stocking out for end-nodes (hop 0). Upstream nodes get fixed SLs by hop-distance."
     ) / 100
-
-    # Compacted description + small example table (user-provided mapping)
-    # NOTE: Removed specific location identifiers from the example per request.
-    st.markdown(
-        """
-        <small>
-        Automatic tiering: leaf (customer-facing) nodes use the chosen Service Level; upstream nodes get deterministic reductions per hop.
-        Below is an example mapping (recommended):
-        </small>
-        <div style="margin-top:8px;"></div>
-        <table style="width:100%; border-collapse:collapse; font-size:12px;">
-          <thead>
-            <tr style="background:#f3f6fb">
-              <th style="padding:6px 8px; text-align:left;">Role in Network</th>
-              <th style="padding:6px 8px; text-align:left;">Distance to Customer</th>
-              <th style="padding:6px 8px; text-align:left;">Recommended SL</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td style="padding:6px 8px;">Customer Facing</td><td style="padding:6px 8px;">0 Hops</td><td style="padding:6px 8px;">99%</td></tr>
-            <tr><td style="padding:6px 8px;">Regional Hub</td><td style="padding:6px 8px;">1 Hop</td><td style="padding:6px 8px;">95%</td></tr>
-            <tr><td style="padding:6px 8px;">Central Hub</td><td style="padding:6px 8px;">2 Hops</td><td style="padding:6px 8px;">85–90%</td></tr>
-            <tr><td style="padding:6px 8px;">Global Hub</td><td style="padding:6px 8px;">3 Hops</td><td style="padding:6px 8px;">~80%</td></tr>
-            <tr><td style="padding:6px 8px;">Oversea Supplier</td><td style="padding:6px 8px;">4+ Hops</td><td style="padding:6px 8px;">50% (example)</td></tr>
-          </tbody>
-        </table>
-        """,
-        unsafe_allow_html=True,
-    )
 
     # compute Z for customer-facing nodes (kept for some displays)
     z = norm.ppf(service_level)
@@ -408,23 +379,33 @@ DEFAULT_LOCATION_CHOICE = "DEW1"
 CURRENT_MONTH_TS = pd.Timestamp.now().to_period('M').to_timestamp()
 
 # Modified run_pipeline to accept explicit data and parameters so it is pure (no hidden globals).
-# Tiering parameters have been removed from the function signature. Tiering is now computed automatically inside.
+# Tiering parameters changed: fixed hop -> SL mapping (no per-hop reduction).
 def run_pipeline(df_d, stats, df_lt, service_level,
                  transitive=True, rho=1.0, lt_mode_param='Apply LT variance',
                  zero_if_no_net_fcst=True, apply_cap=True, cap_range=(0,200)):
     """
     Run aggregation -> stats -> safety-stock pipeline.
 
-    Dynamic Tiering (refined):
-    - Identify customer-facing nodes (leafs) as nodes without outgoing edges (From -> To orientation).
-    - For each product compute the network depth (max hops).
-    - Determine a per-hop reduction (pp) based on depth with safeguards:
-        * per-hop reduction increases with depth (heuristic values tuned to give ~80% at ~3 hops for typical base SL=99%).
-        * total reduction capped (e.g., 25 percentage points).
-        * minimum upstream SL enforced at 80% (as requested).
-    - Apply SL_node = base_sl - per_hop_reduction * hop_distance
-      clipped to [min_upstream_sl, 0.9999] to ensure consistent, auditable reductions.
+    Tiering rules (fixed mapping, NOT per-hop reduction):
+    - Hop distance is measured as number of forward edges to reach an end-node (leaf).
+    - The service level applied is a fixed mapping by hop:
+        hop 0 (end-node): 99.0%
+        hop 1: 95.0%
+        hop 2: 87.5%  (between 85% and 90% as requested; midpoint used)
+        hop 3: 80.0%
+        hop 4+: 50.0%
+    - This mapping is independent of the slider base SL for end-node; the slider continues to control the
+      "base" value used in some scenario comparisons, but the implemented policy uses the fixed hop mapping above.
     """
+
+    # explicit hop->SL mapping (values as fractions)
+    hop_to_sl = {0: 0.99, 1: 0.95, 2: 0.875, 3: 0.80, 4: 0.50}
+    def sl_for_hop(h):
+        if h in hop_to_sl:
+            return hop_to_sl[h]
+        if h > 4:
+            return hop_to_sl[4]
+        return hop_to_sl[0]
 
     base_sl = float(service_level)
 
@@ -500,10 +481,10 @@ def run_pipeline(df_d, stats, df_lt, service_level,
     combined_variance = demand_component + res['lt_component']
     combined_variance = combined_variance.clip(lower=0)
 
-    # Build children mapping per product (used to compute hops to customer-facing nodes)
+    # Build children mapping per product (used to compute hops to end-nodes)
     def compute_hop_distances_for_product(p_lt_df, prod_nodes):
         """
-        Compute hop distances to nearest customer-facing node (leaf = node with no outgoing edges).
+        Compute hop distances to nearest end-node (leaf = node with no outgoing edges).
         ENFORCE forward orientation: From_Location -> To_Location.
         Returns dictionary: node -> distance (int)
         """
@@ -519,7 +500,7 @@ def run_pipeline(df_d, stats, df_lt, service_level,
         if not p_lt_df.empty:
             all_nodes = all_nodes.union(set(p_lt_df['From_Location'].dropna().unique())).union(set(p_lt_df['To_Location'].dropna().unique()))
 
-        # leaf nodes = nodes that do not appear as a key in children (no outgoing edges)
+        # end-node (leaf) = nodes that do not appear as a key in children (no outgoing edges)
         leaf_nodes = set([n for n in all_nodes if n not in children or len(children.get(n, set())) == 0])
 
         distances = {}
@@ -570,34 +551,16 @@ def run_pipeline(df_d, stats, df_lt, service_level,
         nodes = prod_to_nodes.get(p, set())
         prod_distances[p] = compute_hop_distances_for_product(p_routes, nodes)
 
-    # Enforce minimum upstream SL of 80%
-    enforced_min_upstream_sl = 0.80
-
-    # Dynamic tiering engine: derive per-product per-hop reduction & min upstream SL automatically
+    # Dynamic tiering engine replaced by fixed mapping; prepare per-product diagnostics summary
     product_tiering_params = {}
     for p, distances in prod_distances.items():
         max_hops = int(max(distances.values())) if distances else 0
-        if max_hops <= 0:
-            per_hop_reduction = 0.0
-            min_upstream_sl = base_sl
-            max_tier_hops = 0
-        else:
-            # Heuristic: choose per-hop reduction based on depth, but ensure we don't violate the enforced minimum upstream SL.
-            # Compute a baseline per-hop that would exactly map the farthest upstream node to the enforced minimum.
-            per_hop_from_min = (base_sl - enforced_min_upstream_sl) / max_hops if max_hops > 0 else 0.02
-            # Apply sensible bounds to per-hop (so the curve isn't extreme)
-            per_hop_reduction = float(np.clip(per_hop_from_min, 0.02, 0.08))
-            total_reduction = per_hop_reduction * max_hops
-            total_reduction = float(min(total_reduction, 0.25))  # cap total reduction
-            min_upstream_sl = float(np.clip(base_sl - total_reduction, enforced_min_upstream_sl, 0.9999))
-            max_tier_hops = max_hops
-        product_tiering_params[p] = {
-            'per_hop_reduction': per_hop_reduction,
-            'min_upstream_sl': min_upstream_sl,
-            'max_tier_hops': max_tier_hops
-        }
+        # store the fixed mapping as percentages (for diagnostics)
+        tier_map_pct = {f"SL_hop_{h}_pct": float(sl_for_hop(h) * 100.0) for h in range(0,5)}
+        tier_map_pct['max_tier_hops'] = max_hops
+        product_tiering_params[p] = tier_map_pct
 
-    # Assign service level per row (customer-facing nodes: base SL; upstream: reduced SL per hop, clipped by min_upstream_sl)
+    # Assign service level per row based on hop mapping
     sl_list = []
     hop_distance_list = []
     for idx, row in res.iterrows():
@@ -605,11 +568,8 @@ def run_pipeline(df_d, stats, df_lt, service_level,
         loc = row['Location']
         distances = prod_distances.get(prod, {})
         dist = int(distances.get(loc, 0))
-        params = product_tiering_params.get(prod, {'per_hop_reduction': 0.0, 'min_upstream_sl': base_sl, 'max_tier_hops': 0})
-        dist_capped = min(dist, int(params['max_tier_hops']))
-        sl_node = base_sl - params['per_hop_reduction'] * dist_capped
-        # clip to min upstream SL and bounds
-        sl_node = float(np.clip(sl_node, params['min_upstream_sl'], 0.9999))
+        # select SL from mapping (hops >4 mapped to hop 4 SL)
+        sl_node = sl_for_hop(dist)
         sl_list.append(sl_node)
         hop_distance_list.append(dist)
     res['Tier_Hops'] = np.array(hop_distance_list)
@@ -654,9 +614,12 @@ def run_pipeline(df_d, stats, df_lt, service_level,
     for p, params in product_tiering_params.items():
         tier_summary.append({
             'Product': p,
-            'computed_per_hop_reduction_pp': params['per_hop_reduction'] * 100.0,
-            'computed_min_upstream_sl_pct': params['min_upstream_sl'] * 100.0,
-            'max_tier_hops': params['max_tier_hops']
+            'SL_hop_0_pct': params.get('SL_hop_0_pct', 99.0),
+            'SL_hop_1_pct': params.get('SL_hop_1_pct', 95.0),
+            'SL_hop_2_pct': params.get('SL_hop_2_pct', 87.5),
+            'SL_hop_3_pct': params.get('SL_hop_3_pct', 80.0),
+            'SL_hop_4_pct': params.get('SL_hop_4_pct', 50.0),
+            'max_tier_hops': params.get('max_tier_hops', 0)
         })
     tier_df = pd.DataFrame(tier_summary)
     # store as attribute on res for optional downstream use
@@ -1241,36 +1204,40 @@ if s_file and d_file and lt_file:
 
                 # pull per-product tiering params for explanation (if available)
                 tier_df = results.attrs.get('tiering_params', pd.DataFrame())
-                per_hop_pp = None; min_up_pct = None; max_hops = None
+                sl_hop_0 = sl_hop_1 = sl_hop_2 = sl_hop_3 = sl_hop_4 = None
+                max_hops = None
                 if not tier_df.empty:
                     tt = tier_df[tier_df['Product'] == calc_sku]
                     if not tt.empty:
-                        per_hop_pp = float(tt['computed_per_hop_reduction_pp'].iloc[0])
-                        min_up_pct = float(tt['computed_min_upstream_sl_pct'].iloc[0])
+                        sl_hop_0 = float(tt['SL_hop_0_pct'].iloc[0])
+                        sl_hop_1 = float(tt['SL_hop_1_pct'].iloc[0])
+                        sl_hop_2 = float(tt['SL_hop_2_pct'].iloc[0])
+                        sl_hop_3 = float(tt['SL_hop_3_pct'].iloc[0])
+                        sl_hop_4 = float(tt['SL_hop_4_pct'].iloc[0])
                         max_hops = int(tt['max_tier_hops'].iloc[0])
 
                 st.markdown("---")
                 st.subheader("1. Frozen Inputs (current)")
                 # show both base & node SL as explicit metrics
                 i1, i2, i3, i4, i5, i6 = st.columns(6)
-                i1.metric("Base Service Level", f"{service_level*100:.2f}%", help=f"Base Z: {z_current:.4f}")
-                i2.metric("Node Service Level", f"{node_sl*100:.2f}%", help=f"Node Z: {node_z:.4f}")
+                i1.metric("Base Service Level (slider)", f"{service_level*100:.2f}%", help=f"Base Z: {z_current:.4f}")
+                i2.metric("Node Service Level (applied)", f"{node_sl*100:.2f}%", help=f"Node Z: {node_z:.4f}")
                 i3.metric("Network Demand (D, monthly)", euro_format(row['Agg_Future_Demand'], True), help="Aggregated Future Demand (monthly)")
                 i4.metric("Network Std Dev (σ_D, monthly)", euro_format(row['Agg_Std_Hist'], True), help="Aggregated Historical Std Dev (monthly totals)")
                 i5.metric("Avg Lead Time (L)", f"{row['LT_Mean']} days"); i6.metric("LT Std Dev (σ_L)", f"{row['LT_Std']} days")
 
                 # Show tiering diagnostics (why node SL differs)
-                st.markdown("**Tiering diagnostics (why this node SL):**")
+                st.markdown("**Tiering diagnostics (which SL was used):**")
                 hops = int(row.get('Tier_Hops', 0))
-                tier_explain = f"- Hops to customer-facing node: {hops}"
-                if per_hop_pp is not None:
-                    tier_explain += f"  | per-hop reduction = {per_hop_pp:.2f} pp"
-                if min_up_pct is not None:
-                    tier_explain += f"  | min upstream SL = {min_up_pct:.2f}%"
-                if max_hops is not None:
-                    tier_explain += f"  | network max hops = {max_hops}"
-                tier_explain += f"  \n\nApplied formula: SL_node = Base_SL - per_hop_reduction * hops (clipped to min_upstream_SL)"
-                st.markdown(tier_explain)
+                # Construct human explanation of the fixed mapping
+                mapping_explain = "- Applied fixed hop -> SL mapping:\n"
+                mapping_explain += "  - hop 0 (end-node): 99%\n"
+                mapping_explain += "  - hop 1: 95%\n"
+                mapping_explain += "  - hop 2: 85%–90% (implemented: 87.5%)\n"
+                mapping_explain += "  - hop 3: 80%\n"
+                mapping_explain += "  - hop 4+: 50%\n\n"
+                mapping_explain += f"- This node has hops = {hops}, therefore SL applied = {node_sl*100:.2f}%."
+                st.markdown(mapping_explain)
 
                 st.subheader("2. Statistical Calculation (Actual — uses node-level SL/Z)")
                 # Recompute the same steps shown in the pipeline but using node_z (the node-specific Z) to reflect implemented SS
@@ -1652,12 +1619,16 @@ if s_file and d_file and lt_file:
         st.header("🔍 Tiering Diagnostics — per-product & per-node audit")
         tier_df = results.attrs.get('tiering_params', pd.DataFrame())
         if not tier_df.empty:
-            st.subheader("Per-product computed tiering parameters")
+            st.subheader("Per-product computed tiering parameters (fixed hop -> SL mapping used)")
+            # present tidy mapping table
             st.dataframe(df_format_for_display(tier_df.rename(columns={
-                'computed_per_hop_reduction_pp': 'Per Hop Reduction (pp)',
-                'computed_min_upstream_sl_pct': 'Min Upstream SL (%)',
+                'SL_hop_0_pct': 'Hop 0 SL (%)',
+                'SL_hop_1_pct': 'Hop 1 SL (%)',
+                'SL_hop_2_pct': 'Hop 2 SL (%)',
+                'SL_hop_3_pct': 'Hop 3 SL (%)',
+                'SL_hop_4_pct': 'Hop 4+ SL (%)',
                 'max_tier_hops': 'Max Hops'
-            }), cols=['Per Hop Reduction (pp)','Min Upstream SL (%)','Max Hops'], two_decimals_cols=['Per Hop Reduction (pp)','Min Upstream SL (%)']))
+            }), cols=['Hop 0 SL (%)','Hop 1 SL (%)','Hop 2 SL (%)','Hop 3 SL (%)','Hop 4+ SL (%)','Max Hops'], two_decimals_cols=['Hop 0 SL (%)','Hop 1 SL (%)','Hop 2 SL (%)','Hop 3 SL (%)','Hop 4+ SL (%)']))
         else:
             st.write("No tiering parameters were computed (empty).")
 
@@ -1673,13 +1644,17 @@ if s_file and d_file and lt_file:
 
         st.markdown("""
         Notes:
-        - 'Tier_Hops' = distance (hops) to nearest customer-facing node (0 = leaf/customer-facing).
-        - 'Service_Level_Node_%' shows the hard-coded service level applied to that node (derived from network depth).
-        - If you expect DEW1 (or any internal node) to have reduced SL but still see the base SL, verify:
+        - 'Tier_Hops' = distance (hops) to nearest end-node (0 = end-node).
+        - The service level applied is chosen from the fixed mapping below (independent of the slider 'Base Service Level'):
+            * hop 0 (end-node): 99%
+            * hop 1: 95%
+            * hop 2: 85%–90% (implemented as 87.5%)
+            * hop 3: 80%
+            * hop 4+: 50%
+        - If you expect an internal node (e.g., DEW1) to have reduced SL but still see the base SL, verify:
            1) leadtime.csv path and product column matches (identical Product strings),
            2) From_Location/To_Location identifiers exactly match Location values in demand/sales (trim spaces/case),
            3) If product-specific routes don't exist, the algorithm falls back to the global network to compute hops.
         """)
-
 else:
     st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
