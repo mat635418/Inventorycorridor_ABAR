@@ -1,6 +1,5 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — Jan 2026
-# Revised 2026-01-20 — UI adjustments and robustness fixes.
 
 import streamlit as st
 import pandas as pd
@@ -25,7 +24,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.76 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.78 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -269,7 +268,7 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
 # SIDEBAR: collapsible sections (all collapsed by default except Data Sources)
 # ----------------------
 
-with st.sidebar.expander("⚙️ Parameters", expanded=False):
+with st.sidebar.expander("⚙️ Service Level Configuration", expanded=False):
     service_level = st.slider(
         "Service Level (%)",
         50.0,
