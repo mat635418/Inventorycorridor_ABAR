@@ -24,7 +24,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.78 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.79 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -369,7 +369,7 @@ with st.sidebar.expander("⚙️ Aggregation & Uncertainty", expanded=False):
         "Lead-time variance handling",
         ["Apply LT variance", "Ignore LT variance", "Average LT Std across downstream"],
         index=0,
-        help="How lead-time uncertainty is included: 'Apply' uses each node's LT variance; 'Ignore' omits LT variance from SS; 'Average' uses the mean LT Std of downstream nodes to smooth local LT noise."
+        help="How lead-time uncertainty is included: 'Apply' uses each node's LT variance; 'Ignore' omits LT variance from SS; 'Average' uses the mean LT Std of downstream nodes to smooth local LT noi[...]
     )
 
 st.sidebar.markdown("---")
@@ -645,12 +645,20 @@ if s_file and d_file and lt_file:
             plot_full = pd.merge(df_all_periods, plot_df[['Period','Max_Corridor','Safety_Stock','Forecast','Agg_Future_Demand']], on='Period', how='left')
             # fill missing with zeros so months with no data are shown explicitly
             plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Demand']] = plot_full[['Max_Corridor','Safety_Stock','Forecast','Agg_Future_Demand']].fillna(0)
-            fig = go.Figure([
-                go.Scatter(x=plot_full['Period'], y=plot_full['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=1, color='rgba(0,0,0,0.1)')),
+
+            # New: Allow toggling Max Corridor visibility (default OFF)
+            show_max_corridor = st.checkbox("Show Max Corridor", value=False, key="show_max_corridor")
+
+            traces = []
+            if show_max_corridor:
+                traces.append(go.Scatter(x=plot_full['Period'], y=plot_full['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=1, color='rgba(0,0,0,0.1)')))
+            traces.extend([
                 go.Scatter(x=plot_full['Period'], y=plot_full['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
                 go.Scatter(x=plot_full['Period'], y=plot_full['Forecast'], name='Local Direct Demand', line=dict(color='black', dash='dot')),
                 go.Scatter(x=plot_full['Period'], y=plot_full['Agg_Future_Demand'], name='Total Network Demand', line=dict(color='blue', dash='dash'))
             ])
+
+            fig = go.Figure(traces)
             fig.update_layout(legend=dict(orientation="h"), xaxis_title='Period', yaxis_title='Units', xaxis=dict(tickformat="%b\n%Y"))
             st.plotly_chart(fig, use_container_width=True)
 
@@ -674,16 +682,6 @@ if s_file and d_file and lt_file:
                 chosen_period = period_label_map.get(chosen_label, default_period)
             else:
                 chosen_period = CURRENT_MONTH_TS
-
-            # legend for abbreviations (LDD, TND, SS)
-            st.markdown("""
-                <div style="font-size:12px;padding:6px;border-radius:6px;background:#f7f9fc;">
-                  <strong>Legend:</strong><br/>
-                  LDD = Local Direct Demand (local forecast)<br/>
-                  TND = Total Network Demand (aggregated downstream + local)<br/>
-                  SS  = Safety Stock (final policy value)
-                </div>
-            """, unsafe_allow_html=True)
 
             render_selection_badge(product=sku, location=None, df_context=results[(results['Product']==sku)&(results['Period']==chosen_period)])
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
@@ -730,7 +728,7 @@ if s_file and d_file and lt_file:
                         bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
 
                 # consistent naming: LDD (Local Direct Demand), TND (Total Network Demand), SS (Safety Stock)
-                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}"
+                lbl = f"{n}\\nLDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\nTND: {euro_format(m.get('Agg_Future_Demand', 0), show_zero=True)}\\nSS: {euro_format(m.get('Safety_Stock', 0), [...]
                 # pyvis expects newline as '\n'
                 lbl = lbl.replace("\\n", "\n")
                 net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
@@ -788,6 +786,18 @@ if s_file and d_file and lt_file:
                 html_text = html_text + injection_js
             components.html(html_text, height=750)
 
+            # Move legend/agenda below graph and center it (previously above the graph)
+            st.markdown("""
+                <div style="text-align:center; font-size:12px; padding:8px 0;">
+                  <div style="display:inline-block; background:#f7f9fc; padding:8px 12px; border-radius:8px;">
+                    <strong>Legend:</strong><br/>
+                    LDD = Local Direct Demand (local forecast) &nbsp;&nbsp;|&nbsp;&nbsp;
+                    TND = Total Network Demand (aggregated downstream + local) &nbsp;&nbsp;|&nbsp;&nbsp;
+                    SS  = Safety Stock (final policy value)
+                  </div>
+                </div>
+            """, unsafe_allow_html=True)
+
     # TAB 3: Full Plan
     with tab3:
         col_main, col_badge = st.columns([17, 3])
@@ -801,12 +811,32 @@ if s_file and d_file and lt_file:
             period_choices_labels = period_labels
             period_choices_ts = [period_label_map[lbl] for lbl in period_choices_labels]
 
+            # Ensure current month is selected by default (if present)
             default_prod_list = [default_product] if default_product in prod_choices else []
             default_period_list = []
-            if default_period is not None:
-                dp_label = period_label(default_period)
-                if dp_label in period_choices_labels:
-                    default_period_list = [dp_label]
+            cur_label = period_label(CURRENT_MONTH_TS)
+            if cur_label in period_choices_labels:
+                default_period_list = [cur_label]
+            else:
+                if default_period is not None:
+                    dp_label = period_label(default_period)
+                    if dp_label in period_choices_labels:
+                        default_period_list = [dp_label]
+
+            # Additional CSS override here to remove any red-highlighted selected chips (user request)
+            st.markdown(
+                """
+                <style>
+                /* remove red highlight for selected multiselect/selectbox chips */
+                div[data-baseweb="tag"], .stMultiSelect div[data-baseweb="tag"], .stSelectbox div[data-baseweb="tag"] {
+                    background: #e3f2fd !important;
+                    color: #0b3d91 !important;
+                    border: 1px solid #90caf9 !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
 
             f_prod = st.multiselect("MATERIAL", prod_choices, default=default_prod_list, key="full_f_prod")
             f_loc = st.multiselect("LOCATION", loc_choices, default=[], key="full_f_loc")
@@ -1064,8 +1094,8 @@ if s_file and d_file and lt_file:
                         with st.expander(f"Scenario {s+1} inputs", expanded=False):
                             sc_sl_default = float(service_level*100) if s==0 else min(99.9, float(service_level*100) + 0.5*s)
                             sc_sl = st.slider(f"Scenario {s+1} Service Level (%)", 50.0, 99.9, sc_sl_default, key=f"sc_sl_{s}")
-                            sc_lt = st.slider(f"Scenario {s+1} Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2), value=float(row['LT_Mean'] if s==0 else row['LT_Mean']), key=f"sc_lt_{s}")
-                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_lt_std_{s}")
+                            sc_lt = st.slider(f"Scenario {s+1} Avg Lead Time (Days)", 0.0, max(30.0, float(row['LT_Mean'])*2), value=float(row['LT_Mean'] if s==0 else row['LT_Mean']), key=f"sc_lt_{s}"[...]
+                            sc_lt_std = st.slider(f"Scenario {s+1} LT Std Dev (Days)", 0.0, max(10.0, float(row['LT_Std'])*2), value=float(row['LT_Std'] if s==0 else row['LT_Std']), key=f"sc_lt_std_{s[...]
                             scenarios.append({'SL_pct': sc_sl, 'LT_mean': sc_lt, 'LT_std': sc_lt_std})
 
                     scen_rows = []
