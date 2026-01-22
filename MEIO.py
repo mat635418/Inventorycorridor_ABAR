@@ -124,6 +124,26 @@ st.markdown(
         font-weight: 600;
         color: #0b3d91;
       }
+      .kpi-2x2-table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.8rem;
+      }
+      .kpi-2x2-table td {
+        padding: 3px 6px;
+        border: 1px solid #e0e0e0;
+      }
+      .kpi-label {
+        color: #555555;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      .kpi-value {
+        color: #111111;
+        font-weight: 700;
+        text-align: right;
+        white-space: nowrap;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -749,7 +769,6 @@ if s_file and d_file and lt_file:
 
     stats["Local_Std"] = stats.apply(fill_local_std, axis=1)
 
-    # FIX: use correct keyword lt_mode_param and pass service_level explicitly
     results, reachable_map = run_pipeline(
         df_d=df_d,
         stats=stats,
@@ -820,7 +839,7 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
-    # -------- Tabs (with added All Materials View) --------
+    # -------- Tabs --------
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         [
             "📈 Inventory Corridor",
@@ -882,6 +901,7 @@ if s_file and d_file and lt_file:
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
+            # 2x2 KPI table: Avg Daily Demand & SS coverage
             try:
                 summary_row = results[
                     (results["Product"] == sku)
@@ -894,9 +914,20 @@ if s_file and d_file and lt_file:
                     days_cov = srow.get("Days_Covered_by_SS", np.nan)
                     avg_daily_txt = f"{avg_daily:.2f} units/day" if pd.notna(avg_daily) else "N/A"
                     days_cov_txt = f"{days_cov:.1f} days" if pd.notna(days_cov) else "N/A"
-                    # Updated formatting to use a new line between label and value
-                    st.markdown(f"**Avg Daily Demand:**\n{avg_daily_txt}")
-                    st.markdown(f"**Safety Stock coverage:**\n{days_cov_txt}")
+
+                    kpi_html = f"""
+                    <table class="kpi-2x2-table">
+                      <tr>
+                        <td class="kpi-label">Avg Daily Demand</td>
+                        <td class="kpi-value"><strong>{avg_daily_txt}</strong></td>
+                      </tr>
+                      <tr>
+                        <td class="kpi-label">Safety Stock coverage</td>
+                        <td class="kpi-value"><strong>{days_cov_txt}</strong></td>
+                      </tr>
+                    </table>
+                    """
+                    st.markdown(kpi_html, unsafe_allow_html=True)
             except Exception:
                 pass
 
@@ -960,13 +991,11 @@ if s_file and d_file and lt_file:
             fig = go.Figure(traces)
             fig.update_layout(
                 legend=dict(orientation="h"),
-                # Remove axis titles per request
                 xaxis_title=None,
                 yaxis_title=None,
                 xaxis=dict(
                     tickformat="%b\n%Y",
-                    # Force showing every month on the x-axis
-                    dtick="M1",
+                    dtick="M1",  # show all months
                 ),
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -1468,7 +1497,6 @@ if s_file and d_file and lt_file:
                     },
                     title="Policy Impact & Efficiency Ratio (Bubble Size = SS_to_FCST_Ratio)",
                 )
-                # Remove axis titles for this graph
                 fig_eff.update_layout(
                     xaxis_title=None,
                     yaxis_title=None,
@@ -1632,7 +1660,6 @@ if s_file and d_file and lt_file:
                         ),
                     ]
                 )
-                # Remove axis titles for this graph (tab5)
                 fig_hist.update_layout(
                     xaxis_title=None,
                     yaxis_title=None,
@@ -2502,9 +2529,10 @@ if s_file and d_file and lt_file:
                     per_node["retained_stat_total"]
                     * per_node["direct_frac"]
                 )
-                per_node["indirect_retained_ss"] = per_node[
-                    "retained_stat_total"
-                ] * (1 - per_node["direct_frac"])
+                per_node["indirect_retained_ss"] = (
+                    per_node["retained_stat_total"]
+                    * (1 - per_node["direct_frac"])
+                )
                 per_node["cap_reduction"] = per_node.apply(
                     lambda r: max(
                         r["pre_ss"] - r["Safety_Stock"], 0.0
@@ -2717,7 +2745,7 @@ if s_file and d_file and lt_file:
             if "Avg_SS_Days_Coverage" in agg_all.columns:
                 agg_all["Avg_SS_Days_Coverage"] = agg_all["Avg_SS_Days_Coverage"].fillna(0.0)
             if "SS_to_Demand_Ratio_%" in agg_all.columns:
-                agg_all["SS_to_Demand_Ratio_%" ] = agg_all["SS_to_Demand_Ratio_%" ].fillna(0.0)
+                agg_all["SS_to_Demand_Ratio_%"] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
 
             with st.container():
                 st.markdown(
@@ -2771,7 +2799,7 @@ if s_file and d_file and lt_file:
                     "Safety_Stock": "Calculated Safety Stock",
                     "Avg_SS_Days_Coverage": "SS Coverage (days)",
                     "Local_Forecast_Month": "Local Forecast (month)",
-                    "SS_to_Demand_Ratio_%" : "SS / Demand (%)",
+                    "SS_to_Demand_Ratio_%": "SS / Demand (%)",
                 }
                 agg_view = agg_view.rename(columns=rename_map)
 
@@ -2802,6 +2830,112 @@ if s_file and d_file and lt_file:
                     use_container_width=True,
                     height=430,
                 )
+
+            # ---------- NEW: ACTIVE materials table + per-line violin plots ----------
+            st.markdown("---")
+            st.subheader("📊 Active Materials — Demand & Lead Time Variability")
+
+            # ACTIVE = at least one node this period with demand or SS
+            active_mask = (snapshot_all["Agg_Future_Demand"] > 0) | (snapshot_all["Safety_Stock"] > 0)
+            active_products = (
+                snapshot_all[active_mask]["Product"]
+                .dropna()
+                .unique()
+                .tolist()
+            )
+
+            if not active_products:
+                st.info("No active materials for the selected period.")
+            else:
+                # Use the same columns as the first table, but restricted to ACTIVE materials
+                active_agg = agg_all[agg_all["Product"].isin(active_products)].copy()
+                active_view = active_agg.sort_values(
+                    "Avg_Day_Demand", ascending=False
+                )[display_cols_all].reset_index(drop=True)
+                active_view = active_view.rename(columns=rename_map)
+
+                # Show active materials table
+                active_formatted = active_view.copy()
+                if "Avg Daily Demand" in active_formatted.columns:
+                    active_formatted["Avg Daily Demand"] = active_formatted["Avg Daily Demand"].apply(
+                        lambda v: "{:.3f}".format(v) if pd.notna(v) else ""
+                    )
+                if "Calculated Safety Stock" in active_formatted.columns:
+                    active_formatted["Calculated Safety Stock"] = active_formatted[
+                        "Calculated Safety Stock"
+                    ].apply(lambda v: euro_format(v, always_two_decimals=False, show_zero=True))
+                if "Local Forecast (month)" in active_formatted.columns:
+                    active_formatted["Local Forecast (month)"] = active_formatted[
+                        "Local Forecast (month)"
+                    ].apply(lambda v: euro_format(v, always_two_decimals=False, show_zero=True))
+                if "SS Coverage (days)" in active_formatted.columns:
+                    active_formatted["SS Coverage (days)"] = active_formatted[
+                        "SS Coverage (days)"
+                    ].apply(lambda v: "{:.0f}".format(v) if pd.notna(v) else "")
+                if "SS / Demand (%)" in active_formatted.columns:
+                    active_formatted["SS / Demand (%)"] = active_formatted[
+                        "SS / Demand (%)"
+                    ].apply(lambda v: "{:.0f}".format(v) if pd.notna(v) else "")
+
+                st.markdown("**Active materials snapshot (table)**")
+                st.dataframe(
+                    active_formatted,
+                    use_container_width=True,
+                    height=430,
+                )
+
+                # Now, for each active material, plot a violin diagram of variability
+                st.markdown("**Per-material variability (Demand & Lead Time) — violins**")
+
+                for prod in active_products:
+                    sub = snapshot_all[snapshot_all["Product"] == prod].copy()
+                    if sub.empty:
+                        continue
+
+                    violin_rows = []
+
+                    # Demand variability (per-node monthly std dev from Agg_Std_Hist)
+                    if "Agg_Std_Hist" in sub.columns:
+                        for val in sub["Agg_Std_Hist"].dropna():
+                            violin_rows.append(
+                                {
+                                    "Metric": "Demand StdDev (monthly units)",
+                                    "Value": float(val),
+                                }
+                            )
+
+                    # Lead-time variability (per-node LT_Std)
+                    if "LT_Std" in sub.columns:
+                        for val in sub["LT_Std"].dropna():
+                            violin_rows.append(
+                                {
+                                    "Metric": "Lead Time StdDev (days)",
+                                    "Value": float(val),
+                                }
+                            )
+
+                    if not violin_rows:
+                        # Skip if no metrics for this product
+                        continue
+
+                    vdf = pd.DataFrame(violin_rows)
+
+                    st.markdown(f"**{prod}**")
+                    fig_v = px.violin(
+                        vdf,
+                        x="Metric",
+                        y="Value",
+                        color="Metric",
+                        box=True,
+                        points="all",
+                    )
+                    fig_v.update_layout(
+                        xaxis_title=None,
+                        yaxis_title=None,
+                        legend_title_text="Metric",
+                        height=320,
+                    )
+                    st.plotly_chart(fig_v, use_container_width=True)
 
 else:
     st.info(
