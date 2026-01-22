@@ -21,7 +21,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.973 — Jan 2026</h1>",
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.975 — Jan 2026</h1>",
     unsafe_allow_html=True,
 )
 
@@ -697,7 +697,7 @@ if s_file and d_file and lt_file:
         st.stop()
 
     df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
-    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
+    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").to_timestamp()
 
     df_s["Consumption"] = clean_numeric(df_s["Consumption"])
     df_s["Forecast"] = clean_numeric(df_s["Forecast"])
@@ -1005,30 +1005,54 @@ if s_file and d_file and lt_file:
                 )
             )
 
-            # Highlight current period (bug-fixed: convert Timestamp to datetime)
+            # Highlight current period (robust across Plotly versions)
             current_idx = None
-            if CURRENT_MONTH_TS in list(plot_full["Period"].values):
-                current_idx = list(plot_full["Period"].values).index(CURRENT_MONTH_TS)
+            period_values = list(plot_full["Period"].values)
+            if CURRENT_MONTH_TS in period_values:
+                current_idx = period_values.index(CURRENT_MONTH_TS)
 
             if current_idx is not None:
                 current_x = plot_full["Period"].iloc[current_idx]
-                if isinstance(current_x, pd.Timestamp):
-                    current_x_val = current_x.to_pydatetime()
-                else:
-                    current_x_val = current_x
 
-                current_fcst = plot_full["Forecast"].iloc[current_idx]
-                current_ss = plot_full["Safety_Stock"].iloc[current_idx]
+                # Keep x as scalar; Plotly will handle pandas.Timestamp or datetime
+                current_x_val = current_x
 
-                fig2.add_vline(
-                    x=current_x_val,
-                    line_width=1.5,
-                    line_dash="dot",
-                    line_color="#9e9e9e",
-                    annotation_text="Current period",
-                    annotation_position="top left",
-                    annotation_font=dict(size=11, color="#616161"),
-                )
+                current_fcst = float(plot_full["Forecast"].iloc[current_idx])
+                current_ss = float(plot_full["Safety_Stock"].iloc[current_idx])
+
+                try:
+                    # Use the newer add_vline API if available
+                    fig2.add_vline(
+                        x=current_x_val,
+                        line_width=1.5,
+                        line_dash="dot",
+                        line_color="#9e9e9e",
+                        annotation_text="Current period",
+                        annotation_position="top left",
+                        annotation_font=dict(size=11, color="#616161"),
+                    )
+                except Exception:
+                    # Fallback for older Plotly versions: add shape + annotation manually
+                    fig2.add_shape(
+                        type="line",
+                        x0=current_x_val,
+                        x1=current_x_val,
+                        y0=0,
+                        y1=1,
+                        xref="x",
+                        yref="paper",
+                        line=dict(width=1.5, dash="dot", color="#9e9e9e"),
+                    )
+                    fig2.add_annotation(
+                        x=current_x_val,
+                        y=1,
+                        xref="x",
+                        yref="paper",
+                        text="Current period",
+                        showarrow=False,
+                        yshift=10,
+                        font=dict(size=11, color="#616161"),
+                    )
 
                 row_current = results[
                     (results["Product"] == sku)
@@ -2741,6 +2765,4 @@ if s_file and d_file and lt_file:
                 st.markdown(summary_html, unsafe_allow_html=True)
 
 else:
-    st.info(
-        "Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer."
-    )
+    st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
