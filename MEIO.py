@@ -25,7 +25,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.95 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.96 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -43,6 +43,18 @@ st.markdown(
         color: #0b3d91 !important;
       }
       div[data-baseweb="tag"] svg, .stMultiSelect div[data-baseweb="tag"] svg, .stSelectbox div[data-baseweb="tag"] svg { fill: #0b3d91 !important; }
+
+      /* Make Streamlit download buttons smaller and more compact */
+      .stDownloadButton button, .stDownloadButton > button {
+        padding: 0.35rem 0.6rem !important;
+        font-size: 0.78rem !important;
+        border-radius: 6px !important;
+      }
+
+      /* Slightly smaller base font for most UI elements (esp. Tab 7 request) */
+      .main, .block-container, .stDataFrame, .stMarkdown, .stMetric {
+        font-size: 0.88rem;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -757,31 +769,17 @@ if s_file and d_file and lt_file:
                 plot_full[['Max_Corridor', 'Safety_Stock', 'Forecast', 'Agg_Future_Internal', 'Agg_Future_External']].fillna(0)
             )
 
-            # New: Allow toggling Max Corridor visibility (default OFF)
-            show_max_corridor = st.checkbox("Show Max Corridor", value=False, key="show_max_corridor")
-
-            traces = []
-            if show_max_corridor:
-                traces.append(go.Scatter(x=plot_full['Period'], y=plot_full['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=1, color='rgba(0,0,0,0.1)')))
-            traces.extend([
+            # Always show Max Corridor (removed toggle)
+            traces = [
+                go.Scatter(x=plot_full['Period'], y=plot_full['Max_Corridor'], name='Max Corridor (SS + Forecast)', line=dict(width=1, color='rgba(0,0,0,0.1)')),
                 go.Scatter(x=plot_full['Period'], y=plot_full['Safety_Stock'], name='Safety Stock', fill='tonexty', fillcolor='rgba(0,176,246,0.2)'),
                 go.Scatter(x=plot_full['Period'], y=plot_full['Forecast'], name='Local Direct Demand (Internal)', line=dict(color='black', dash='dot')),
                 go.Scatter(x=plot_full['Period'], y=plot_full['Agg_Future_External'], name='External Network Demand (Downstream)', line=dict(color='blue', dash='dash'))
-            ])
+            ]
 
             fig = go.Figure(traces)
             fig.update_layout(legend=dict(orientation="h"), xaxis_title='Period', yaxis_title='Units', xaxis=dict(tickformat="%b\n%Y"))
             st.plotly_chart(fig, use_container_width=True)
-
-            # Export corridor data for the selected SKU/Location
-            csv_buf_tab1 = plot_full.copy()
-            csv_buf_tab1['Period'] = csv_buf_tab1['Period'].dt.strftime('%Y-%m-%d')
-            st.download_button(
-                "📥 Export Inventory Corridor data (CSV)",
-                data=csv_buf_tab1.to_csv(index=False),
-                file_name=f"corridor_{sku}_{loc}.csv",
-                mime="text/csv"
-            )
 
     # TAB 2: Network Topology
     with tab2:
@@ -806,6 +804,8 @@ if s_file and d_file and lt_file:
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
+            # Repeat section title at top of tab
+            st.subheader("🕸️ Network Topology")
             # Show selection at start of tab (product + period)
             st.markdown(f"**Selected**: {sku} — {period_label(chosen_period)}")
             st.markdown("""
@@ -932,6 +932,7 @@ if s_file and d_file and lt_file:
                 html_text = html_text + injection_js
             components.html(html_text, height=750)
 
+            # Legend immediately below network (no extra blank spacer after)
             st.markdown("""
                 <div style="text-align:center; font-size:12px; padding:8px 0;">
                   <div style="display:inline-block; background:#f7f9fc; padding:8px 12px; border-radius:8px;">
@@ -942,15 +943,6 @@ if s_file and d_file and lt_file:
                   </div>
                 </div>
             """, unsafe_allow_html=True)
-
-            # Export raw network data for this material/period
-            topo_export = results[(results['Product'] == sku) & (results['Period'] == chosen_period)].copy()
-            st.download_button(
-                "📥 Export Network Topology data (CSV)",
-                data=topo_export.to_csv(index=False),
-                file_name=f"network_topology_{sku}_{period_label(chosen_period)}.csv",
-                mime="text/csv"
-            )
 
     # TAB 3: Full Plan
     with tab3:
@@ -975,25 +967,21 @@ if s_file and d_file and lt_file:
                     if dp_label in period_choices_labels:
                         default_period_list = [dp_label]
 
-            st.markdown(
-                """
-                <style>
-                /* remove red highlight for selected multiselect/selectbox chips */
-                div[data-baseweb="tag"], .stMultiSelect div[data-baseweb="tag"], .stSelectbox div[data-baseweb="tag"] {
-                    background: #e3f2fd !important;
-                    color: #0b3d91 !important;
-                    border: 1px solid #90caf9 !important;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True
-            )
-
+            # Filters aligned with other tabs: rely on global CSS for blue chips, no extra overrides here
             f_prod = st.multiselect("MATERIAL", prod_choices, default=default_prod_list, key="full_f_prod")
             f_loc = st.multiselect("LOCATION", loc_choices, default=[], key="full_f_loc")
             f_period_labels = st.multiselect("PERIOD", period_choices_labels, default=default_period_list, key="full_f_period")
 
             f_period = [period_label_map[lbl] for lbl in f_period_labels] if f_period_labels else []
+
+            # Small export button right under filters
+            st.download_button(
+                "Export filtered plan (CSV)",
+                data=results.to_csv(index=False),
+                file_name="filtered_plan.csv",
+                mime="text/csv",
+                key="full_plan_export"
+            )
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1018,24 +1006,22 @@ if s_file and d_file and lt_file:
 
             filtered_display = hide_zero_rows(filtered)
 
-            display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Adjustment_Status','Max_Corridor']
-            fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
+            # Only show specific columns as in screenshot: Product, Location, Period, Forecast, D_day, Days_Covered_by_SS, Safety_Stock, Adjustment_Status
+            display_cols = [c for c in [
+                'Product','Location','Period','Forecast','D_day','Days_Covered_by_SS','Safety_Stock','Adjustment_Status'
+            ] if c in filtered_display.columns]
+            fmt_cols = [c for c in ['Forecast','D_day','Days_Covered_by_SS','Safety_Stock'] if c in filtered_display.columns]
 
-            # Show main table below
             # Make Period human-friendly like the filters (e.g., "JAN 2026")
             disp_df = filtered_display.copy()
             if 'Period' in disp_df.columns:
                 try:
                     disp_df['Period'] = disp_df['Period'].apply(period_label)
                 except Exception:
-                    # leave as-is on failure
                     pass
 
             disp = df_format_for_display(disp_df[display_cols].copy(), cols=fmt_cols, two_decimals_cols=['D_day','Days_Covered_by_SS'])
             st.dataframe(disp, use_container_width=True, height=700)
-
-            csv_buf = filtered[display_cols].to_csv(index=False)
-            st.download_button("📥 Download Filtered Plan (CSV)", data=csv_buf, file_name="filtered_plan.csv", mime="text/csv")
 
     # TAB 4: Efficiency Analysis
     with tab4:
@@ -1055,6 +1041,20 @@ if s_file and d_file and lt_file:
                 eff_period = period_label_map.get(chosen_label, default_period)
             else:
                 eff_period = CURRENT_MONTH_TS
+
+            # Export snapshot right below filters
+            snapshot_period = eff_period if eff_period in all_periods else (all_periods[-1] if all_periods else None)
+            if snapshot_period is None:
+                eff_export = results[results['Product'] == sku].copy()
+            else:
+                eff_export = results[(results['Product'] == sku) & (results['Period'] == snapshot_period)].copy()
+            st.download_button(
+                "Export efficiency snapshot (CSV)",
+                data=eff_export.to_csv(index=False),
+                file_name=f"efficiency_{sku}_{period_label(snapshot_period) if snapshot_period is not None else 'all'}.csv",
+                mime="text/csv",
+                key="eff_export_btn"
+            )
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1093,7 +1093,6 @@ if s_file and d_file and lt_file:
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
                 eff_top_display = eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10).reset_index(drop=True)
-                # round Safety_Stock to integer and reduce font via styled dataframe
                 eff_top_display['Safety_Stock'] = eff_top_display['Safety_Stock'].round(0)
                 eff_top_fmt = df_format_for_display(
                     eff_top_display,
@@ -1104,14 +1103,6 @@ if s_file and d_file and lt_file:
                 st.dataframe(
                     eff_top_styled,
                     use_container_width=True
-                )
-
-                # Export efficiency snapshot
-                st.download_button(
-                    "📥 Export Efficiency snapshot (CSV)",
-                    data=eff.to_csv(index=False),
-                    file_name=f"efficiency_{sku}_{period_label(snapshot_period)}.csv",
-                    mime="text/csv"
                 )
 
     # TAB 5: Forecast Accuracy
@@ -1159,14 +1150,6 @@ if s_file and d_file and lt_file:
                                       go.Scatter(x=hdf['Period'], y=hdf['Forecast_Hist'], name='Forecast', line=dict(color='blue', dash='dot'))])
                 st.plotly_chart(fig_hist, use_container_width=True)
 
-                # Export local history
-                st.download_button(
-                    "📥 Export local history (CSV)",
-                    data=hdf.to_csv(index=False),
-                    file_name=f"forecast_history_{h_sku}_{h_loc if h_loc != '(no location)' else 'ALL'}.csv",
-                    mime="text/csv"
-                )
-
                 # --- Added separator between the graph and the aggregated history table ---
                 st.markdown("---")
 
@@ -1190,15 +1173,6 @@ if s_file and d_file and lt_file:
                 with c_net2:
                     c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                     st.metric("Network WAPE (%)", c_val)
-
-                # Export aggregated network history
-                if not net_table.empty:
-                    st.download_button(
-                        "📥 Export aggregated network history (CSV)",
-                        data=net_table.to_csv(index=False),
-                        file_name=f"network_history_{h_sku}.csv",
-                        mime="text/csv"
-                    )
 
     # TAB 6: Calculation Trace & Simulation — show mapping table and highlight values used
     with tab6:
@@ -1229,6 +1203,20 @@ if s_file and d_file and lt_file:
             else:
                 calc_period = CURRENT_MONTH_TS
 
+            # Export trace row as CSV right under filters
+            row_export = results[(results['Product'] == calc_sku) & (results['Location'] == calc_loc) & (results['Period'] == calc_period)]
+            if row_export.empty:
+                export_data = pd.DataFrame()
+            else:
+                export_data = row_export
+            st.download_button(
+                "Export calculation trace row (CSV)",
+                data=export_data.to_csv(index=False),
+                file_name=f"calc_trace_{calc_sku}_{calc_loc}_{period_label(calc_period)}.csv",
+                mime="text/csv",
+                key="calc_export_btn"
+            )
+
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
@@ -1253,7 +1241,6 @@ if s_file and d_file and lt_file:
                 hops = int(row.get('Tier_Hops', 0))
 
                 # Show the hop->SL mapping as an HTML table and highlight the row used
-                # Use explicit system font stack and same font-size as dataframes so the table font exactly matches below tables
                 mapping_rows = [
                     (0, "99%", "End-node"),
                     (1, "95%", "Internal + external demand"),
@@ -1290,22 +1277,19 @@ if s_file and d_file and lt_file:
                 </div>
                 """
                 st.markdown("**Applied Hop → Service Level mapping (highlight shows which row was used for this node):**")
-                # Use components.html to ensure the HTML table is rendered and font matches dataframes
                 try:
                     components.html(table_html, height=180)
                 except Exception:
-                    # fallback to markdown (legacy)
                     st.markdown(table_html, unsafe_allow_html=True)
 
                 # Highlight the exact values used for the calculation in a compact summary box
-                # Build HTML summary with key inputs and highlight
                 avg_daily = row.get('D_day', np.nan)
                 days_cov = row.get('Days_Covered_by_SS', np.nan)
                 avg_daily_txt = f"{avg_daily:.2f}" if pd.notna(avg_daily) else "N/A"
                 days_cov_txt = f"{days_cov:.1f}" if pd.notna(days_cov) else "N/A"
 
                 summary_html = f"""
-                <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
+                <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px; font-size:13px;">
                   <div style="flex:0 0 48%;background:#e8f0ff;border-radius:8px;padding:12px;">
                     <div style="font-size:12px;color:#0b3d91;font-weight:600;">Applied Node SL</div>
                     <div style="font-size:18px;font-weight:800;color:#0b3d91;">{node_sl*100:.2f}%</div>
@@ -1376,6 +1360,31 @@ if s_file and d_file and lt_file:
     7. Pre-rule SS (max of raw vs floor) = {max(raw_ss_calc, ss_floor):.2f} units
     """)
 
+                # Move Zero Demand / Capping diagnostics here (before Section 3/4)
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("**Zero Demand Rule**")
+                    if zero_if_no_net_fcst and row['Agg_Future_Demand'] <= 0:
+                        st.error("❌ Network Demand is 0. SS Forced to 0.")
+                    else:
+                        st.success("✅ Network Demand exists. Keep Statistical SS.")
+                with c2:
+                    st.markdown("**Capping (Min/Max) Diagnostics**")
+                    if apply_cap:
+                        lower_limit = row['Agg_Future_Demand'] * (cap_range[0]/100)
+                        upper_limit = row['Agg_Future_Demand'] * (cap_range[1]/100)
+                        st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
+                        st.write(f"Lower limit = Agg_Future_Demand * {cap_range[0]}% = {euro_format(lower_limit, True)}")
+                        st.write(f"Upper limit = Agg_Future_Demand * {cap_range[1]}% = {euro_format(upper_limit, True)}")
+                        if raw_ss_calc > upper_limit:
+                            st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) > Max Cap ({euro_format(upper_limit, True)}). Capping downwards to {euro_format(upper_limit, True)}.")
+                        elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
+                            st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) < Min Cap ({euro_format(lower_limit, True)}). Raising to {euro_format(lower_limit, True)}.")
+                        else:
+                            st.success("✅ Raw SS is within caps (no capping applied).")
+                    else:
+                        st.write("Capping logic disabled.")
+
                 # Reworked explanation section: FIRST explain why Pre-rule vs Implemented can differ
                 st.markdown("### 3. Why do we sometimes use a different SS than the pure statistical value?")
                 st.markdown("""
@@ -1411,7 +1420,7 @@ if s_file and d_file and lt_file:
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Zero / capping diagnostics AFTER the two light-blue boxes
+                # Zero / capping diagnostics explanation moves into main explanation already; keep equations as Section 4
                 st.subheader("4. Business Rules & Diagnostics — explanation & diagnostics")
                 st.markdown(r"""
                 Background & explanation of the calculation steps and business-rule adjustments.
@@ -1430,45 +1439,27 @@ if s_file and d_file and lt_file:
                 """)
                 st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
-                st.markdown("---")
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown("**Zero Demand Rule**")
-                    if zero_if_no_net_fcst and row['Agg_Future_Demand'] <= 0:
-                        st.error("❌ Network Demand is 0. SS Forced to 0.")
-                    else:
-                        st.success("✅ Network Demand exists. Keep Statistical SS.")
-                with c2:
-                    st.markdown("**Capping (Min/Max) Diagnostics**")
-                    if apply_cap:
-                        lower_limit = row['Agg_Future_Demand'] * (cap_range[0]/100)
-                        upper_limit = row['Agg_Future_Demand'] * (cap_range[1]/100)
-                        st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
-                        st.write(f"Lower limit = Agg_Future_Demand * {cap_range[0]}% = {euro_format(lower_limit, True)}")
-                        st.write(f"Upper limit = Agg_Future_Demand * {cap_range[1]}% = {euro_format(upper_limit, True)}")
-                        if raw_ss_calc > upper_limit:
-                            st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) > Max Cap ({euro_format(upper_limit, True)}). Capping downwards to {euro_format(upper_limit, True)}.")
-                        elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
-                            st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) < Min Cap ({euro_format(lower_limit, True)}). Raising to {euro_format(lower_limit, True)}.")
-                        else:
-                            st.success("✅ Raw SS is within caps (no capping applied).")
-                    else:
-                        st.write("Capping logic disabled.")
-
-                # Export trace row as CSV
-                trace_export = row_df.copy()
-                st.download_button(
-                    "📥 Export Calculation Trace row (CSV)",
-                    data=trace_export.to_csv(index=False),
-                    file_name=f"calc_trace_{calc_sku}_{calc_loc}_{period_label(calc_period)}.csv",
-                    mime="text/csv"
-                )
-
                 # ---- Scenario planning moved to the bottom as a dedicated, collapsed section ----
                 st.markdown("---")
+                scen_style = """
+                <style>
+                  details.scenario-expander summary {
+                    font-size: 0.95rem;
+                    font-weight: 700;
+                    color: #0b4f9c;
+                  }
+                </style>
+                """
+                st.markdown(scen_style, unsafe_allow_html=True)
                 with st.expander("Scenario Planning — simulate alternative SL / LT assumptions (analysis-only)", expanded=False):
-                    st.write("Use scenarios to test sensitivity to Service Level or Lead Time. Scenarios do not change implemented policy — they are analysis-only.")
+                    st.markdown(
+                        """
+                        <div style="border:1px solid #0b4f9c;border-radius:10px;background:#fff9e0;padding:12px;color:#0b4f9c;font-size:0.95rem;">
+                          Use scenarios to test sensitivity to Service Level or Lead Time. Scenarios do not change implemented policy — they are analysis-only.
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
                     if 'n_scen' not in st.session_state:
                         st.session_state['n_scen'] = 1
                     options = [1,2,3]
@@ -1522,14 +1513,6 @@ if s_file and d_file and lt_file:
                     fig_bar.update_layout(title="Scenario SS Comparison", yaxis_title="SS (units)")
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                    # Export scenario comparison
-                    st.download_button(
-                        "📥 Export Scenario comparison (CSV)",
-                        data=display_comp.to_csv(index=False),
-                        file_name=f"scenario_comparison_{calc_sku}_{calc_loc}_{period_label(calc_period)}.csv",
-                        mime="text/csv"
-                    )
-
     # TAB 7: By Material
     with tab7:
         col_main, col_badge = st.columns([17, 3])
@@ -1550,17 +1533,37 @@ if s_file and d_file and lt_file:
             else:
                 selected_period = CURRENT_MONTH_TS
 
+            # Export material-period data right below filters
+            mat_period_export = results[(results['Product'] == selected_product) & (results['Period'] == selected_period)].copy()
+            st.download_button(
+                "Export material-period data (CSV)",
+                data=mat_period_export.to_csv(index=False),
+                file_name=f"material_view_{selected_product}_{period_label(selected_period)}.csv",
+                mime="text/csv",
+                key="mat_export_btn"
+            )
+
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
+            # Slightly smaller font on this tab (except header and tables) as requested
+            st.markdown(
+                """
+                <style>
+                  div[data-testid="stVerticalBlock"] div:nth-child(7) .stMarkdown p {
+                    font-size: 0.82rem !important;
+                  }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+
             # Show selection at the start of the tab
-            st.markdown(f"**Selected**: {selected_product} — {period_label(selected_period)}")
             st.header("📦 View by Material (Single Material Focus + 8 Reasons for Inventory)")
+            st.markdown(f"**Selected**: {selected_product} — {period_label(selected_period)}")
             mat_period_df = results[(results['Product'] == selected_product) & (results['Period'] == selected_period)].copy()
             mat_period_df_display = hide_zero_rows(mat_period_df)
             total_forecast = mat_period_df['Forecast'].sum()
-            # Fix: report network total demand as the SUM of raw forecasts across the network
-            # (previously showing sum of aggregated per-node agg demands could double-count downstream)
             network_total_forecast = df_d[(df_d['Product'] == selected_product) & (df_d['Period'] == selected_period)]['Forecast'].sum()
             total_net = network_total_forecast
             total_ss = mat_period_df['Safety_Stock'].sum(); nodes_count = mat_period_df['Location'].nunique()
@@ -1572,14 +1575,12 @@ if s_file and d_file and lt_file:
             except Exception:
                 avg_days_covered = np.nan
 
-            # --- Removed the 'Total Network Demand' metric from the top KPIs as requested ---
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Total Local Forecast", euro_format(total_forecast, True))
             k2.metric("Total Safety Stock (sum nodes)", euro_format(total_ss, True))
             k3.metric("Nodes", f"{nodes_count}")
             k4.metric("Avg Days Covered (nodes)", f"{avg_days_covered:.1f}" if not pd.isna(avg_days_covered) else "N/A")
 
-            # Insert a clear bar separator before the "Why do we carry this..." section to visually separate KPIs from the breakdown
             st.markdown("---")
 
             st.markdown("### Why do we carry this SS? — 8 Reasons breakdown (aggregated for selected material)")
@@ -1595,12 +1596,10 @@ if s_file and d_file and lt_file:
 
                 mat['term1'] = (mat['Agg_Std_Hist']**2 / float(days_per_month)) * mat['LT_Mean']
                 mat['term2'] = (mat['LT_Std']**2) * (mat['Agg_Future_Demand'] / float(days_per_month))**2
-                # use current service level z
                 z_current = norm.ppf(service_level)
                 mat['demand_uncertainty_raw'] = z_current * np.sqrt(mat['term1'].clip(lower=0))
                 mat['lt_uncertainty_raw'] = z_current * np.sqrt(mat['term2'].clip(lower=0))
                 mat['direct_forecast_raw'] = mat['Forecast'].clip(lower=0)
-                # use explicit Agg_Future_External for indirect/downstream amount
                 mat['indirect_network_raw'] = mat['Agg_Future_External'].clip(lower=0)
                 mat['cap_reduction_raw'] = ((mat['Pre_Rule_SS'] - mat['Safety_Stock']).clip(lower=0)).fillna(0)
                 mat['cap_increase_raw'] = ((mat['Safety_Stock'] - mat['Pre_Rule_SS']).clip(lower=0)).fillna(0)
@@ -1638,14 +1637,6 @@ if s_file and d_file and lt_file:
                                                   cols=['Units','Pct_of_raw_sum'],
                                                   two_decimals_cols=['Pct_of_raw_sum']),
                              use_container_width=True)
-
-                # Export raw driver table
-                st.download_button(
-                    "📥 Export raw driver breakdown (CSV)",
-                    data=drv_df_display.to_csv(index=False),
-                    file_name=f"drivers_raw_{selected_product}_{period_label(selected_period)}.csv",
-                    mime="text/csv"
-                )
 
                 # B. SS Attribution — mutually exclusive components that sum to total SS
                 st.markdown("---")
@@ -1737,42 +1728,26 @@ if s_file and d_file and lt_file:
                 st.dataframe(ss_attrib_df_formatted,
                              use_container_width=True)
 
-                # Export SS attribution
-                st.download_button(
-                    "📥 Export SS attribution (CSV)",
-                    data=ss_drv_df_display.to_csv(index=False),
-                    file_name=f"ss_attribution_{selected_product}_{period_label(selected_period)}.csv",
-                    mime="text/csv"
-                )
-
                 grand_forecast = mat_period_df['Forecast'].sum()
                 grand_net = mat_period_df['Agg_Future_Demand'].sum()
                 grand_ss = mat_period_df['Safety_Stock'].sum()
                 summary_html = f"""
-                <div style="margin-top:12px;">
+                <div style="margin-top:12px; font-size:0.86rem;">
                   <table style="border-collapse:collapse;">
                     <tr>
-                      <td style="padding:2px 12px;font-size:12px;">&nbsp;</td>
-                      <td style="padding:2px 12px;font-size:12px;">Total Local Demand</td>
-                      <td style="padding:2px 12px;font-size:12px;">Total Safety Stock</td>                      
+                      <td style="padding:2px 12px;">&nbsp;</td>
+                      <td style="padding:2px 12px;">Total Local Demand</td>
+                      <td style="padding:2px 12px;">Total Safety Stock</td>                      
                     </tr>
                     <tr style="color:#666">
-                      <td style="padding:6px 12px;font-size:14px;"><strong>Grand Totals</strong></td>
-                      <td style="padding:6px 12px;font-size:14px;"><strong>{euro_format(grand_forecast, True)}</strong></td>
-                      <td style="padding:6px 12px;font-size:14px;"><strong>{euro_format(grand_ss, True)}</strong></td>
+                      <td style="padding:6px 12px;"><strong>Grand Totals</strong></td>
+                      <td style="padding:6px 12px;"><strong>{euro_format(grand_forecast, True)}</strong></td>
+                      <td style="padding:6px 12px;"><strong>{euro_format(grand_ss, True)}</strong></td>
                     </tr>
                   </table>
                 </div>
                 """
                 st.markdown(summary_html, unsafe_allow_html=True)
-
-                # Export underlying material-period table
-                st.download_button(
-                    "📥 Export material-period data (CSV)",
-                    data=mat_period_df.to_csv(index=False),
-                    file_name=f"material_view_{selected_product}_{period_label(selected_period)}.csv",
-                    mime="text/csv"
-                )
 
 else:
     st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
