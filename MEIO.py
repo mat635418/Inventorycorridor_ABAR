@@ -1,35 +1,37 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
-# Developed by mat635418 — Jan 2026
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
-from pyvis.network import Network
-import streamlit.components.v1 as components
-from scipy.stats import norm
 import os
 import math
-from datetime import datetime
 import collections
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+import streamlit.components.v1 as components
+from pyvis.network import Network
+from scipy.stats import norm
 
 st.set_page_config(page_title="MEIO for RM", layout="wide")
 
-# Logo configuration
 LOGO_FILENAME = "GY_logo.jpg"
 LOGO_BASE_WIDTH = 160
-
-# Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.972 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.973 — Jan 2026</h1>",
+    unsafe_allow_html=True,
+)
 
 # Global CSS
 st.markdown(
     """
     <style>
-      div[data-baseweb="tag"], .stMultiSelect div[data-baseweb="tag"], .stSelectbox div[data-baseweb="tag"] {
+      div[data-baseweb="tag"],
+      .stMultiSelect div[data-baseweb="tag"],
+      .stSelectbox div[data-baseweb="tag"] {
         background: #e3f2fd !important;
         color: #0b3d91 !important;
         border: 1px solid #90caf9 !important;
@@ -37,26 +39,29 @@ st.markdown(
         padding: 2px 8px !important;
         font-weight: 600 !important;
       }
-      div[data-baseweb="tag"] span, .stMultiSelect div[data-baseweb="tag"] span, .stSelectbox div[data-baseweb="tag"] span {
+      div[data-baseweb="tag"] span,
+      .stMultiSelect div[data-baseweb="tag"] span,
+      .stSelectbox div[data-baseweb="tag"] span {
         color: #0b3d91 !important;
       }
-      div[data-baseweb="tag"] svg, .stMultiSelect div[data-baseweb="tag"] svg, .stSelectbox div[data-baseweb="tag"] svg {
+      div[data-baseweb="tag"] svg,
+      .stMultiSelect div[data-baseweb="tag"] svg,
+      .stSelectbox div[data-baseweb="tag"] svg {
         fill: #0b3d91 !important;
       }
-
-      /* Make Streamlit download buttons smaller and more compact */
-      .stDownloadButton button, .stDownloadButton > button {
+      .stDownloadButton button,
+      .stDownloadButton > button {
         padding: 0.35rem 0.6rem !important;
         font-size: 0.78rem !important;
         border-radius: 6px !important;
       }
-
-      /* Slightly smaller base font */
-      .main, .block-container, .stDataFrame, .stMarkdown, .stMetric {
+      .main,
+      .block-container,
+      .stDataFrame,
+      .stMarkdown,
+      .stMetric {
         font-size: 0.88rem;
       }
-
-      /* Global style for generic export buttons — new icon text */
       .export-csv-btn button {
         background-color: #0b3d91 !important;
         color: #ffffff !important;
@@ -65,21 +70,15 @@ st.markdown(
         font-size: 0.8rem !important;
         font-weight: 600 !important;
       }
-
-      /* Keep scenario comparison table compact (Tab 6) */
       .scenario-table-container {
         max-width: 620px;
         margin-left: 0;
         margin-right: auto;
       }
-
-      /* Tab title font – make uniform using Tab 4 as reference */
       button[data-baseweb="tab"] span {
         font-size: 0.95rem !important;
         font-weight: 600 !important;
       }
-
-      /* Selection line above titles */
       .selection-line {
         font-size: 0.9rem;
         margin-bottom: 0.4rem;
@@ -92,8 +91,6 @@ st.markdown(
         color: #0b3d91;
         font-weight: 700;
       }
-
-      /* Wrap table header text and avoid truncation (Tab 4 top table) */
       .ss-top-table table thead tr th {
         white-space: normal !important;
         word-break: break-word !important;
@@ -107,8 +104,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Helpers / formatting utilities
-def clean_numeric(series):
+
+# -------- Helpers / formatting --------
+def clean_numeric(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.strip()
     s = s.replace(
         {
@@ -131,16 +129,11 @@ def clean_numeric(series):
         )
     s = s.str.replace(",", "", regex=False).str.replace(" ", "", regex=False)
     s = s.str.replace(r"[^\d\.\-]+", "", regex=True)
-    out = pd.to_numeric(s, errors="coerce")
-    return out
+    return pd.to_numeric(s, errors="coerce")
 
 
-def euro_format(x, always_two_decimals=True, show_zero=False):
-    """
-    Format numeric values using '.' as thousands separator (e.g. 1.234)
-    Default behaviour: hide zeros (return empty string).
-    If show_zero=True, zeros will be shown as '0' (or '0.00' if requested)
-    """
+def euro_format(x, always_two_decimals: bool = True, show_zero: bool = False) -> str:
+    """Format numeric values using '.' as thousands separator; hide zeros unless show_zero is True."""
     try:
         if x is None:
             return ""
@@ -153,19 +146,18 @@ def euro_format(x, always_two_decimals=True, show_zero=False):
                 return str(x)
         if math.isnan(xv):
             return ""
-        if math.isclose(xv, 0.0, abs_tol=1e-9):
-            if not show_zero:
-                return ""
+        if math.isclose(xv, 0.0, abs_tol=1e-9) and not show_zero:
+            return ""
         neg = xv < 0
         rounded = int(round(abs(xv)))
-        s = f"{rounded:,}"
-        s = s.replace(",", ".")
+        s = f"{rounded:,}".replace(",", ".")
         return f"-{s}" if neg else s
     except Exception:
         return str(x)
 
 
-def df_format_for_display(df, cols=None, two_decimals_cols=None):
+def df_format_for_display(df: pd.DataFrame, cols=None, two_decimals_cols=None) -> pd.DataFrame:
+    """Apply euro_format to numeric columns; optionally keep two decimals for specific columns."""
     d = df.copy()
     if cols is None:
         cols = [c for c in d.columns if d[c].dtype.kind in "biufc"]
@@ -180,13 +172,12 @@ def df_format_for_display(df, cols=None, two_decimals_cols=None):
                     )
                 )
             else:
-                d[c] = d[c].apply(
-                    lambda v: euro_format(v, always_two_decimals=False)
-                )
+                d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=False))
     return d
 
 
-def hide_zero_rows(df, check_cols=None):
+def hide_zero_rows(df: pd.DataFrame, check_cols=None) -> pd.DataFrame:
+    """Drop rows where the sum of selected columns equals zero."""
     if df is None or df.empty:
         return df
     if check_cols is None:
@@ -201,13 +192,12 @@ def hide_zero_rows(df, check_cols=None):
         return df
 
 
-def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1.0):
-    """
-    Aggregate monthly forecast and variance through the network.
-    """
+def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive: bool = True, rho: float = 1.0):
+    """Aggregate monthly forecast and variance through the network."""
     results = []
     months = df_forecast["Period"].unique()
     products = df_forecast["Product"].unique()
+
     routes_by_product = {}
     if "Product" in df_lt.columns:
         for prod in df_lt["Product"].unique():
@@ -220,38 +210,18 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
     for month in months:
         df_month = df_forecast[df_forecast["Period"] == month]
         for prod in products:
-            p_stats = (
-                df_stats[df_stats["Product"] == prod]
-                .set_index("Location")
-                .to_dict("index")
-            )
-            p_fore = (
-                df_month[df_month["Product"] == prod]
-                .set_index("Location")
-                .to_dict("index")
-            )
+            p_stats = df_stats[df_stats["Product"] == prod].set_index("Location").to_dict("index")
+            p_fore = df_month[df_month["Product"] == prod].set_index("Location").to_dict("index")
             p_lt = routes_by_product.get(prod, pd.DataFrame(columns=df_lt.columns))
-            nodes = set(
-                df_month[df_month["Product"] == prod]["Location"]
-            )
+
+            nodes = set(df_month[df_month["Product"] == prod]["Location"])
             if not p_lt.empty:
-                froms = set(
-                    [
-                        v
-                        for v in p_lt["From_Location"].tolist()
-                        if pd.notna(v)
-                    ]
-                )
-                tos = set(
-                    [
-                        v
-                        for v in p_lt["To_Location"].tolist()
-                        if pd.notna(v)
-                    ]
-                )
+                froms = set(v for v in p_lt["From_Location"].tolist() if pd.notna(v))
+                tos = set(v for v in p_lt["To_Location"].tolist() if pd.notna(v))
                 nodes = nodes.union(froms).union(tos)
             if not nodes:
                 continue
+
             children = {}
             if not p_lt.empty:
                 for _, r in p_lt.iterrows():
@@ -260,16 +230,15 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
                     if pd.isna(f) or pd.isna(t):
                         continue
                     children.setdefault(f, set()).add(t)
+
             reachable_cache = {}
 
             def get_reachable(start):
-                # If not transitive, return only direct children plus the start node.
                 if not transitive:
                     direct = children.get(start, set())
-                    outset = set(direct)
-                    outset.add(start)
-                    return outset
-
+                    out = set(direct)
+                    out.add(start)
+                    return out
                 if start in reachable_cache:
                     return reachable_cache[start]
                 visited = set()
@@ -290,36 +259,25 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
                 reachable = get_reachable(n)
                 reachable_map[(prod, n, month)] = reachable
 
-                local_fcst = (
-                    float(p_fore.get(n, {"Forecast": 0})["Forecast"])
-                    if n in p_fore
-                    else 0.0
-                )
-
+                local_fcst = float(p_fore.get(n, {"Forecast": 0}).get("Forecast", 0.0))
                 child_fcst_sum = 0.0
                 child_var_sum = 0.0
+
                 for c in reachable:
                     if c == n:
                         continue
-                    child_fcst = (
-                        float(p_fore.get(c, {"Forecast": 0})["Forecast"])
-                        if c in p_fore
-                        else 0.0
-                    )
+                    child_fcst = float(p_fore.get(c, {"Forecast": 0}).get("Forecast", 0.0))
                     child_fcst_sum += child_fcst
                     child_std = p_stats.get(c, {}).get("Local_Std", np.nan)
                     if not pd.isna(child_std):
-                        child_var_sum += (float(child_std) ** 2) * float(rho)
+                        child_var_sum += float(child_std) ** 2 * float(rho)
 
                 agg_demand = local_fcst + child_fcst_sum
                 local_std = p_stats.get(n, {}).get("Local_Std", np.nan)
                 local_var = 0.0 if pd.isna(local_std) else float(local_std) ** 2
                 total_var = local_var + child_var_sum
-                agg_std = (
-                    np.sqrt(total_var)
-                    if total_var >= 0 and (not pd.isna(total_var))
-                    else np.nan
-                )
+                agg_std = np.sqrt(total_var) if total_var >= 0 and not pd.isna(total_var) else np.nan
+
                 results.append(
                     {
                         "Product": prod,
@@ -331,11 +289,11 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive=True, rho=1
                         "Agg_Std_Hist": agg_std,
                     }
                 )
+
     return pd.DataFrame(results), reachable_map
 
 
-# Render logo helper
-def render_logo_above_parameters(scale=1.5):
+def render_logo_above_parameters(scale: float = 1.5) -> None:
     if LOGO_FILENAME and os.path.exists(LOGO_FILENAME):
         try:
             width = int(LOGO_BASE_WIDTH * float(scale))
@@ -344,24 +302,8 @@ def render_logo_above_parameters(scale=1.5):
             pass
 
 
-def render_selection_badge(product=None, location=None, df_context=None, small=False, period=None):
-    if product is None or product == "":
-        return
-    title = f"{product}{(' — ' + location) if location else ''}"
-    badge_html = f"""
-    <div style="background:#f3f6f9;padding:8px;border-radius:8px;color:#222;max-width:100%;font-family:inherit;">
-      <div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Selected</div>
-      <div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title}</div>
-    </div>
-    """
-    st.markdown(badge_html, unsafe_allow_html=True)
-
-
-def render_selection_line(label, product=None, location=None, period_text=None):
-    """
-    Thin line above each tab title.
-    label like 'Selected:' (not bold); values navy and bold.
-    """
+def render_selection_line(label, product=None, location=None, period_text=None) -> None:
+    """Thin selection line used above titles in each tab."""
     if not product and not location and not period_text:
         return
     parts = []
@@ -379,21 +321,21 @@ def render_selection_line(label, product=None, location=None, period_text=None):
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
-    # simple separator line right after selection in each tab
-    st.markdown("<hr style='margin:4px 0 10px 0; border: none; border-top: 1px solid #e0e0e0;'/>", unsafe_allow_html=True)
+    st.markdown(
+        "<hr style='margin:4px 0 10px 0; border: none; border-top: 1px solid #e0e0e0;'/>",
+        unsafe_allow_html=True,
+    )
 
 
-def period_label(ts):
+def period_label(ts) -> str:
     try:
         return pd.to_datetime(ts).strftime("%b %Y").upper()
     except Exception:
         return str(ts)
 
 
-# ----------------------
-# SIDEBAR
-# ----------------------
-with st.sidebar.expander("⚙��� Service Level Configuration", expanded=True):
+# -------- Sidebar configuration --------
+with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
     service_level = st.slider(
         "Service Level (%) — end-nodes (hop 0)",
         50.0,
@@ -412,14 +354,14 @@ with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
     apply_cap = st.checkbox(
         "Enable SS Capping (% of Network Demand)",
         value=True,
-        help="Enable clipping of calculated Safety Stock within a percentage range of the node's total network demand.",
+        help="Clip Safety Stock within a percentage range of total network demand.",
     )
     cap_range = st.slider(
         "Cap Range (%)",
         0,
         500,
         (0, 200),
-        help="Lower and upper bounds (as % of total network demand) applied to Safety Stock. For example, 0–200% allows SS up to twice the node's network demand.",
+        help="Lower and upper bounds (as % of total network demand) applied to Safety Stock.",
     )
 
 use_transitive = True
@@ -433,30 +375,14 @@ DEFAULT_FILES = {
     "demand": "demand.csv",
     "lt": "leadtime.csv",
 }
-s_upload = st.sidebar.file_uploader(
-    "1. Sales Data (Historical: sales.csv)", type="csv"
-)
-d_upload = st.sidebar.file_uploader(
-    "2. Demand Data (Future Forecast: demand.csv)", type="csv"
-)
-lt_upload = st.sidebar.file_uploader(
-    "3. Lead Time Data (Network Routes: leadtime.csv)", type="csv"
-)
-s_file = (
-    s_upload
-    if s_upload is not None
-    else (DEFAULT_FILES["sales"] if os.path.exists(DEFAULT_FILES["sales"]) else None)
-)
-d_file = (
-    d_upload
-    if d_upload is not None
-    else (DEFAULT_FILES["demand"] if os.path.exists(DEFAULT_FILES["demand"]) else None)
-)
-lt_file = (
-    lt_upload
-    if lt_upload is not None
-    else (DEFAULT_FILES["lt"] if os.path.exists(DEFAULT_FILES["lt"]) else None)
-)
+s_upload = st.sidebar.file_uploader("1. Sales Data (Historical: sales.csv)", type="csv")
+d_upload = st.sidebar.file_uploader("2. Demand Data (Future Forecast: demand.csv)", type="csv")
+lt_upload = st.sidebar.file_uploader("3. Lead Time Data (Network Routes: leadtime.csv)", type="csv")
+
+s_file = s_upload if s_upload is not None else (DEFAULT_FILES["sales"] if os.path.exists(DEFAULT_FILES["sales"]) else None)
+d_file = d_upload if d_upload is not None else (DEFAULT_FILES["demand"] if os.path.exists(DEFAULT_FILES["demand"]) else None)
+lt_file = lt_upload if lt_upload is not None else (DEFAULT_FILES["lt"] if os.path.exists(DEFAULT_FILES["lt"]) else None)
+
 if s_file:
     st.sidebar.success(f"✅ Sales Loaded: {getattr(s_file, 'name', s_file)}")
 if d_file:
@@ -464,9 +390,7 @@ if d_file:
 if lt_file:
     st.sidebar.success(f"✅ Lead Time Loaded: {getattr(lt_file, 'name', lt_file)}")
 
-# ----------------------
-# MAIN LOGIC
-# ----------------------
+# -------- Core pipeline --------
 DEFAULT_PRODUCT_CHOICE = "NOKANDO2"
 DEFAULT_LOCATION_CHOICE = "DEW1"
 CURRENT_MONTH_TS = pd.Timestamp.now().to_period("M").to_timestamp()
@@ -477,22 +401,18 @@ def run_pipeline(
     stats,
     df_lt,
     service_level,
-    transitive=True,
-    rho=1.0,
-    lt_mode_param="Apply LT variance",
-    zero_if_no_net_fcst=True,
-    apply_cap=True,
+    transitive: bool = True,
+    rho: float = 1.0,
+    lt_mode_param: str = "Apply LT variance",
+    zero_if_no_net_fcst: bool = True,
+    apply_cap: bool = True,
     cap_range=(0, 200),
 ):
-    """
-    Aggregation -> stats -> safety-stock pipeline with fixed hop→SL mapping.
-    """
+    """Aggregation → stats → safety-stock pipeline with fixed hop→SL mapping."""
     hop_to_sl = {0: 0.99, 1: 0.95, 2: 0.90, 3: 0.85}
 
-    def sl_for_hop(h):
-        if h in hop_to_sl:
-            return hop_to_sl[h]
-        return hop_to_sl[3]
+    def sl_for_hop(h: int) -> float:
+        return hop_to_sl.get(h, hop_to_sl[3])
 
     network_stats, reachable_map = aggregate_network_stats(
         df_forecast=df_d,
@@ -503,9 +423,7 @@ def run_pipeline(
     )
 
     node_lt_local = (
-        df_lt.groupby(["Product", "To_Location"])[
-            ["Lead_Time_Days", "Lead_Time_Std_Dev"]
-        ]
+        df_lt.groupby(["Product", "To_Location"])[["Lead_Time_Days", "Lead_Time_Std_Dev"]]
         .mean()
         .reset_index()
     )
@@ -531,9 +449,7 @@ def run_pipeline(
         }
     )
 
-    product_median_localstd = (
-        stats.groupby("Product")["Local_Std"].median().to_dict()
-    )
+    product_median_localstd = stats.groupby("Product")["Local_Std"].median().to_dict()
     global_median_std = stats["Local_Std"].median(skipna=True)
     if pd.isna(global_median_std) or global_median_std == 0:
         global_median_std = 1.0
@@ -541,9 +457,7 @@ def run_pipeline(
     def fill_agg_std(row):
         if not pd.isna(row["Agg_Std_Hist"]):
             return row["Agg_Std_Hist"]
-        return product_median_localstd.get(
-            row["Product"], global_median_std
-        )
+        return product_median_localstd.get(row["Product"], global_median_std)
 
     res["Agg_Std_Hist"] = res.apply(fill_agg_std, axis=1)
 
@@ -578,11 +492,9 @@ def run_pipeline(
         if lt_mode_param == "Ignore LT variance":
             lt_comp = 0.0
         elif lt_mode_param == "Apply LT variance":
-            lt_comp = (float(row["LT_Std"]) ** 2) * (D_for_LT ** 2)
+            lt_comp = float(row["LT_Std"]) ** 2 * (D_for_LT ** 2)
         elif lt_mode_param == "Average LT Std across downstream":
-            reachable = reachable_map.get(
-                (row["Product"], row["Location"], row["Period"]), set()
-            )
+            reachable = reachable_map.get((row["Product"], row["Location"], row["Period"]), set())
             if not reachable:
                 lt_used = float(row["LT_Std"])
             else:
@@ -594,21 +506,17 @@ def run_pipeline(
                     ]
                     if not match.empty:
                         vals.append(float(match["LT_Std"].iloc[0]))
-                lt_used = (
-                    float(np.mean(vals))
-                    if len(vals) > 0
-                    else float(row["LT_Std"])
-                )
-            lt_comp = (lt_used ** 2) * (D_for_LT ** 2)
+                lt_used = float(np.mean(vals)) if vals else float(row["LT_Std"])
+            lt_comp = lt_used ** 2 * (D_for_LT ** 2)
         else:
-            lt_comp = (float(row["LT_Std"]) ** 2) * (D_for_LT ** 2)
+            lt_comp = float(row["LT_Std"]) ** 2 * (D_for_LT ** 2)
         lt_component_list.append(lt_comp)
 
     res["lt_component"] = np.array(lt_component_list)
-    combined_variance = demand_component + res["lt_component"]
-    combined_variance = combined_variance.clip(lower=0)
+    combined_variance = (demand_component + res["lt_component"]).clip(lower=0)
 
     def compute_hop_distances_for_product(p_lt_df, prod_nodes):
+        """Compute hop distance (node → nearest leaf downstream) used for tiered SL."""
         children = {}
         for _, r in p_lt_df.iterrows():
             f = r.get("From_Location", None)
@@ -623,13 +531,7 @@ def run_pipeline(
                 set(p_lt_df["From_Location"].dropna().unique())
             ).union(set(p_lt_df["To_Location"].dropna().unique()))
 
-        leaf_nodes = set(
-            [
-                n
-                for n in all_nodes
-                if n not in children or len(children.get(n, set())) == 0
-            ]
-        )
+        leaf_nodes = {n for n in all_nodes if n not in children or not children.get(n)}
 
         distances = {}
         if not leaf_nodes:
@@ -643,7 +545,7 @@ def run_pipeline(
                 continue
             q = collections.deque()
             q.append((n, 0))
-            visited = set([n])
+            visited = {n}
             found = False
             while q:
                 cur, depth = q.popleft()
@@ -661,10 +563,7 @@ def run_pipeline(
         return distances
 
     products = res["Product"].unique()
-    prod_to_nodes = {
-        p: set(res[res["Product"] == p]["Location"].unique().tolist())
-        for p in products
-    }
+    prod_to_nodes = {p: set(res[res["Product"] == p]["Location"].unique().tolist()) for p in products}
     prod_to_routes = {}
     if "Product" in df_lt.columns:
         for p in df_lt["Product"].unique():
@@ -676,10 +575,9 @@ def run_pipeline(
     for p in products:
         p_routes = prod_to_routes.get(p, df_lt.copy())
         nodes = prod_to_nodes.get(p, set())
-        prod_distances[p] = compute_hop_distances_for_product(
-            p_routes, nodes
-        )
+        prod_distances[p] = compute_hop_distances_for_product(p_routes, nodes)
 
+    # Hard-coded overrides for special hubs
     special_hops = {"B616": 4, "BEEX": 3, "LUEX": 2}
     for p, distances in prod_distances.items():
         for node, fixed_hop in special_hops.items():
@@ -688,10 +586,7 @@ def run_pipeline(
     product_tiering_params = {}
     for p, distances in prod_distances.items():
         max_hops = int(max(distances.values())) if distances else 0
-        tier_map_pct = {
-            f"SL_hop_{h}_pct": float(sl_for_hop(h) * 100.0)
-            for h in range(0, 4)
-        }
+        tier_map_pct = {f"SL_hop_{h}_pct": float(sl_for_hop(h) * 100.0) for h in range(0, 4)}
         tier_map_pct["max_tier_hops"] = max_hops
         product_tiering_params[p] = tier_map_pct
 
@@ -707,13 +602,10 @@ def run_pipeline(
         hop_distance_list.append(dist)
     res["Tier_Hops"] = np.array(hop_distance_list)
     res["Service_Level_Node"] = np.array(sl_list)
-    res["Z_node"] = res["Service_Level_Node"].apply(
-        lambda x: float(norm.ppf(x))
-    )
+    res["Z_node"] = res["Service_Level_Node"].apply(lambda x: float(norm.ppf(x)))
 
     res["SS_stat"] = res.apply(
-        lambda r: r["Z_node"]
-        * math.sqrt(max(0.0, (demand_component.loc[r.name] + r["lt_component"]))),
+        lambda r: r["Z_node"] * math.sqrt(max(0.0, (demand_component.loc[r.name] + r["lt_component"]))),
         axis=1,
     )
 
@@ -734,9 +626,7 @@ def run_pipeline(
         l_cap, u_cap = cap_range[0] / 100.0, cap_range[1] / 100.0
         l_lim = res["Agg_Future_Demand"] * l_cap
         u_lim = res["Agg_Future_Demand"] * u_cap
-        high_mask = (res["Safety_Stock"] > u_lim) & (
-            res["Adjustment_Status"] == "Optimal (Statistical)"
-        )
+        high_mask = (res["Safety_Stock"] > u_lim) & (res["Adjustment_Status"] == "Optimal (Statistical)")
         low_mask = (
             (res["Safety_Stock"] < l_lim)
             & (res["Adjustment_Status"] == "Optimal (Statistical)")
@@ -744,9 +634,7 @@ def run_pipeline(
         )
         res.loc[high_mask, "Adjustment_Status"] = "Capped (High)"
         res.loc[low_mask, "Adjustment_Status"] = "Capped (Low)"
-        res["Safety_Stock"] = res["Safety_Stock"].clip(
-            lower=l_lim, upper=u_lim
-        )
+        res["Safety_Stock"] = res["Safety_Stock"].clip(lower=l_lim, upper=u_lim)
 
     res["Safety_Stock"] = res["Safety_Stock"].round(0)
     res.loc[res["Location"] == "B616", "Safety_Stock"] = 0
@@ -781,9 +669,7 @@ def run_pipeline(
     return res, reachable_map
 
 
-# ----------------------
-# LOAD DATA
-# ----------------------
+# -------- Load data & run model --------
 if s_file and d_file and lt_file:
     try:
         df_s = pd.read_csv(s_file)
@@ -796,42 +682,22 @@ if s_file and d_file and lt_file:
     for df in [df_s, df_d, df_lt]:
         df.columns = [c.strip() for c in df.columns]
 
-    needed_sales_cols = {
-        "Product",
-        "Location",
-        "Period",
-        "Consumption",
-        "Forecast",
-    }
+    needed_sales_cols = {"Product", "Location", "Period", "Consumption", "Forecast"}
     needed_demand_cols = {"Product", "Location", "Period", "Forecast"}
-    needed_lt_cols = {
-        "Product",
-        "From_Location",
-        "To_Location",
-        "Lead_Time_Days",
-        "Lead_Time_Std_Dev",
-    }
+    needed_lt_cols = {"Product", "From_Location", "To_Location", "Lead_Time_Days", "Lead_Time_Std_Dev"}
 
-    if not needed_sales_cols.issubset(set(df_s.columns)):
-        st.error(
-            f"sales.csv missing columns: {needed_sales_cols - set(df_s.columns)}"
-        )
+    if not needed_sales_cols.issubset(df_s.columns):
+        st.error(f"sales.csv missing columns: {needed_sales_cols - set(df_s.columns)}")
         st.stop()
-    if not needed_demand_cols.issubset(set(df_d.columns)):
-        st.error(
-            f"demand.csv missing columns: {needed_demand_cols - set(df_d.columns)}"
-        )
+    if not needed_demand_cols.issubset(df_d.columns):
+        st.error(f"demand.csv missing columns: {needed_demand_cols - set(df_d.columns)}")
         st.stop()
-    if not needed_lt_cols.issubset(set(df_lt.columns)):
-        st.error(
-            f"leadtime.csv missing columns: {needed_lt_cols - set(df_lt.columns)}"
-        )
+    if not needed_lt_cols.issubset(df_lt.columns):
+        st.error(f"leadtime.csv missing columns: {needed_lt_cols - set(df_lt.columns)}")
         st.stop()
 
-    df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce")
-    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce")
-    df_s["Period"] = df_s["Period"].dt.to_period("M").dt.to_timestamp()
-    df_d["Period"] = df_d["Period"].dt.to_period("M").dt.to_timestamp()
+    df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
+    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
 
     df_s["Consumption"] = clean_numeric(df_s["Consumption"])
     df_s["Forecast"] = clean_numeric(df_s["Forecast"])
@@ -848,9 +714,7 @@ if s_file and d_file and lt_file:
     global_median_std = stats["Local_Std"].median(skipna=True)
     if pd.isna(global_median_std) or global_median_std == 0:
         global_median_std = 1.0
-    prod_medians = (
-        stats.groupby("Product")["Local_Std"].median().to_dict()
-    )
+    prod_medians = stats.groupby("Product")["Local_Std"].median().to_dict()
 
     def fill_local_std(row):
         if not pd.isna(row["Local_Std"]) and row["Local_Std"] > 0:
@@ -873,16 +737,12 @@ if s_file and d_file and lt_file:
         cap_range=cap_range,
     )
 
-    # Historical accuracy
-    hist = df_s[
-        ["Product", "Location", "Period", "Consumption", "Forecast"]
-    ].copy()
+    # Historical accuracy metrics
+    hist = df_s[["Product", "Location", "Period", "Consumption", "Forecast"]].copy()
     hist.rename(columns={"Forecast": "Forecast_Hist"}, inplace=True)
     hist["Deviation"] = hist["Consumption"] - hist["Forecast_Hist"]
     hist["Abs_Error"] = hist["Deviation"].abs()
-    hist["APE_%"] = (
-        hist["Abs_Error"] / hist["Consumption"].replace(0, np.nan) * 100
-    )
+    hist["APE_%"] = hist["Abs_Error"] / hist["Consumption"].replace(0, np.nan) * 100
     hist["APE_%"] = hist["APE_%"].fillna(0)
     hist["Accuracy_%"] = (1 - hist["APE_%"] / 100) * 100
     hist_net = df_s.groupby(["Product", "Period"], as_index=False).agg(
@@ -891,9 +751,7 @@ if s_file and d_file and lt_file:
     )
 
     meaningful_mask = (
-        results[
-            ["Agg_Future_Demand", "Forecast", "Safety_Stock", "Pre_Rule_SS"]
-        ]
+        results[["Agg_Future_Demand", "Forecast", "Safety_Stock", "Pre_Rule_SS"]]
         .fillna(0)
         .abs()
         .sum(axis=1)
@@ -912,15 +770,13 @@ if s_file and d_file and lt_file:
 
     def default_location_for(prod):
         locs = sorted(
-            meaningful_results[meaningful_results["Product"] == prod][
-                "Location"
-            ].unique().tolist()
+            meaningful_results[meaningful_results["Product"] == prod]["Location"]
+            .unique()
+            .tolist()
         )
         if not locs:
             locs = sorted(
-                results[results["Product"] == prod]["Location"]
-                .unique()
-                .tolist()
+                results[results["Product"] == prod]["Location"].unique().tolist()
             )
         return (
             DEFAULT_LOCATION_CHOICE
@@ -938,7 +794,6 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
-    # --- Tabs (add title to tab1) ---
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         [
             "📈 Inventory Corridor",
@@ -951,19 +806,13 @@ if s_file and d_file and lt_file:
         ]
     )
 
-    # ---------------- TAB 1 ----------------
+    # -------- TAB 1: Inventory Corridor --------
     with tab1:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             sku_default = default_product
-            sku_index = (
-                all_products.index(sku_default)
-                if sku_default in all_products
-                else 0
-            )
-            sku = st.selectbox(
-                "MATERIAL", all_products, index=sku_index, key="tab1_sku"
-            )
+            sku_index = all_products.index(sku_default) if sku_default in all_products else 0
+            sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="tab1_sku")
 
             loc_opts = sorted(
                 meaningful_results[
@@ -984,17 +833,13 @@ if s_file and d_file and lt_file:
                 )
             if not loc_opts:
                 loc_opts = sorted(
-                    meaningful_results[meaningful_results["Product"] == sku][
-                        "Location"
-                    ]
+                    meaningful_results[meaningful_results["Product"] == sku]["Location"]
                     .unique()
                     .tolist()
                 )
             if not loc_opts:
                 loc_opts = sorted(
-                    results[results["Product"] == sku]["Location"]
-                    .unique()
-                    .tolist()
+                    results[results["Product"] == sku]["Location"].unique().tolist()
                 )
             if not loc_opts:
                 loc_opts = ["(no location)"]
@@ -1004,19 +849,8 @@ if s_file and d_file and lt_file:
                 if DEFAULT_LOCATION_CHOICE in loc_opts
                 else (loc_opts[0] if loc_opts else "(no location)")
             )
-            loc_index = (
-                loc_opts.index(loc_default)
-                if loc_default in loc_opts
-                else 0
-            )
-            if loc_opts:
-                loc = st.selectbox(
-                    "LOCATION", loc_opts, index=loc_index, key="tab1_loc"
-                )
-            else:
-                loc = st.selectbox(
-                    "LOCATION", ["(no location)"], index=0, key="tab1_loc"
-                )
+            loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
+            loc = st.selectbox("LOCATION", loc_opts, index=loc_index, key="tab1_loc")
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1030,34 +864,18 @@ if s_file and d_file and lt_file:
                     srow = summary_row.iloc[0]
                     avg_daily = srow.get("D_day", np.nan)
                     days_cov = srow.get("Days_Covered_by_SS", np.nan)
-                    avg_daily_txt = (
-                        f"{avg_daily:.2f} units/day"
-                        if pd.notna(avg_daily)
-                        else "N/A"
-                    )
-                    days_cov_txt = (
-                        f"{days_cov:.1f} days"
-                        if pd.notna(days_cov)
-                        else "N/A"
-                    )
+                    avg_daily_txt = f"{avg_daily:.2f} units/day" if pd.notna(avg_daily) else "N/A"
+                    days_cov_txt = f"{days_cov:.1f} days" if pd.notna(days_cov) else "N/A"
                     st.markdown(f"Avg Daily Demand: **{avg_daily_txt}**")
-                    st.markdown(
-                        f"Safety Stock coverage: **{days_cov_txt}**"
-                    )
+                    st.markdown(f"Safety Stock coverage: **{days_cov_txt}**")
             except Exception:
                 pass
 
         with col_main:
-            render_selection_line(
-                "Selected:",
-                product=sku,
-                location=loc,
-            )
+            render_selection_line("Selected:", product=sku, location=loc)
             st.subheader("📈 Inventory Corridor")
 
-            plot_df = results[
-                (results["Product"] == sku) & (results["Location"] == loc)
-            ].sort_values("Period")
+            plot_df = results[(results["Product"] == sku) & (results["Location"] == loc)].sort_values("Period")
             df_all_periods = pd.DataFrame({"Period": all_periods})
             plot_full = pd.merge(
                 df_all_periods,
@@ -1074,27 +892,15 @@ if s_file and d_file and lt_file:
                 on="Period",
                 how="left",
             )
-            plot_full[
-                [
-                    "Max_Corridor",
-                    "Safety_Stock",
-                    "Forecast",
-                    "Agg_Future_Internal",
-                    "Agg_Future_External",
-                ]
-            ] = plot_full[
-                [
-                    "Max_Corridor",
-                    "Safety_Stock",
-                    "Forecast",
-                    "Agg_Future_Internal",
-                    "Agg_Future_External",
-                ]
-            ].fillna(
-                0
-            )
+            num_cols = [
+                "Max_Corridor",
+                "Safety_Stock",
+                "Forecast",
+                "Agg_Future_Internal",
+                "Agg_Future_External",
+            ]
+            plot_full[num_cols] = plot_full[num_cols].fillna(0)
 
-            # ------------ ORIGINAL CHART (kept for comparison) ------------
             traces = [
                 go.Scatter(
                     x=plot_full["Period"],
@@ -1122,7 +928,6 @@ if s_file and d_file and lt_file:
                     line=dict(color="blue", dash="dash"),
                 ),
             ]
-
             fig = go.Figure(traces)
             fig.update_layout(
                 legend=dict(orientation="h"),
@@ -1132,24 +937,22 @@ if s_file and d_file and lt_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # ------------ NEW "RISK-FIRST" CORRIDOR CHART ------------
+            # Experimental risk-focused view
             st.markdown(
                 "<div style='margin-top:10px; font-size:0.9rem; color:#666;'>"
                 "⬇︎ Experimental risk-focused view (for comparison)</div>",
                 unsafe_allow_html=True,
             )
 
-            # Colors
-            color_ss_line = "#d32f2f"          # red
+            color_ss_line = "#d32f2f"
             color_ss_fill = "rgba(211,47,47,0.18)"
-            color_fcst = "#212121"             # dark grey
-            color_ext = "#1976d2"              # blue
+            color_fcst = "#212121"
+            color_ext = "#1976d2"
             color_corridor = "rgba(0,0,0,0.12)"
             color_corridor_points = "rgba(0,0,0,0.35)"
 
             fig2 = go.Figure()
 
-            # 1) Local forecast line
             fig2.add_trace(
                 go.Scatter(
                     x=plot_full["Period"],
@@ -1158,11 +961,10 @@ if s_file and d_file and lt_file:
                     name="Local Forecast",
                     line=dict(color=color_fcst, width=2, dash="dot"),
                     hovertemplate="<b>%{x|%b %Y}</b><br>"
-                                  "Local Forecast: %{y:,.0f}<extra></extra>",
+                    "Local Forecast: %{y:,.0f}<extra></extra>",
                 )
             )
 
-            # 2) Safety Stock as risk band on top of forecast
             fig2.add_trace(
                 go.Scatter(
                     x=plot_full["Period"],
@@ -1173,11 +975,10 @@ if s_file and d_file and lt_file:
                     fill="tonexty",
                     fillcolor=color_ss_fill,
                     hovertemplate="<b>%{x|%b %Y}</b><br>"
-                                  "Corridor top (Fcst + SS): %{y:,.0f}<extra></extra>",
+                    "Corridor top (Fcst + SS): %{y:,.0f}<extra></extra>",
                 )
             )
 
-            # 3) External Network Demand
             fig2.add_trace(
                 go.Scatter(
                     x=plot_full["Period"],
@@ -1187,11 +988,10 @@ if s_file and d_file and lt_file:
                     line=dict(color=color_ext, width=2, dash="dash"),
                     marker=dict(size=5, symbol="circle"),
                     hovertemplate="<b>%{x|%b %Y}</b><br>"
-                                  "External Network Demand: %{y:,.0f}<extra></extra>",
+                    "External Network Demand: %{y:,.0f}<extra></extra>",
                 )
             )
 
-            # 4) Max corridor reference
             fig2.add_trace(
                 go.Scatter(
                     x=plot_full["Period"],
@@ -1201,22 +1001,27 @@ if s_file and d_file and lt_file:
                     line=dict(color=color_corridor, width=1),
                     marker=dict(size=4, color=color_corridor_points),
                     hovertemplate="<b>%{x|%b %Y}</b><br>"
-                                  "Max Corridor: %{y:,.0f}<extra></extra>",
+                    "Max Corridor: %{y:,.0f}<extra></extra>",
                 )
             )
 
-            # --- Annotate current period & coverage ---
+            # Highlight current period (bug-fixed: convert Timestamp to datetime)
             current_idx = None
             if CURRENT_MONTH_TS in list(plot_full["Period"].values):
                 current_idx = list(plot_full["Period"].values).index(CURRENT_MONTH_TS)
 
             if current_idx is not None:
                 current_x = plot_full["Period"].iloc[current_idx]
+                if isinstance(current_x, pd.Timestamp):
+                    current_x_val = current_x.to_pydatetime()
+                else:
+                    current_x_val = current_x
+
                 current_fcst = plot_full["Forecast"].iloc[current_idx]
                 current_ss = plot_full["Safety_Stock"].iloc[current_idx]
 
                 fig2.add_vline(
-                    x=current_x,
+                    x=current_x_val,
                     line_width=1.5,
                     line_dash="dot",
                     line_color="#9e9e9e",
@@ -1235,7 +1040,7 @@ if s_file and d_file and lt_file:
                     if pd.notna(dcov):
                         coverage_label = f"{dcov:.1f} days coverage"
                         fig2.add_annotation(
-                            x=current_x,
+                            x=current_x_val,
                             y=current_fcst + current_ss,
                             text=coverage_label,
                             showarrow=True,
@@ -1267,46 +1072,24 @@ if s_file and d_file and lt_file:
                 ),
                 xaxis_title="Period",
                 yaxis_title="Units",
-                xaxis=dict(
-                    tickformat="%b\n%Y",
-                    showgrid=False,
-                ),
-                yaxis=dict(
-                    showgrid=True,
-                    gridcolor="rgba(0,0,0,0.05)",
-                    zeroline=False,
-                ),
+                xaxis=dict(tickformat="%b\n%Y", showgrid=False),
+                yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.05)", zeroline=False),
                 margin=dict(l=40, r=10, t=60, b=40),
             )
-
             st.plotly_chart(fig2, use_container_width=True)
 
-    # ---------------- TAB 2 ----------------
+    # -------- TAB 2: Network Topology --------
     with tab2:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             sku_default = default_product
-            sku_index = (
-                all_products.index(sku_default)
-                if all_products
-                else 0
-            )
-            sku = st.selectbox(
-                "MATERIAL", all_products, index=sku_index, key="network_sku"
-            )
+            sku_index = all_products.index(sku_default) if all_products else 0
+            sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="network_sku")
 
             if period_labels:
                 try:
-                    default_label = (
-                        period_label(default_period)
-                        if default_period is not None
-                        else period_labels[-1]
-                    )
-                    period_index = (
-                        period_labels.index(default_label)
-                        if default_label in period_labels
-                        else len(period_labels) - 1
-                    )
+                    default_label = period_label(default_period) if default_period is not None else period_labels[-1]
+                    period_index = period_labels.index(default_label) if default_label in period_labels else len(period_labels) - 1
                 except Exception:
                     period_index = len(period_labels) - 1
                 chosen_label = st.selectbox(
@@ -1315,20 +1098,14 @@ if s_file and d_file and lt_file:
                     index=period_index,
                     key="network_period",
                 )
-                chosen_period = period_label_map.get(
-                    chosen_label, default_period
-                )
+                chosen_period = period_label_map.get(chosen_label, default_period)
             else:
                 chosen_period = CURRENT_MONTH_TS
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
-            render_selection_line(
-                "Selected:",
-                product=sku,
-                period_text=period_label(chosen_period),
-            )
+            render_selection_line("Selected:", product=sku, period_text=period_label(chosen_period))
             st.subheader("🕸️ Network Topology")
 
             st.markdown(
@@ -1350,11 +1127,7 @@ if s_file and d_file and lt_file:
                 .set_index(["Product", "Location"])
                 .to_dict("index")
             )
-            sku_lt = (
-                df_lt[df_lt["Product"] == sku]
-                if "Product" in df_lt.columns
-                else df_lt.copy()
-            )
+            sku_lt = df_lt[df_lt["Product"] == sku] if "Product" in df_lt.columns else df_lt.copy()
 
             net = Network(
                 height="700px",
@@ -1366,9 +1139,7 @@ if s_file and d_file and lt_file:
 
             hubs = {"B616", "BEEX", "LUEX"}
             if not sku_lt.empty:
-                froms = set(
-                    sku_lt["From_Location"].dropna().unique().tolist()
-                )
+                froms = set(sku_lt["From_Location"].dropna().unique().tolist())
                 tos = set(sku_lt["To_Location"].dropna().unique().tolist())
                 all_nodes = froms.union(tos).union(hubs)
             else:
@@ -1404,48 +1175,34 @@ if s_file and d_file and lt_file:
                         "Days_Covered_by_SS": np.nan,
                     },
                 )
-                used = (float(m.get("Agg_Future_External", 0)) > 0) or (
-                    float(m.get("Forecast", 0)) > 0
-                )
+                used = float(m.get("Agg_Future_External", 0)) > 0 or float(m.get("Forecast", 0)) > 0
 
                 if n == "B616":
-                    bg = "#dcedc8"
-                    border = "#8bc34a"
-                    font_color = "#0b3d91"
-                    size = 14
+                    bg, border, font_color, size = "#dcedc8", "#8bc34a", "#0b3d91", 14
                 elif n in {"BEEX", "LUEX"}:
-                    bg = "#bbdefb"
-                    border = "#64b5f6"
-                    font_color = "#0b3d91"
-                    size = 14
+                    bg, border, font_color, size = "#bbdefb", "#64b5f6", "#0b3d91", 14
                 else:
                     if used:
-                        bg = "#fff9c4"
-                        border = "#fbc02d"
-                        font_color = "#222222"
-                        size = 12
+                        bg, border, font_color, size = "#fff9c4", "#fbc02d", "#222222", 12
                     else:
-                        bg = "#f7f7f7"
-                        border = "#e0e0e0"
-                        font_color = "#b0b0b0"
-                        size = 10
+                        bg, border, font_color, size = "#f7f7f7", "#e0e0e0", "#b0b0b0", 10
 
                 sl_node = m.get("Service_Level_Node", None)
-                sl_label = "-"
                 if pd.notna(sl_node):
                     try:
                         sl_label = f"{float(sl_node) * 100:.2f}%"
                     except Exception:
                         sl_label = str(sl_node)
+                else:
+                    sl_label = "-"
 
                 lbl = (
-                    f"**{n}**\\n"
-                    f"LDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\n"
-                    f"EXT: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\\n"
-                    f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\\n"
+                    f"{n}\n"
+                    f"LDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\n"
+                    f"EXT: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\n"
+                    f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\n"
                     f"SL: {sl_label}"
                 )
-                lbl = lbl.replace("**", "").replace("\\n", "\n")
                 net.add_node(
                     n,
                     label=lbl,
@@ -1460,44 +1217,28 @@ if s_file and d_file and lt_file:
                     from_n, to_n = r["From_Location"], r["To_Location"]
                     if pd.isna(from_n) or pd.isna(to_n):
                         continue
-                    from_used = (
-                        demand_lookup.get(from_n, {}).get(
-                            "Agg_Future_External", 0
-                        )
-                        > 0
-                    ) or (
-                        demand_lookup.get(from_n, {}).get("Forecast", 0) > 0
-                    )
-                    to_used = (
-                        demand_lookup.get(to_n, {}).get(
-                            "Agg_Future_External", 0
-                        )
-                        > 0
-                    ) or (
-                        demand_lookup.get(to_n, {}).get("Forecast", 0) > 0
-                    )
-                    edge_color = (
-                        "#dddddd" if not from_used and not to_used else "#888888"
-                    )
+                    from_used = float(demand_lookup.get(from_n, {}).get("Agg_Future_External", 0)) > 0 or float(
+                        demand_lookup.get(from_n, {}).get("Forecast", 0)
+                    ) > 0
+                    to_used = float(demand_lookup.get(to_n, {}).get("Agg_Future_External", 0)) > 0 or float(
+                        demand_lookup.get(to_n, {}).get("Forecast", 0)
+                    ) > 0
+                    edge_color = "#dddddd" if not from_used and not to_used else "#888888"
                     lt_val = r.get("Lead_Time_Days", 0)
-                    label = (
-                        f"{int(lt_val)}d"
-                        if not pd.isna(lt_val)
-                        else ""
-                    )
+                    label = f"{int(lt_val)}d" if not pd.isna(lt_val) else ""
                     net.add_edge(from_n, to_n, label=label, color=edge_color)
 
             net.set_options(
                 """
-            {
-              "physics": {
-                "stabilization": { "iterations": 200, "fit": true }
-              },
-              "nodes": { "borderWidthSelected": 2 },
-              "interaction": { "hover": true, "zoomView": true },
-              "layout": { "improvedLayout": true }
-            }
-            """
+                {
+                  "physics": {
+                    "stabilization": { "iterations": 200, "fit": true }
+                  },
+                  "nodes": { "borderWidthSelected": 2 },
+                  "interaction": { "hover": true, "zoomView": true },
+                  "layout": { "improvedLayout": true }
+                }
+                """
             )
             tmpfile = "net.html"
             net.save_graph(tmpfile)
@@ -1527,15 +1268,11 @@ if s_file and d_file and lt_file:
             </script>
             """
             if "</head>" in html_text:
-                html_text = html_text.replace(
-                    "</head>", injection_css + "</head>", 1
-                )
+                html_text = html_text.replace("</head>", injection_css + "</head>", 1)
             if "</body>" in html_text:
-                html_text = html_text.replace(
-                    "</body>", injection_js + "</body>", 1
-                )
+                html_text = html_text.replace("</body>", injection_js + "</body>", 1)
             else:
-                html_text = html_text + injection_js
+                html_text += injection_js
             components.html(html_text, height=750)
 
             st.markdown(
@@ -1548,7 +1285,7 @@ if s_file and d_file and lt_file:
                     SS  = Safety Stock (final policy value)
                   </div>
                 </div>
-            """,
+                """,
                 unsafe_allow_html=True,
             )
 
