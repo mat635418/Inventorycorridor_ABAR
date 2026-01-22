@@ -2833,57 +2833,7 @@ if s_file and d_file and lt_file:
 
             # ---------- NEW: ACTIVE materials table + per-line violin plots ----------
             st.markdown("---")
-            st.subheader("📊 Active Materials — Demand & Lead Time Variability")
-
-            # ACTIVE = at least one node this period with demand or SS
-            active_mask = (snapshot_all["Agg_Future_Demand"] > 0) | (snapshot_all["Safety_Stock"] > 0)
-            active_products = (
-                snapshot_all[active_mask]["Product"]
-                .dropna()
-                .unique()
-                .tolist()
-            )
-
-            if not active_products:
-                st.info("No active materials for the selected period.")
-            else:
-                # Use the same columns as the first table, but restricted to ACTIVE materials
-                active_agg = agg_all[agg_all["Product"].isin(active_products)].copy()
-                active_view = active_agg.sort_values(
-                    "Avg_Day_Demand", ascending=False
-                )[display_cols_all].reset_index(drop=True)
-                active_view = active_view.rename(columns=rename_map)
-
-                # Show active materials table
-                active_formatted = active_view.copy()
-                if "Avg Daily Demand" in active_formatted.columns:
-                    active_formatted["Avg Daily Demand"] = active_formatted["Avg Daily Demand"].apply(
-                        lambda v: "{:.3f}".format(v) if pd.notna(v) else ""
-                    )
-                if "Calculated Safety Stock" in active_formatted.columns:
-                    active_formatted["Calculated Safety Stock"] = active_formatted[
-                        "Calculated Safety Stock"
-                    ].apply(lambda v: euro_format(v, always_two_decimals=False, show_zero=True))
-                if "Local Forecast (month)" in active_formatted.columns:
-                    active_formatted["Local Forecast (month)"] = active_formatted[
-                        "Local Forecast (month)"
-                    ].apply(lambda v: euro_format(v, always_two_decimals=False, show_zero=True))
-                if "SS Coverage (days)" in active_formatted.columns:
-                    active_formatted["SS Coverage (days)"] = active_formatted[
-                        "SS Coverage (days)"
-                    ].apply(lambda v: "{:.0f}".format(v) if pd.notna(v) else "")
-                if "SS / Demand (%)" in active_formatted.columns:
-                    active_formatted["SS / Demand (%)"] = active_formatted[
-                        "SS / Demand (%)"
-                    ].apply(lambda v: "{:.0f}".format(v) if pd.notna(v) else "")
-
-                st.markdown("**Active materials snapshot (table)**")
-                st.dataframe(
-                    active_formatted,
-                    use_container_width=True,
-                    height=430,
-                )
-
+             
                 # Now, for each active material, plot a violin diagram of variability
                 st.markdown("**Per-material variability (Demand & Lead Time) — violins**")
 
