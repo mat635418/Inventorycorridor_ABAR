@@ -894,8 +894,9 @@ if s_file and d_file and lt_file:
                     days_cov = srow.get("Days_Covered_by_SS", np.nan)
                     avg_daily_txt = f"{avg_daily:.2f} units/day" if pd.notna(avg_daily) else "N/A"
                     days_cov_txt = f"{days_cov:.1f} days" if pd.notna(days_cov) else "N/A"
-                    st.markdown(f"Avg Daily Demand: **{avg_daily_txt}**")
-                    st.markdown(f"Safety Stock coverage: **{days_cov_txt}**")
+                    # Updated formatting to use a new line between label and value
+                    st.markdown(f"**Avg Daily Demand:**\n{avg_daily_txt}")
+                    st.markdown(f"**Safety Stock coverage:**\n{days_cov_txt}")
             except Exception:
                 pass
 
@@ -2501,10 +2502,9 @@ if s_file and d_file and lt_file:
                     per_node["retained_stat_total"]
                     * per_node["direct_frac"]
                 )
-                per_node["indirect_retained_ss"] = (
-                    per_node["retained_stat_total"]
-                    * (1 - per_node["direct_frac"])
-                )
+                per_node["indirect_retained_ss"] = per_node[
+                    "retained_stat_total"
+                ] * (1 - per_node["direct_frac"])
                 per_node["cap_reduction"] = per_node.apply(
                     lambda r: max(
                         r["pre_ss"] - r["Safety_Stock"], 0.0
@@ -2807,4 +2807,3 @@ else:
     st.info(
         "Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer."
     )
-
