@@ -794,7 +794,8 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+    # -------- Tabs (with added All Materials View) --------
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         [
             "📈 Inventory Corridor",
             "🕸️ Network Topology",
@@ -803,6 +804,7 @@ if s_file and d_file and lt_file:
             "📉 Forecast Accuracy",
             "🧮 Calculation Trace & Sim",
             "📦 By Material",
+            "📊 All Materials View",
         ]
     )
 
@@ -937,170 +939,12 @@ if s_file and d_file and lt_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # Experimental risk-focused view
+            # Only keep the label line; experimental plot removed
             st.markdown(
                 "<div style='margin-top:10px; font-size:0.9rem; color:#666;'>"
                 "⬇︎ Experimental risk-focused view (for comparison)</div>",
                 unsafe_allow_html=True,
             )
-
-            color_ss_line = "#d32f2f"
-            color_ss_fill = "rgba(211,47,47,0.18)"
-            color_fcst = "#212121"
-            color_ext = "#1976d2"
-            color_corridor = "rgba(0,0,0,0.12)"
-            color_corridor_points = "rgba(0,0,0,0.35)"
-
-            fig2 = go.Figure()
-
-            fig2.add_trace(
-                go.Scatter(
-                    x=plot_full["Period"],
-                    y=plot_full["Forecast"],
-                    mode="lines",
-                    name="Local Forecast",
-                    line=dict(color=color_fcst, width=2, dash="dot"),
-                    hovertemplate="<b>%{x|%b %Y}</b><br>"
-                    "Local Forecast: %{y:,.0f}<extra></extra>",
-                )
-            )
-
-            fig2.add_trace(
-                go.Scatter(
-                    x=plot_full["Period"],
-                    y=plot_full["Forecast"] + plot_full["Safety_Stock"],
-                    mode="lines",
-                    name="Safety Stock (Risk Buffer)",
-                    line=dict(color=color_ss_line, width=2.5),
-                    fill="tonexty",
-                    fillcolor=color_ss_fill,
-                    hovertemplate="<b>%{x|%b %Y}</b><br>"
-                    "Corridor top (Fcst + SS): %{y:,.0f}<extra></extra>",
-                )
-            )
-
-            fig2.add_trace(
-                go.Scatter(
-                    x=plot_full["Period"],
-                    y=plot_full["Agg_Future_External"],
-                    mode="lines+markers",
-                    name="External Network Demand (Downstream)",
-                    line=dict(color=color_ext, width=2, dash="dash"),
-                    marker=dict(size=5, symbol="circle"),
-                    hovertemplate="<b>%{x|%b %Y}</b><br>"
-                    "External Network Demand: %{y:,.0f}<extra></extra>",
-                )
-            )
-
-            fig2.add_trace(
-                go.Scatter(
-                    x=plot_full["Period"],
-                    y=plot_full["Max_Corridor"],
-                    mode="lines+markers",
-                    name="Max Corridor (SS + Forecast)",
-                    line=dict(color=color_corridor, width=1),
-                    marker=dict(size=4, color=color_corridor_points),
-                    hovertemplate="<b>%{x|%b %Y}</b><br>"
-                    "Max Corridor: %{y:,.0f}<extra></extra>",
-                )
-            )
-
-            # Highlight current period (robust across Plotly versions)
-            current_idx = None
-            period_values = list(plot_full["Period"].values)
-            if CURRENT_MONTH_TS in period_values:
-                current_idx = period_values.index(CURRENT_MONTH_TS)
-
-            if current_idx is not None:
-                current_x = plot_full["Period"].iloc[current_idx]
-
-                # Keep x as scalar; Plotly will handle pandas.Timestamp or datetime
-                current_x_val = current_x
-
-                current_fcst = float(plot_full["Forecast"].iloc[current_idx])
-                current_ss = float(plot_full["Safety_Stock"].iloc[current_idx])
-
-                try:
-                    # Use the newer add_vline API if available
-                    fig2.add_vline(
-                        x=current_x_val,
-                        line_width=1.5,
-                        line_dash="dot",
-                        line_color="#9e9e9e",
-                        annotation_text="Current period",
-                        annotation_position="top left",
-                        annotation_font=dict(size=11, color="#616161"),
-                    )
-                except Exception:
-                    # Fallback for older Plotly versions: add shape + annotation manually
-                    fig2.add_shape(
-                        type="line",
-                        x0=current_x_val,
-                        x1=current_x_val,
-                        y0=0,
-                        y1=1,
-                        xref="x",
-                        yref="paper",
-                        line=dict(width=1.5, dash="dot", color="#9e9e9e"),
-                    )
-                    fig2.add_annotation(
-                        x=current_x_val,
-                        y=1,
-                        xref="x",
-                        yref="paper",
-                        text="Current period",
-                        showarrow=False,
-                        yshift=10,
-                        font=dict(size=11, color="#616161"),
-                    )
-
-                row_current = results[
-                    (results["Product"] == sku)
-                    & (results["Location"] == loc)
-                    & (results["Period"] == CURRENT_MONTH_TS)
-                ]
-                if not row_current.empty:
-                    dcov = row_current["Days_Covered_by_SS"].iloc[0]
-                    if pd.notna(dcov):
-                        coverage_label = f"{dcov:.1f} days coverage"
-                        fig2.add_annotation(
-                            x=current_x_val,
-                            y=current_fcst + current_ss,
-                            text=coverage_label,
-                            showarrow=True,
-                            arrowhead=2,
-                            arrowsize=1,
-                            arrowwidth=1,
-                            ax=0,
-                            ay=-40,
-                            bgcolor="rgba(255,255,255,0.9)",
-                            bordercolor=color_ss_line,
-                            borderwidth=1,
-                            font=dict(color=color_ss_line, size=11),
-                        )
-
-            fig2.update_layout(
-                title=dict(
-                    text="Risk-focused Inventory Corridor (Safety Stock highlighted in red)",
-                    x=0,
-                    xanchor="left",
-                    font=dict(size=14),
-                ),
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="left",
-                    x=0,
-                    font=dict(size=11),
-                ),
-                xaxis_title="Period",
-                yaxis_title="Units",
-                xaxis=dict(tickformat="%b\n%Y", showgrid=False),
-                yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.05)", zeroline=False),
-                margin=dict(l=40, r=10, t=60, b=40),
-            )
-            st.plotly_chart(fig2, use_container_width=True)
 
     # -------- TAB 2: Network Topology --------
     with tab2:
@@ -1629,7 +1473,6 @@ if s_file and d_file and lt_file:
                     cols=["Safety_Stock", "SS_to_FCST_Ratio"],
                     two_decimals_cols=["SS_to_FCST_Ratio"],
                 )
-                # styled table inside a wrapper to allow header wrapping and avoid truncation
                 eff_top_styled = eff_top_fmt.style.set_table_styles(
                     [
                         {
@@ -2059,7 +1902,6 @@ if s_file and d_file and lt_file:
                 )
                 st.markdown(summary_html, unsafe_allow_html=True)
 
-                # ---- Scenario planning banner ABOVE expander ----
                 st.markdown("---")
                 st.markdown(
                     """
@@ -2390,7 +2232,7 @@ if s_file and d_file and lt_file:
 
             st.markdown("---")
             st.markdown(
-                "### Why do we carry this SS? — 8 Reasons breakdown (aggregated for selected material)"
+                "### Why do we carry this SS? — 8 Reasons breakdown"
             )
             if mat_period_df_display.empty:
                 st.warning(
@@ -2539,7 +2381,6 @@ if s_file and d_file and lt_file:
                     use_container_width=True,
                 )
 
-                # B. Attribution
                 st.markdown("---")
                 st.markdown(
                     "#### B. SS Attribution — Mutually exclusive components that SUM EXACTLY to Total Safety Stock"
@@ -2761,8 +2602,168 @@ if s_file and d_file and lt_file:
                     ss_attrib_df_formatted, use_container_width=True
                 )
 
+    # ---------------- TAB 8: All Materials View ----------------
+    with tab8:
+        col_main, col_badge = st.columns([17, 3])
+        with col_badge:
+            render_logo_above_parameters(scale=1.5)
 
-                st.markdown(summary_html, unsafe_allow_html=True)
+            if period_labels:
+                try:
+                    sel_label = (
+                        period_label(default_period)
+                        if default_period is not None
+                        else period_labels[-1]
+                    )
+                    sel_period_index = (
+                        period_labels.index(sel_label)
+                        if sel_label in period_labels
+                        else len(period_labels) - 1
+                    )
+                except Exception:
+                    sel_period_index = len(period_labels) - 1
+                chosen_label_all = st.selectbox(
+                    "PERIOD",
+                    period_labels,
+                    index=sel_period_index,
+                    key="allmat_period",
+                )
+                selected_period_all = period_label_map.get(
+                    chosen_label_all, default_period
+                )
+            else:
+                selected_period_all = CURRENT_MONTH_TS
+
+            snapshot_all = results[
+                results["Period"] == selected_period_all
+            ].copy()
+
+            agg_all = snapshot_all.groupby("Product", as_index=False).agg(
+                Network_Demand_Month=("Agg_Future_Demand", "sum"),
+                Local_Forecast_Month=("Forecast", "sum"),
+                Safety_Stock=("Safety_Stock", "sum"),
+                Max_Corridor=("Max_Corridor", "sum"),
+                Avg_Day_Demand=("D_day", "mean"),
+                Avg_SS_Days_Coverage=("Days_Covered_by_SS", "mean"),
+                Nodes=("Location", "nunique"),
+            )
+
+            if "Tier_Hops" in snapshot_all.columns:
+                end_nodes = (
+                    snapshot_all[snapshot_all["Tier_Hops"] == 0]
+                    .groupby("Product")["Location"]
+                    .nunique()
+                    .reset_index(name="End_Nodes")
+                )
+                agg_all = agg_all.merge(end_nodes, on="Product", how="left")
+            else:
+                agg_all["End_Nodes"] = np.nan
+
+            agg_all["Reorder_Point"] = (
+                agg_all["Safety_Stock"] + agg_all["Local_Forecast_Month"]
+            )
+
+            agg_all["SS_to_Demand_Ratio_%"] = np.where(
+                agg_all["Network_Demand_Month"] > 0,
+                (agg_all["Safety_Stock"] / agg_all["Network_Demand_Month"]) * 100.0,
+                0.0,
+            )
+
+            int_cols = [
+                "Network_Demand_Month",
+                "Local_Forecast_Month",
+                "Safety_Stock",
+                "Max_Corridor",
+                "Reorder_Point",
+                "Nodes",
+                "End_Nodes",
+            ]
+            for c in int_cols:
+                if c in agg_all.columns:
+                    agg_all[c] = agg_all[c].fillna(0).round(0).astype(int)
+
+            if "Avg_Day_Demand" in agg_all.columns:
+                agg_all["Avg_Day_Demand"] = agg_all["Avg_Day_Demand"].fillna(0).round(0).astype(int)
+            if "Avg_SS_Days_Coverage" in agg_all.columns:
+                agg_all["Avg_SS_Days_Coverage"] = (
+                    agg_all["Avg_SS_Days_Coverage"].fillna(0).round(0).astype(int)
+                )
+            if "SS_to_Demand_Ratio_%" in agg_all.columns:
+                agg_all["SS_to_Demand_Ratio_%"] = (
+                    agg_all["SS_to_Demand_Ratio_%"].fillna(0).round(0).astype(int)
+                )
+
+            with st.container():
+                st.markdown(
+                    '<div class="export-csv-btn">', unsafe_allow_html=True
+                )
+                st.download_button(
+                    "💾 Export CSV (All Materials Snapshot)",
+                    data=agg_all.to_csv(index=False),
+                    file_name=f"all_materials_{period_label(selected_period_all)}.csv",
+                    mime="text/csv",
+                    key="allmat_export_btn",
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='height:6px'></div>", unsafe_allow_html=True
+            )
+
+        with col_main:
+            render_selection_line(
+                "Selected:",
+                period_text=period_label(selected_period_all),
+            )
+            st.subheader("📊 All Materials View")
+
+            st.markdown(
+                "High-level snapshot by material (one row per material for the selected period). "
+                "Values are aggregated across all locations; all numeric values are rounded to integers."
+            )
+
+            if agg_all.empty:
+                st.warning("No data available for the selected period.")
+            else:
+                display_cols_all = [
+                    "Product",
+                    "Avg_Day_Demand",
+                    "Safety_Stock",
+                    "Reorder_Point",
+                    "Max_Corridor",
+                    "Avg_SS_Days_Coverage",
+                    "Nodes",
+                    "End_Nodes",
+                    "Network_Demand_Month",
+                    "Local_Forecast_Month",
+                    "SS_to_Demand_Ratio_%",
+                ]
+                display_cols_all = [
+                    c for c in display_cols_all if c in agg_all.columns
+                ]
+
+                agg_view = agg_all.sort_values("Safety_Stock", ascending=False)[
+                    display_cols_all
+                ].reset_index(drop=True)
+
+                rename_map = {
+                    "Avg_Day_Demand": "Avg Daily Demand",
+                    "Safety_Stock": "Calculated Safety Stock",
+                    "Reorder_Point": "ReOrder Point",
+                    "Max_Corridor": "Max",
+                    "Avg_SS_Days_Coverage": "SS Coverage (days)",
+                    "Nodes": "#Nodes",
+                    "End_Nodes": "#End-Nodes",
+                    "Network_Demand_Month": "Network Demand (month)",
+                    "Local_Forecast_Month": "Local Forecast (month)",
+                    "SS_to_Demand_Ratio_%": "SS / Demand (%)",
+                }
+                agg_view = agg_view.rename(columns=rename_map)
+
+                st.dataframe(
+                    agg_view,
+                    use_container_width=True,
+                    height=700,
+                )
 
 else:
     st.info(
