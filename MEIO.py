@@ -21,7 +21,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.975 — Jan 2026</h1>",
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.973 — Jan 2026</h1>",
     unsafe_allow_html=True,
 )
 
@@ -2765,4 +2765,6 @@ if s_file and d_file and lt_file:
                 st.markdown(summary_html, unsafe_allow_html=True)
 
 else:
-    st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
+    st.info(
+        "Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer."
+    )
