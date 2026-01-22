@@ -2831,7 +2831,7 @@ if s_file and d_file and lt_file:
                     height=430,
                 )
 
-            # ---------- NEW: ACTIVE materials table + per-line violin plots ----------
+            # ---------- Violin plots ----------
             st.markdown("---")
              
                 # Now, for each active material, plot a violin diagram of variability
