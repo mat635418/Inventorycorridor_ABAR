@@ -756,7 +756,7 @@ if s_file and d_file and lt_file:
         service_level=service_level,
         transitive=use_transitive,
         rho=var_rho,
-        lt_mode_param=lt_mode,
+        lt_mode=lt_mode,
         zero_if_no_net_fcst=zero_if_no_net_fcst,
         apply_cap=apply_cap,
         cap_range=cap_range,
@@ -2206,6 +2206,7 @@ if s_file and d_file and lt_file:
             )
             st.subheader("📦 View by Material (+ 8 Reasons for Inventory)")
 
+            # --- main material-level metrics & attribution (unchanged) ---
             mat_period_df = results[
                 (results["Product"] == selected_product)
                 & (results["Period"] == selected_period)
@@ -2708,40 +2709,7 @@ if s_file and d_file and lt_file:
             if "Avg_SS_Days_Coverage" in agg_all.columns:
                 agg_all["Avg_SS_Days_Coverage"] = agg_all["Avg_SS_Days_Coverage"].fillna(0.0)
             if "SS_to_Demand_Ratio_%" in agg_all.columns:
-                agg_all["SS_to_Demand_Ratio_%"] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
-
-            # Pre-compute per-material location details for drill-down table
-            per_material_locations = {}
-            if not snapshot_all.empty:
-                # format numeric columns in location-level detail
-                loc_cols_numeric = [
-                    "Forecast",
-                    "Agg_Future_Demand",
-                    "Safety_Stock",
-                    "Days_Covered_by_SS",
-                ]
-                for prod in agg_all["Product"]:
-                    loc_df = snapshot_all[snapshot_all["Product"] == prod].copy()
-                    loc_df = hide_zero_rows(loc_df)
-                    if loc_df.empty:
-                        per_material_locations[prod] = pd.DataFrame()
-                        continue
-                    loc_view = loc_df[
-                        [
-                            "Location",
-                            "Forecast",
-                            "Agg_Future_Demand",
-                            "Safety_Stock",
-                            "Days_Covered_by_SS",
-                            "Adjustment_Status",
-                        ]
-                    ].copy()
-                    loc_view = df_format_for_display(
-                        loc_view,
-                        cols=loc_cols_numeric,
-                        two_decimals_cols=["Days_Covered_by_SS"],
-                    )
-                    per_material_locations[prod] = loc_view
+                agg_all["SS_to_Demand_Ratio_%"] = agg_all["SS_to_Demand_Ratio_%" ].fillna(0.0)
 
             with st.container():
                 st.markdown(
@@ -2774,7 +2742,6 @@ if s_file and d_file and lt_file:
             if agg_all.empty:
                 st.warning("No data available for the selected period.")
             else:
-                # Build display table similarly to the screenshot
                 display_cols_all = [
                     "Product",
                     "Avg_Day_Demand",
@@ -2800,7 +2767,6 @@ if s_file and d_file and lt_file:
                 }
                 agg_view = agg_view.rename(columns=rename_map)
 
-                # Prepare formatted copy for showing euro-like formatting
                 formatted = agg_view.copy()
                 if "Avg Daily Demand" in formatted.columns:
                     formatted["Avg Daily Demand"] = formatted["Avg Daily Demand"].apply(
@@ -2829,30 +2795,8 @@ if s_file and d_file and lt_file:
                     height=430,
                 )
 
-                st.markdown("---")
-                st.markdown(
-                    "<b>Location details by material</b> &nbsp;— expand a row below to see its locations.",
-                    unsafe_allow_html=True,
-                )
-
-                # Collapsible per-material location details
-                for _, row in agg_view.iterrows():
-                    prod = row["Product"]
-                    loc_df_disp = per_material_locations.get(prod, pd.DataFrame())
-                    if loc_df_disp is None or loc_df_disp.empty:
-                        continue
-                    html = f"""
-                    <details class="all-mat-details">
-                      <summary>Locations for <strong>{prod}</strong></summary>
-                    </details>
-                    """
-                    # Render the summary line
-                    components.html(html, height=40)
-                    # Render the dataframe directly under (Streamlit cannot be fully controlled by <details>,
-                    # but the details box still serves as a visual toggle / label)
-                    st.dataframe(loc_df_disp, use_container_width=True, height=min(300, 40 + 24 * len(loc_df_disp)))
-
 else:
     st.info(
         "Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer."
     )
+
