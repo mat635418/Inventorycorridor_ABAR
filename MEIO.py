@@ -23,7 +23,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.967 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.97 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Global CSS
 st.markdown(
@@ -379,6 +379,8 @@ def render_selection_line(label, product=None, location=None, period_text=None):
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
+    # simple separator line right after selection in each tab
+    st.markdown("<hr style='margin:4px 0 10px 0; border: none; border-top: 1px solid #e0e0e0;'/>", unsafe_allow_html=True)
 
 
 def period_label(ts):
@@ -1046,13 +1048,12 @@ if s_file and d_file and lt_file:
                 pass
 
         with col_main:
-            # selection line ABOVE title
             render_selection_line(
                 "Selected:",
                 product=sku,
                 location=loc,
             )
-            st.subheader("Inventory Corridor")
+            st.subheader("📈 Inventory Corridor")
 
             plot_df = results[
                 (results["Product"] == sku) & (results["Location"] == loc)
@@ -1178,7 +1179,7 @@ if s_file and d_file and lt_file:
                 product=sku,
                 period_text=period_label(chosen_period),
             )
-            st.subheader("Network Topology")
+            st.subheader("🕸️ Network Topology")
 
             st.markdown(
                 """
@@ -1499,7 +1500,7 @@ if s_file and d_file and lt_file:
                 product=" — ".join(selected_text_parts) if selected_text_parts else None,
             )
 
-            st.subheader("Global Inventory Plan")
+            st.subheader("📋 Global Inventory Plan")
             filtered = results.copy()
             if f_prod:
                 filtered = filtered[filtered["Product"].isin(f_prod)]
@@ -1624,7 +1625,7 @@ if s_file and d_file and lt_file:
                 product=sku,
                 period_text=period_label(eff_period),
             )
-            st.subheader("Efficiency & Policy Analysis")
+            st.subheader("⚖️ Efficiency & Policy Analysis")
 
             snapshot_period = (
                 eff_period
@@ -1791,7 +1792,7 @@ if s_file and d_file and lt_file:
                 product=h_sku,
                 location=(h_loc if h_loc != "(no location)" else None),
             )
-            st.subheader("Historical Forecast vs Actuals")
+            st.subheader("📉 Historical Forecast vs Actuals")
             hdf = hist.copy()
             if h_loc != "(no location)":
                 hdf = hdf[
@@ -2015,12 +2016,12 @@ if s_file and d_file and lt_file:
         with col_main:
             st.markdown(
                 """
-                <style>
-                  .calc-mapping-container {
-                    max-width: 560px;
-                  }
-                </style>
-                """,
+                  <style>
+                    .calc-mapping-container {
+                      max-width: 560px;
+                    }
+                  </style>
+                  """,
                 unsafe_allow_html=True,
             )
 
@@ -2030,7 +2031,7 @@ if s_file and d_file and lt_file:
                 location=calc_loc,
                 period_text=period_label(calc_period),
             )
-            st.subheader("Transparent Calculation Engine & Scenario Simulation")
+            st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
             st.write(
                 "See how changing service level or lead-time assumptions affects safety stock."
             )
@@ -2432,7 +2433,7 @@ if s_file and d_file and lt_file:
                 product=selected_product,
                 period_text=period_label(selected_period),
             )
-            st.subheader("View by Material (+ 8 Reasons for Inventory)")
+            st.subheader("📦 View by Material (+ 8 Reasons for Inventory)")
 
             mat_period_df = results[
                 (results["Product"] == selected_product)
