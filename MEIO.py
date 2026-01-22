@@ -23,7 +23,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.965 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.967 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Global CSS
 st.markdown(
@@ -71,6 +71,36 @@ st.markdown(
         max-width: 620px;
         margin-left: 0;
         margin-right: auto;
+      }
+
+      /* Tab title font – make uniform using Tab 4 as reference */
+      button[data-baseweb="tab"] span {
+        font-size: 0.95rem !important;
+        font-weight: 600 !important;
+      }
+
+      /* Selection line above titles */
+      .selection-line {
+        font-size: 0.9rem;
+        margin-bottom: 0.4rem;
+      }
+      .selection-label {
+        color: #444444;
+        font-weight: 500;
+      }
+      .selection-value {
+        color: #0b3d91;
+        font-weight: 700;
+      }
+
+      /* Wrap table header text and avoid truncation (Tab 4 top table) */
+      .ss-top-table table thead tr th {
+        white-space: normal !important;
+        word-break: break-word !important;
+        max-width: 120px;
+      }
+      .ss-top-table table {
+        table-layout: fixed;
       }
     </style>
     """,
@@ -325,6 +355,30 @@ def render_selection_badge(product=None, location=None, df_context=None, small=F
     </div>
     """
     st.markdown(badge_html, unsafe_allow_html=True)
+
+
+def render_selection_line(label, product=None, location=None, period_text=None):
+    """
+    Thin line above each tab title.
+    label like 'Selected:' (not bold); values navy and bold.
+    """
+    if not product and not location and not period_text:
+        return
+    parts = []
+    if product:
+        parts.append(f"<span class='selection-value'>{product}</span>")
+    if location:
+        parts.append(f"<span class='selection-value'>{location}</span>")
+    if period_text:
+        parts.append(f"<span class='selection-value'>{period_text}</span>")
+    values = " — ".join(parts)
+    html = f"""
+    <div class="selection-line">
+      <span class="selection-label">{label}</span>
+      {values}
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def period_label(ts):
@@ -882,6 +936,7 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
+    # --- Tabs (add title to tab1) ---
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         [
             "📈 Inventory Corridor",
@@ -991,7 +1046,14 @@ if s_file and d_file and lt_file:
                 pass
 
         with col_main:
-            st.markdown(f"**Selected**: {sku} — {loc}")
+            # selection line ABOVE title
+            render_selection_line(
+                "Selected:",
+                product=sku,
+                location=loc,
+            )
+            st.subheader("Inventory Corridor")
+
             plot_df = results[
                 (results["Product"] == sku) & (results["Location"] == loc)
             ].sort_values("Period")
@@ -1075,7 +1137,7 @@ if s_file and d_file and lt_file:
             sku_default = default_product
             sku_index = (
                 all_products.index(sku_default)
-                if sku_default in all_products
+                if all_products
                 else 0
             )
             sku = st.selectbox(
@@ -1111,8 +1173,13 @@ if s_file and d_file and lt_file:
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
-            st.subheader("🕸️ Network Topology")
-            st.markdown(f"**Selected**: {sku} — {period_label(chosen_period)}")
+            render_selection_line(
+                "Selected:",
+                product=sku,
+                period_text=period_label(chosen_period),
+            )
+            st.subheader("Network Topology")
+
             st.markdown(
                 """
                 <style>
@@ -1402,7 +1469,7 @@ if s_file and d_file and lt_file:
                     mime="text/csv",
                     key="full_plan_export",
                 )
-                st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown(
                 "<div style='height:6px'></div>", unsafe_allow_html=True
@@ -1420,14 +1487,19 @@ if s_file and d_file and lt_file:
             )
             badge_loc = ", ".join(f_loc) if f_loc else ""
             badge_period = ", ".join(f_period_labels) if f_period_labels else ""
-            selected_text = badge_product
+            selected_text_parts = []
+            if badge_product:
+                selected_text_parts.append(badge_product)
             if badge_loc:
-                selected_text += f" — {badge_loc}"
-            elif badge_period:
-                selected_text += f" — {badge_period}"
-            st.markdown(f"**Selected**: {selected_text}")
+                selected_text_parts.append(badge_loc)
+            if badge_period:
+                selected_text_parts.append(badge_period)
+            render_selection_line(
+                "Selected:",
+                product=" — ".join(selected_text_parts) if selected_text_parts else None,
+            )
 
-            st.subheader("📋 Global Inventory Plan")
+            st.subheader("Global Inventory Plan")
             filtered = results.copy()
             if f_prod:
                 filtered = filtered[filtered["Product"].isin(f_prod)]
@@ -1547,10 +1619,13 @@ if s_file and d_file and lt_file:
             )
 
         with col_main:
-            st.markdown(
-                f"**Selected**: {sku} — {period_label(eff_period)}"
+            render_selection_line(
+                "Selected:",
+                product=sku,
+                period_text=period_label(eff_period),
             )
-            st.subheader("⚖️ Efficiency & Policy Analysis")
+            st.subheader("Efficiency & Policy Analysis")
+
             snapshot_period = (
                 eff_period
                 if eff_period in all_periods
@@ -1642,10 +1717,30 @@ if s_file and d_file and lt_file:
                     cols=["Safety_Stock", "SS_to_FCST_Ratio"],
                     two_decimals_cols=["SS_to_FCST_Ratio"],
                 )
-                eff_top_styled = eff_top_fmt.style.set_properties(
-                    **{"font-size": "11px"}
+                # styled table inside a wrapper to allow header wrapping and avoid truncation
+                eff_top_styled = eff_top_fmt.style.set_table_styles(
+                    [
+                        {
+                            "selector": "th",
+                            "props": [
+                                ("white-space", "normal"),
+                                ("word-break", "break-word"),
+                                ("max-width", "120px"),
+                            ],
+                        },
+                        {
+                            "selector": "td",
+                            "props": [("font-size", "11px")],
+                        },
+                    ]
                 )
-                st.dataframe(eff_top_styled, use_container_width=True)
+                st.markdown('<div class="ss-top-table">', unsafe_allow_html=True)
+                st.dataframe(
+                    eff_top_styled,
+                    use_container_width=True,
+                    height=300,
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
 
     # ---------------- TAB 5 ----------------
     with tab5:
@@ -1691,10 +1786,12 @@ if s_file and d_file and lt_file:
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
-            st.markdown(
-                f"**Selected**: {h_sku} — {h_loc if h_loc != '(no location)' else ''}"
+            render_selection_line(
+                "Selected:",
+                product=h_sku,
+                location=(h_loc if h_loc != "(no location)" else None),
             )
-            st.subheader("📉 Historical Forecast vs Actuals")
+            st.subheader("Historical Forecast vs Actuals")
             hdf = hist.copy()
             if h_loc != "(no location)":
                 hdf = hdf[
@@ -1755,7 +1852,7 @@ if s_file and d_file and lt_file:
                 st.markdown("---")
 
                 st.subheader(
-                    "🌐 Aggregated Network History (Selected Product)"
+                    "Aggregated Network History (Selected Product)"
                 )
                 net_table = (
                     hist_net[hist_net["Product"] == h_sku]
@@ -1885,11 +1982,11 @@ if s_file and d_file and lt_file:
                     index=calc_period_index,
                     key="c_period",
                 )
-                calc_period = period_label_map.get(
-                    chosen_label, default_period
-                )
             else:
-                calc_period = CURRENT_MONTH_TS
+                chosen_label = period_label(CURRENT_MONTH_TS)
+            calc_period = period_label_map.get(
+                chosen_label, default_period
+            )
 
             row_export = results[
                 (results["Product"] == calc_sku)
@@ -1909,7 +2006,7 @@ if s_file and d_file and lt_file:
                     mime="text/csv",
                     key="calc_export_btn",
                 )
-                st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown(
                 "<div style='height:6px'></div>", unsafe_allow_html=True
@@ -1927,10 +2024,13 @@ if s_file and d_file and lt_file:
                 unsafe_allow_html=True,
             )
 
-            st.markdown(
-                f"**Selected**: {calc_sku} — {calc_loc} — {period_label(calc_period)}"
+            render_selection_line(
+                "Selected:",
+                product=calc_sku,
+                location=calc_loc,
+                period_text=period_label(calc_period),
             )
-            st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
+            st.subheader("Transparent Calculation Engine & Scenario Simulation")
             st.write(
                 "See how changing service level or lead-time assumptions affects safety stock."
             )
@@ -2309,7 +2409,7 @@ if s_file and d_file and lt_file:
                     mime="text/csv",
                     key="mat_export_btn",
                 )
-                st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown(
                 "<div style='height:6px'></div>", unsafe_allow_html=True
@@ -2327,12 +2427,13 @@ if s_file and d_file and lt_file:
                 unsafe_allow_html=True,
             )
 
-            st.header(
-                "📦 View by Material (+ 8 Reasons for Inventory)"
+            render_selection_line(
+                "Selected:",
+                product=selected_product,
+                period_text=period_label(selected_period),
             )
-            st.markdown(
-                f"**Selected**: {selected_product} — {period_label(selected_period)}"
-            )
+            st.subheader("View by Material (+ 8 Reasons for Inventory)")
+
             mat_period_df = results[
                 (results["Product"] == selected_product)
                 & (results["Period"] == selected_period)
