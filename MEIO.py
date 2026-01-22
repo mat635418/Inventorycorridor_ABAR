@@ -21,7 +21,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.988 — Jan 2026</h1>",
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.99 — Jan 2026</h1>",
     unsafe_allow_html=True,
 )
 
@@ -394,7 +394,7 @@ def period_label(ts) -> str:
 # -------- Sidebar configuration --------
 with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
     service_level = st.slider(
-        "Service Level (%) — end-nodes (hop 0)",
+        "Service Level (%) for the end-nodes",
         50.0,
         99.9,
         99.0,
@@ -404,12 +404,12 @@ with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
 
 with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
     zero_if_no_net_fcst = st.checkbox(
-        "Force Zero SS if No Network Demand",
+        "Force zero SS if no Demand",
         value=True,
         help="When enabled, nodes with zero aggregated network demand will have Safety Stock forced to zero.",
     )
     apply_cap = st.checkbox(
-        "Enable SS Capping (% of Network Demand)",
+        "Enable SS Capping",
         value=True,
         help="Clip Safety Stock within a percentage range of total network demand.",
     )
@@ -913,7 +913,7 @@ if s_file and d_file and lt_file:
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
-            # 2x2 KPI table: Avg Daily Demand & SS coverage
+            # 2x2 KPI table: Avg Daily Demand & SS coverage (new layout like pic2)
             try:
                 summary_row = results[
                     (results["Product"] == sku)
@@ -924,18 +924,18 @@ if s_file and d_file and lt_file:
                     srow = summary_row.iloc[0]
                     avg_daily = srow.get("D_day", np.nan)
                     days_cov = srow.get("Days_Covered_by_SS", np.nan)
-                    avg_daily_txt = f"{avg_daily:.2f} units/day" if pd.notna(avg_daily) else "N/A"
-                    days_cov_txt = f"{days_cov:.1f} days" if pd.notna(days_cov) else "N/A"
+                    avg_daily_val = f"{avg_daily:.2f}" if pd.notna(avg_daily) else ""
+                    days_cov_val = f"{days_cov:.1f}" if pd.notna(days_cov) else ""
 
                     kpi_html = f"""
                     <table class="kpi-2x2-table">
                       <tr>
-                        <td class="kpi-label">Avg Daily Demand</td>
-                        <td class="kpi-value"><strong>{avg_daily_txt}</strong></td>
+                        <td class="kpi-label">Avg Daily Demand<br/>[units/day]</td>
+                        <td class="kpi-label">Safety Stock Coverage<br/>[days]</td>
                       </tr>
                       <tr>
-                        <td class="kpi-label">Safety Stock coverage</td>
-                        <td class="kpi-value"><strong>{days_cov_txt}</strong></td>
+                        <td class="kpi-value">{avg_daily_val}</td>
+                        <td class="kpi-value">{days_cov_val}</td>
                       </tr>
                     </table>
                     """
