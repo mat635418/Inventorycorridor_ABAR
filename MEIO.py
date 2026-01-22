@@ -2757,7 +2757,7 @@ if s_file and d_file and lt_file:
             if "Avg_SS_Days_Coverage" in agg_all.columns:
                 agg_all["Avg_SS_Days_Coverage"] = agg_all["Avg_SS_Days_Coverage"].fillna(0.0)
             if "SS_to_Demand_Ratio_%" in agg_all.columns:
-                agg_all["SS_to_Demand_Ratio_%"] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
+                agg_all["SS_to_Demand_Ratio_%" ] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
 
             with st.container():
                 st.markdown(
@@ -2861,6 +2861,9 @@ if s_file and d_file and lt_file:
                         unsafe_allow_html=True,
                     )
 
+                    # layout: put the two violins on the same line
+                    vcol1, vcol2 = st.columns(2)
+
                     # Demand variability plot
                     if "Agg_Std_Hist" in sub.columns and not sub["Agg_Std_Hist"].dropna().empty:
                         vdf_demand = pd.DataFrame(
@@ -2884,7 +2887,8 @@ if s_file and d_file and lt_file:
                             height=300,
                             title="Demand variability",
                         )
-                        st.plotly_chart(fig_v_d, use_container_width=True, key=f"violin_demand_{prod}")
+                        with vcol1:
+                            st.plotly_chart(fig_v_d, use_container_width=True, key=f"violin_demand_{prod}")
 
                     # LT variability plot
                     if "LT_Std" in sub.columns and not sub["LT_Std"].dropna().empty:
@@ -2909,7 +2913,8 @@ if s_file and d_file and lt_file:
                             height=300,
                             title="Lead Time variability",
                         )
-                        st.plotly_chart(fig_v_lt, use_container_width=True, key=f"violin_lt_{prod}")
+                        with vcol2:
+                            st.plotly_chart(fig_v_lt, use_container_width=True, key=f"violin_lt_{prod}")
 
                     st.markdown("</div>", unsafe_allow_html=True)
 
