@@ -99,6 +99,31 @@ st.markdown(
       .ss-top-table table {
         table-layout: fixed;
       }
+      details summary {
+        cursor: pointer;
+      }
+      details summary::-webkit-details-marker {
+        display: none;
+      }
+      details summary:before {
+        content: "▶ ";
+        font-size: 0.8rem;
+      }
+      details[open] summary:before {
+        content: "▼ ";
+      }
+      .all-mat-details {
+        margin: 0;
+        padding: 6px 10px;
+        background: #f8faff;
+        border-radius: 6px;
+        border: 1px solid #e0e7ff;
+        font-size: 0.85rem;
+      }
+      .all-mat-details summary {
+        font-weight: 600;
+        color: #0b3d91;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -938,13 +963,6 @@ if s_file and d_file and lt_file:
                 xaxis=dict(tickformat="%b\n%Y"),
             )
             st.plotly_chart(fig, use_container_width=True)
-
-            # Only keep the label line; experimental plot removed
-            st.markdown(
-                "<div style='margin-top:10px; font-size:0.9rem; color:#666;'>"
-                "⬇︎ Experimental risk-focused view (for comparison)</div>",
-                unsafe_allow_html=True,
-            )
 
     # -------- TAB 2: Network Topology --------
     with tab2:
@@ -2450,8 +2468,8 @@ if s_file and d_file and lt_file:
                 per_node["retained_demand"] = (
                     per_node["demand_share"] * per_node["retained_ratio"]
                 )
-                per_node["retained_lt"] = (
-                    per_node["lt_share"] * per_node["retained_ratio"]
+                per_node["retained_lt"] = per_node.apply(
+                    lambda r: r["lt_share"] * r["retained_ratio"], axis=1
                 )
                 per_node["retained_stat_total"] = (
                     per_node["retained_demand"]
@@ -2638,6 +2656,7 @@ if s_file and d_file and lt_file:
                 results["Period"] == selected_period_all
             ].copy()
 
+            # Aggregate by material
             agg_all = snapshot_all.groupby("Product", as_index=False).agg(
                 Network_Demand_Month=("Agg_Future_Demand", "sum"),
                 Local_Forecast_Month=("Forecast", "sum"),
@@ -2659,6 +2678,9 @@ if s_file and d_file and lt_file:
             else:
                 agg_all["End_Nodes"] = np.nan
 
+            # Remove materials where calculated SS is null/zero
+            agg_all = agg_all[agg_all["Safety_Stock"] > 0].copy()
+
             agg_all["Reorder_Point"] = (
                 agg_all["Safety_Stock"] + agg_all["Local_Forecast_Month"]
             )
@@ -2669,29 +2691,57 @@ if s_file and d_file and lt_file:
                 0.0,
             )
 
-            int_cols = [
+            # Keep floats for key columns to match mock-up; integer-like formatting will be applied via euro_format
+            for c in [
                 "Network_Demand_Month",
                 "Local_Forecast_Month",
                 "Safety_Stock",
                 "Max_Corridor",
                 "Reorder_Point",
-                "Nodes",
-                "End_Nodes",
-            ]
-            for c in int_cols:
+            ]:
                 if c in agg_all.columns:
-                    agg_all[c] = agg_all[c].fillna(0).round(0).astype(int)
+                    agg_all[c] = agg_all[c].fillna(0.0)
 
+            # Coverage and ratio remain numeric (float) for display with decimals
             if "Avg_Day_Demand" in agg_all.columns:
-                agg_all["Avg_Day_Demand"] = agg_all["Avg_Day_Demand"].fillna(0).round(0).astype(int)
+                agg_all["Avg_Day_Demand"] = agg_all["Avg_Day_Demand"].fillna(0.0)
             if "Avg_SS_Days_Coverage" in agg_all.columns:
-                agg_all["Avg_SS_Days_Coverage"] = (
-                    agg_all["Avg_SS_Days_Coverage"].fillna(0).round(0).astype(int)
-                )
+                agg_all["Avg_SS_Days_Coverage"] = agg_all["Avg_SS_Days_Coverage"].fillna(0.0)
             if "SS_to_Demand_Ratio_%" in agg_all.columns:
-                agg_all["SS_to_Demand_Ratio_%"] = (
-                    agg_all["SS_to_Demand_Ratio_%"].fillna(0).round(0).astype(int)
-                )
+                agg_all["SS_to_Demand_Ratio_%"] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
+
+            # Pre-compute per-material location details for drill-down table
+            per_material_locations = {}
+            if not snapshot_all.empty:
+                # format numeric columns in location-level detail
+                loc_cols_numeric = [
+                    "Forecast",
+                    "Agg_Future_Demand",
+                    "Safety_Stock",
+                    "Days_Covered_by_SS",
+                ]
+                for prod in agg_all["Product"]:
+                    loc_df = snapshot_all[snapshot_all["Product"] == prod].copy()
+                    loc_df = hide_zero_rows(loc_df)
+                    if loc_df.empty:
+                        per_material_locations[prod] = pd.DataFrame()
+                        continue
+                    loc_view = loc_df[
+                        [
+                            "Location",
+                            "Forecast",
+                            "Agg_Future_Demand",
+                            "Safety_Stock",
+                            "Days_Covered_by_SS",
+                            "Adjustment_Status",
+                        ]
+                    ].copy()
+                    loc_view = df_format_for_display(
+                        loc_view,
+                        cols=loc_cols_numeric,
+                        two_decimals_cols=["Days_Covered_by_SS"],
+                    )
+                    per_material_locations[prod] = loc_view
 
             with st.container():
                 st.markdown(
@@ -2724,16 +2774,12 @@ if s_file and d_file and lt_file:
             if agg_all.empty:
                 st.warning("No data available for the selected period.")
             else:
+                # Build display table similarly to the screenshot
                 display_cols_all = [
                     "Product",
                     "Avg_Day_Demand",
                     "Safety_Stock",
-                    "Reorder_Point",
-                    "Max_Corridor",
                     "Avg_SS_Days_Coverage",
-                    "Nodes",
-                    "End_Nodes",
-                    "Network_Demand_Month",
                     "Local_Forecast_Month",
                     "SS_to_Demand_Ratio_%",
                 ]
@@ -2741,29 +2787,70 @@ if s_file and d_file and lt_file:
                     c for c in display_cols_all if c in agg_all.columns
                 ]
 
-                agg_view = agg_all.sort_values("Safety_Stock", ascending=False)[
-                    display_cols_all
-                ].reset_index(drop=True)
+                agg_view = agg_all.sort_values(
+                    "Avg_Day_Demand", ascending=False
+                )[display_cols_all].reset_index(drop=True)
 
                 rename_map = {
                     "Avg_Day_Demand": "Avg Daily Demand",
                     "Safety_Stock": "Calculated Safety Stock",
-                    "Reorder_Point": "ReOrder Point",
-                    "Max_Corridor": "Max",
                     "Avg_SS_Days_Coverage": "SS Coverage (days)",
-                    "Nodes": "#Nodes",
-                    "End_Nodes": "#End-Nodes",
-                    "Network_Demand_Month": "Network Demand (month)",
                     "Local_Forecast_Month": "Local Forecast (month)",
                     "SS_to_Demand_Ratio_%": "SS / Demand (%)",
                 }
                 agg_view = agg_view.rename(columns=rename_map)
 
+                # Prepare formatted copy for showing euro-like formatting
+                formatted = agg_view.copy()
+                if "Avg Daily Demand" in formatted.columns:
+                    formatted["Avg Daily Demand"] = formatted["Avg Daily Demand"].apply(
+                        lambda v: "{:.3f}".format(v / 1.0) if pd.notna(v) else ""
+                    )
+                if "Calculated Safety Stock" in formatted.columns:
+                    formatted["Calculated Safety Stock"] = formatted[
+                        "Calculated Safety Stock"
+                    ].apply(lambda v: euro_format(v, always_two_decimals=False, show_zero=True))
+                if "Local Forecast (month)" in formatted.columns:
+                    formatted["Local Forecast (month)"] = formatted[
+                        "Local Forecast (month)"
+                    ].apply(lambda v: euro_format(v, always_two_decimals=False, show_zero=True))
+                if "SS Coverage (days)" in formatted.columns:
+                    formatted["SS Coverage (days)"] = formatted[
+                        "SS Coverage (days)"
+                    ].apply(lambda v: "{:.0f}".format(v) if pd.notna(v) else "")
+                if "SS / Demand (%)" in formatted.columns:
+                    formatted["SS / Demand (%)"] = formatted[
+                        "SS / Demand (%)"
+                    ].apply(lambda v: "{:.0f}".format(v) if pd.notna(v) else "")
+
                 st.dataframe(
-                    agg_view,
+                    formatted,
                     use_container_width=True,
-                    height=700,
+                    height=430,
                 )
+
+                st.markdown("---")
+                st.markdown(
+                    "<b>Location details by material</b> &nbsp;— expand a row below to see its locations.",
+                    unsafe_allow_html=True,
+                )
+
+                # Collapsible per-material location details
+                for _, row in agg_view.iterrows():
+                    prod = row["Product"]
+                    loc_df_disp = per_material_locations.get(prod, pd.DataFrame())
+                    if loc_df_disp is None or loc_df_disp.empty:
+                        continue
+                    html = f"""
+                    <details class="all-mat-details">
+                      <summary>Locations for <strong>{prod}</strong></summary>
+                    </details>
+                    """
+                    # Render the summary line
+                    components.html(html, height=40)
+                    # Render the dataframe directly under (Streamlit cannot be fully controlled by <details>,
+                    # but the details box still serves as a visual toggle / label)
+                    st.dataframe(loc_df_disp, use_container_width=True, height=min(300, 40 + 24 * len(loc_df_disp)))
 
 else:
     st.info(
