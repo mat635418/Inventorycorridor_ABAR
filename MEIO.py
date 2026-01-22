@@ -144,6 +144,13 @@ st.markdown(
         text-align: right;
         white-space: nowrap;
       }
+      .violin-box {
+        border: 1px solid #dddddd;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin-bottom: 10px;
+        background: #f7f7f7;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -2529,10 +2536,9 @@ if s_file and d_file and lt_file:
                     per_node["retained_stat_total"]
                     * per_node["direct_frac"]
                 )
-                per_node["indirect_retained_ss"] = (
-                    per_node["retained_stat_total"]
-                    * (1 - per_node["direct_frac"])
-                )
+                per_node["indirect_retained_ss"] = per_node[
+                    "retained_stat_total"
+                ] * (1 - per_node["direct_frac"])
                 per_node["cap_reduction"] = per_node.apply(
                     lambda r: max(
                         r["pre_ss"] - r["Safety_Stock"], 0.0
@@ -2659,7 +2665,7 @@ if s_file and d_file and lt_file:
                     ss_attrib_df_formatted, use_container_width=True
                 )
 
-    # ---------------- TAB 8: All Materials View ----------------
+    # ---------------- TAB 8 ----------------
     with tab8:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -2833,44 +2839,47 @@ if s_file and d_file and lt_file:
 
             # ---------- Violin plots ----------
             st.markdown("---")
-             
-                # Now, for each active material, plot a violin diagram of variability
-                st.markdown("**Per-material variability (Demand & Lead Time) — violins**")
+            st.markdown("**Per-material variability (Demand & Lead Time) — violins**")
 
-                for prod in active_products:
-                    sub = snapshot_all[snapshot_all["Product"] == prod].copy()
-                    if sub.empty:
-                        continue
+            # Only show for products that appear in this period snapshot
+            active_products = sorted(snapshot_all["Product"].unique().tolist())
 
-                    violin_rows = []
+            for prod in active_products:
+                sub = snapshot_all[snapshot_all["Product"] == prod].copy()
+                if sub.empty:
+                    continue
 
-                    # Demand variability (per-node monthly std dev from Agg_Std_Hist)
-                    if "Agg_Std_Hist" in sub.columns:
-                        for val in sub["Agg_Std_Hist"].dropna():
-                            violin_rows.append(
-                                {
-                                    "Metric": "Demand StdDev (monthly units)",
-                                    "Value": float(val),
-                                }
-                            )
+                violin_rows = []
 
-                    # Lead-time variability (per-node LT_Std)
-                    if "LT_Std" in sub.columns:
-                        for val in sub["LT_Std"].dropna():
-                            violin_rows.append(
-                                {
-                                    "Metric": "Lead Time StdDev (days)",
-                                    "Value": float(val),
-                                }
-                            )
+                # Demand variability (per-node monthly std dev from Agg_Std_Hist)
+                if "Agg_Std_Hist" in sub.columns:
+                    for val in sub["Agg_Std_Hist"].dropna():
+                        violin_rows.append(
+                            {
+                                "Metric": "Demand StdDev (monthly units)",
+                                "Value": float(val),
+                            }
+                        )
 
-                    if not violin_rows:
-                        # Skip if no metrics for this product
-                        continue
+                # Lead-time variability (per-node LT_Std)
+                if "LT_Std" in sub.columns:
+                    for val in sub["LT_Std"].dropna():
+                        violin_rows.append(
+                            {
+                                "Metric": "Lead Time StdDev (days)",
+                                "Value": float(val),
+                            }
+                        )
 
-                    vdf = pd.DataFrame(violin_rows)
+                if not violin_rows:
+                    # Skip if no metrics for this product
+                    continue
 
-                    st.markdown(f"**{prod}**")
+                vdf = pd.DataFrame(violin_rows)
+
+                # Wrap each product's violin in a grey border box
+                st.markdown(f"<div class='violin-box'><strong>{prod}</strong></div>", unsafe_allow_html=True)
+                with st.container():
                     fig_v = px.violin(
                         vdf,
                         x="Metric",
