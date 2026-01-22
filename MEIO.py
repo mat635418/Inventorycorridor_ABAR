@@ -25,7 +25,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.94 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.95 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Small UI styling tweak to make selected multiselect chips match app theme.
 st.markdown(
@@ -732,8 +732,8 @@ if s_file and d_file and lt_file:
                     days_cov = srow.get('Days_Covered_by_SS', np.nan)
                     avg_daily_txt = f"{avg_daily:.2f} units/day" if pd.notna(avg_daily) else "N/A"
                     days_cov_txt = f"{days_cov:.1f} days" if pd.notna(days_cov) else "N/A"
-                    st.markdown(f"**Avg/day:** {avg_daily_txt}")
-                    st.markdown(f"**Days covered (SS):** {days_cov_txt}")
+                    st.markdown(f"Avg Daily Demand: **{avg_daily_txt}**")
+                    st.markdown(f"Safety Stock coverage: **{days_cov_txt}**")
             except Exception:
                 # silent fallback
                 pass
@@ -772,6 +772,16 @@ if s_file and d_file and lt_file:
             fig = go.Figure(traces)
             fig.update_layout(legend=dict(orientation="h"), xaxis_title='Period', yaxis_title='Units', xaxis=dict(tickformat="%b\n%Y"))
             st.plotly_chart(fig, use_container_width=True)
+
+            # Export corridor data for the selected SKU/Location
+            csv_buf_tab1 = plot_full.copy()
+            csv_buf_tab1['Period'] = csv_buf_tab1['Period'].dt.strftime('%Y-%m-%d')
+            st.download_button(
+                "📥 Export Inventory Corridor data (CSV)",
+                data=csv_buf_tab1.to_csv(index=False),
+                file_name=f"corridor_{sku}_{loc}.csv",
+                mime="text/csv"
+            )
 
     # TAB 2: Network Topology
     with tab2:
@@ -825,10 +835,10 @@ if s_file and d_file and lt_file:
 
             demand_lookup = {}
             for n in all_nodes:
-                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': 0})
+                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': np.nan})
 
             for n in sorted(all_nodes):
-                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': 0})
+                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': np.nan})
                 # Node considered 'used' visually if any of the metrics are > 0
                 used = (float(m.get('Agg_Future_External', 0)) > 0) or (float(m.get('Forecast', 0)) > 0)
 
@@ -840,10 +850,10 @@ if s_file and d_file and lt_file:
                     if used:
                         bg = '#fff9c4'; border = '#fbc02d'; font_color = '#222222'; size = 12
                     else:
-                        bg = '#f0f0f0'; border = '#cccccc'; font_color = '#9e9e9e'; size = 10
+                        # even lighter grey for inactive nodes
+                        bg = '#f7f7f7'; border = '#e0e0e0'; font_color = '#b0b0b0'; size = 10
 
-                # Try to display hops and node SL where available
-                hops = m.get('Tier_Hops', None)
+                # Try to display node SL where available
                 sl_node = m.get('Service_Level_Node', None)
                 sl_label = "-"
                 if pd.notna(sl_node):
@@ -852,16 +862,16 @@ if s_file and d_file and lt_file:
                     except Exception:
                         sl_label = str(sl_node)
 
-                # Build the label with explicit newlines, then replace the escaped newlines for pyvis rendering
-                # Avg/day and Days covered removed from the topology labels as requested.
+                # Build the label (location in bold, no hops in label)
                 lbl = (
-                    f"{n}\\n"
+                    f"**{n}**\\n"
                     f"LDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\\n"
                     f"EXT: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\\n"
                     f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\\n"
-                    f"Hops: {int(hops) if (hops is not None and not pd.isna(hops)) else '-'}\\n"
                     f"SL: {sl_label}"
                 )
+                # pyvis doesn't understand Markdown, so keep visual emphasis by uppercase & spacing
+                lbl = lbl.replace("**", "")
                 lbl = lbl.replace("\\n", "\n")
                 net.add_node(n, label=lbl, title=lbl, color={'background': bg, 'border': border}, shape='box', font={'color': font_color, 'size': size})
 
@@ -933,6 +943,15 @@ if s_file and d_file and lt_file:
                 </div>
             """, unsafe_allow_html=True)
 
+            # Export raw network data for this material/period
+            topo_export = results[(results['Product'] == sku) & (results['Period'] == chosen_period)].copy()
+            st.download_button(
+                "📥 Export Network Topology data (CSV)",
+                data=topo_export.to_csv(index=False),
+                file_name=f"network_topology_{sku}_{period_label(chosen_period)}.csv",
+                mime="text/csv"
+            )
+
     # TAB 3: Full Plan
     with tab3:
         col_main, col_badge = st.columns([17, 3])
@@ -1002,8 +1021,6 @@ if s_file and d_file and lt_file:
             display_cols = ['Product','Location','Period','Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Adjustment_Status','Max_Corridor']
             fmt_cols = [c for c in ['Forecast','Agg_Future_Internal','Agg_Future_External','Agg_Future_Demand','D_day','Days_Covered_by_SS','Safety_Stock','Max_Corridor'] if c in filtered_display.columns]
 
-            # Removed the "TOTAL" header row above the table as requested (no totals in Tab 3)
-
             # Show main table below
             # Make Period human-friendly like the filters (e.g., "JAN 2026")
             disp_df = filtered_display.copy()
@@ -1025,7 +1042,7 @@ if s_file and d_file and lt_file:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             sku_default = default_product
-            sku_index = all_products.index(sku_default) if sku_default in all_products else 0
+            sku_index = all_products.index(sku_default) if all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="eff_sku")
 
             if period_labels:
@@ -1072,19 +1089,29 @@ if s_file and d_file and lt_file:
                 st.plotly_chart(fig_eff, use_container_width=True)
             with c2:
                 st.markdown("**Status Breakdown**")
-                # Use table (st.table) or st.dataframe; keep it compact but ensure more width available now
                 st.table(eff_display['Adjustment_Status'].value_counts())
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 eff_top = eff_display.sort_values('Safety_Stock', ascending=False)
-                # remove the automatic index column so the content fits the space
                 eff_top_display = eff_top[['Location', 'Adjustment_Status', 'Safety_Stock', 'SS_to_FCST_Ratio']].head(10).reset_index(drop=True)
+                # round Safety_Stock to integer and reduce font via styled dataframe
+                eff_top_display['Safety_Stock'] = eff_top_display['Safety_Stock'].round(0)
+                eff_top_fmt = df_format_for_display(
+                    eff_top_display,
+                    cols=['Safety_Stock', 'SS_to_FCST_Ratio'],
+                    two_decimals_cols=['SS_to_FCST_Ratio']
+                )
+                eff_top_styled = eff_top_fmt.style.set_properties(**{'font-size': '11px'})
                 st.dataframe(
-                    df_format_for_display(
-                        eff_top_display,
-                        cols=['Safety_Stock'],
-                        two_decimals_cols=['Safety_Stock']
-                    ),
+                    eff_top_styled,
                     use_container_width=True
+                )
+
+                # Export efficiency snapshot
+                st.download_button(
+                    "📥 Export Efficiency snapshot (CSV)",
+                    data=eff.to_csv(index=False),
+                    file_name=f"efficiency_{sku}_{period_label(snapshot_period)}.csv",
+                    mime="text/csv"
                 )
 
     # TAB 5: Forecast Accuracy
@@ -1092,7 +1119,7 @@ if s_file and d_file and lt_file:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             h_sku_default = default_product
-            h_sku_index = all_products.index(h_sku_default) if h_sku_default in all_products else 0
+            h_sku_index = all_products.index(h_sku_default) if all_products else 0
             h_sku = st.selectbox("MATERIAL", all_products, index=h_sku_index, key="h1")
 
             h_loc_opts = sorted(results[results['Product'] == h_sku]['Location'].unique().tolist())
@@ -1132,6 +1159,14 @@ if s_file and d_file and lt_file:
                                       go.Scatter(x=hdf['Period'], y=hdf['Forecast_Hist'], name='Forecast', line=dict(color='blue', dash='dot'))])
                 st.plotly_chart(fig_hist, use_container_width=True)
 
+                # Export local history
+                st.download_button(
+                    "📥 Export local history (CSV)",
+                    data=hdf.to_csv(index=False),
+                    file_name=f"forecast_history_{h_sku}_{h_loc if h_loc != '(no location)' else 'ALL'}.csv",
+                    mime="text/csv"
+                )
+
                 # --- Added separator between the graph and the aggregated history table ---
                 st.markdown("---")
 
@@ -1156,13 +1191,22 @@ if s_file and d_file and lt_file:
                     c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                     st.metric("Network WAPE (%)", c_val)
 
+                # Export aggregated network history
+                if not net_table.empty:
+                    st.download_button(
+                        "📥 Export aggregated network history (CSV)",
+                        data=net_table.to_csv(index=False),
+                        file_name=f"network_history_{h_sku}.csv",
+                        mime="text/csv"
+                    )
+
     # TAB 6: Calculation Trace & Simulation — show mapping table and highlight values used
     with tab6:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             render_logo_above_parameters(scale=1.5)
             calc_sku_default = default_product
-            calc_sku_index = all_products.index(calc_sku_default) if calc_sku_default in all_products else 0
+            calc_sku_index = all_products.index(calc_sku_default) if all_products else 0
             calc_sku = st.selectbox("MATERIAL", all_products, index=calc_sku_index, key="c_sku")
 
             avail_locs = sorted(meaningful_results[meaningful_results['Product'] == calc_sku]['Location'].unique().tolist())
@@ -1191,7 +1235,7 @@ if s_file and d_file and lt_file:
             # Show selection at the start of the tab
             st.markdown(f"**Selected**: {calc_sku} — {calc_loc} — {period_label(calc_period)}")
             st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
-            st.write("See how changing service level or lead-time assumptions affects safety stock. The scenario planning area below is collapsed by default.")
+            st.write("See how changing service level or lead-time assumptions affects safety stock.")
 
             # Always read the current service_level and recompute the z used in displays
             z_current = norm.ppf(service_level)
@@ -1331,11 +1375,99 @@ if s_file and d_file and lt_file:
     6. Floor applied (1% of mean LT demand) = {ss_floor:.2f} units
     7. Pre-rule SS (max of raw vs floor) = {max(raw_ss_calc, ss_floor):.2f} units
     """)
-                st.info(f"🧮 **Resulting Pre-rule SS (node-level):** {euro_format(row['Pre_Rule_SS'], True)} units")
-                st.info(f"📦 **Implemented Safety Stock (after business rules):** {euro_format(row['Safety_Stock'], True)} units")
 
-                # Scenario planning (analysis-only, does not alter implemented policy)
-                with st.expander("Scenario Planning (expand to configure scenarios)", expanded=False):
+                # Reworked explanation section: FIRST explain why Pre-rule vs Implemented can differ
+                st.markdown("### 3. Why do we sometimes use a different SS than the pure statistical value?")
+                st.markdown("""
+                The engine first calculates a **statistical** Safety Stock (`Pre_Rule_SS`) based purely on demand and lead‑time uncertainty.
+                Then, business rules can modify this number:
+
+                - **Zero-demand rule**: if there is no network demand, SS is forced to zero.
+                - **Capping**: SS is constrained between a minimum and maximum % of network demand.
+                - **Policy overrides**: specific locations (e.g. B616) can be forced to zero regardless of the statistical result.
+
+                The two boxes below show:
+                """)
+                st.markdown("""
+                <div style="margin:8px 0;">
+                  <ul style="margin-top:4px; margin-bottom:4px;">
+                    <li><strong>Resulting Pre‑rule SS (node-level)</strong>: the statistical result <em>before</em> any business rules.</li>
+                    <li><strong>Implemented Safety Stock (after business rules)</strong>: the final value actually used in planning.</li>
+                  </ul>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Light-blue boxes as in screenshot
+                pre_rule_text = euro_format(row['Pre_Rule_SS'], True)
+                impl_text = euro_format(row['Safety_Stock'], True)
+                st.markdown(f"""
+                <div style="background:#e8f3ff;border-radius:12px;padding:10px 14px;margin-bottom:6px;border:1px solid #c5dbff;">
+                  <span style="font-size:13px;"><strong>🧮 Resulting Pre-rule SS (node-level)</strong>: {pre_rule_text} units</span>
+                </div>
+                """, unsafe_allow_html=True)
+                st.markdown(f"""
+                <div style="background:#e8f3ff;border-radius:12px;padding:10px 14px;margin-bottom:16px;border:1px solid #c5dbff;">
+                  <span style="font-size:13px;"><strong>📦 Implemented Safety Stock (after business rules)</strong>: {impl_text} units</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Zero / capping diagnostics AFTER the two light-blue boxes
+                st.subheader("4. Business Rules & Diagnostics — explanation & diagnostics")
+                st.markdown(r"""
+                Background & explanation of the calculation steps and business-rule adjustments.
+                """)
+                st.latex(r"SS = Z \cdot \sqrt{\mathrm{Var}(D_{\text{day}})\cdot L \;+\; (\bar{D}_{\text{day}})^2 \cdot \mathrm{Var}(L)}")
+                st.markdown(r"""
+                Capping policy (if enabled):
+                """)
+                st.latex(r"\text{lower\_limit} = D \times \text{cap\_min\_pct}")
+                st.latex(r"\text{upper\_limit} = D \times \text{cap\_max\_pct}")
+                st.markdown(r"""
+                Then: Safety_Stock = clip(SS_{pre}, lower_limit, upper_limit)
+                with exceptions:
+                - If D == 0 and zero suppression rule is enabled -> Safety_Stock = 0
+                - Explicit overrides (e.g., specific locations such as B616) may force 0
+                """)
+                st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+
+                st.markdown("---")
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("**Zero Demand Rule**")
+                    if zero_if_no_net_fcst and row['Agg_Future_Demand'] <= 0:
+                        st.error("❌ Network Demand is 0. SS Forced to 0.")
+                    else:
+                        st.success("✅ Network Demand exists. Keep Statistical SS.")
+                with c2:
+                    st.markdown("**Capping (Min/Max) Diagnostics**")
+                    if apply_cap:
+                        lower_limit = row['Agg_Future_Demand'] * (cap_range[0]/100)
+                        upper_limit = row['Agg_Future_Demand'] * (cap_range[1]/100)
+                        st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
+                        st.write(f"Lower limit = Agg_Future_Demand * {cap_range[0]}% = {euro_format(lower_limit, True)}")
+                        st.write(f"Upper limit = Agg_Future_Demand * {cap_range[1]}% = {euro_format(upper_limit, True)}")
+                        if raw_ss_calc > upper_limit:
+                            st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) > Max Cap ({euro_format(upper_limit, True)}). Capping downwards to {euro_format(upper_limit, True)}.")
+                        elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
+                            st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) < Min Cap ({euro_format(lower_limit, True)}). Raising to {euro_format(lower_limit, True)}.")
+                        else:
+                            st.success("✅ Raw SS is within caps (no capping applied).")
+                    else:
+                        st.write("Capping logic disabled.")
+
+                # Export trace row as CSV
+                trace_export = row_df.copy()
+                st.download_button(
+                    "📥 Export Calculation Trace row (CSV)",
+                    data=trace_export.to_csv(index=False),
+                    file_name=f"calc_trace_{calc_sku}_{calc_loc}_{period_label(calc_period)}.csv",
+                    mime="text/csv"
+                )
+
+                # ---- Scenario planning moved to the bottom as a dedicated, collapsed section ----
+                st.markdown("---")
+                with st.expander("Scenario Planning — simulate alternative SL / LT assumptions (analysis-only)", expanded=False):
                     st.write("Use scenarios to test sensitivity to Service Level or Lead Time. Scenarios do not change implemented policy — they are analysis-only.")
                     if 'n_scen' not in st.session_state:
                         st.session_state['n_scen'] = 1
@@ -1390,49 +1522,13 @@ if s_file and d_file and lt_file:
                     fig_bar.update_layout(title="Scenario SS Comparison", yaxis_title="SS (units)")
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                st.subheader("4. Business Rules & Diagnostics — explanation & diagnostics")
-                st.markdown(r"""
-                Background & explanation of the calculation steps and business-rule adjustments.
-                """)
-                st.latex(r"SS = Z \cdot \sqrt{\mathrm{Var}(D_{\text{day}})\cdot L \;+\; (\bar{D}_{\text{day}})^2 \cdot \mathrm{Var}(L)}")
-                st.markdown(r"""
-                Capping policy (if enabled):
-                """)
-                st.latex(r"\text{lower\_limit} = D \times \text{cap\_min\_pct}")
-                st.latex(r"\text{upper\_limit} = D \times \text{cap\_max\_pct}")
-                st.markdown(r"""
-                Then: Safety_Stock = clip(SS_{pre}, lower_limit, upper_limit)
-                with exceptions:
-                - If D == 0 and zero suppression rule is enabled -> Safety_Stock = 0
-                - Explicit overrides (e.g., specific locations such as B616) may force 0
-                """)
-                st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-
-                st.markdown("---")
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown("**Zero Demand Rule**")
-                    if zero_if_no_net_fcst and row['Agg_Future_Demand'] <= 0:
-                        st.error("❌ Network Demand is 0. SS Forced to 0.")
-                    else:
-                        st.success("✅ Network Demand exists. Keep Statistical SS.")
-                with c2:
-                    st.markdown("**Capping (Min/Max) Diagnostics**")
-                    if apply_cap:
-                        lower_limit = row['Agg_Future_Demand'] * (cap_range[0]/100)
-                        upper_limit = row['Agg_Future_Demand'] * (cap_range[1]/100)
-                        st.write(f"Constraint: {int(cap_range[0])}% to {int(cap_range[1])}% of Demand")
-                        st.write(f"Lower limit = Agg_Future_Demand * {cap_range[0]}% = {euro_format(lower_limit, True)}")
-                        st.write(f"Upper limit = Agg_Future_Demand * {cap_range[1]}% = {euro_format(upper_limit, True)}")
-                        if raw_ss_calc > upper_limit:
-                            st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) > Max Cap ({euro_format(upper_limit, True)}). Capping downwards to {euro_format(upper_limit, True)}.")
-                        elif raw_ss_calc < lower_limit and row['Agg_Future_Demand'] > 0:
-                            st.warning(f"⚠️ Raw SS ({euro_format(raw_ss_calc, True)}) < Min Cap ({euro_format(lower_limit, True)}). Raising to {euro_format(lower_limit, True)}.")
-                        else:
-                            st.success("✅ Raw SS is within caps (no capping applied).")
-                    else:
-                        st.write("Capping logic disabled.")
+                    # Export scenario comparison
+                    st.download_button(
+                        "📥 Export Scenario comparison (CSV)",
+                        data=display_comp.to_csv(index=False),
+                        file_name=f"scenario_comparison_{calc_sku}_{calc_loc}_{period_label(calc_period)}.csv",
+                        mime="text/csv"
+                    )
 
     # TAB 7: By Material
     with tab7:
@@ -1440,7 +1536,7 @@ if s_file and d_file and lt_file:
         with col_badge:
             render_logo_above_parameters(scale=1.5)
             sel_prod_default = default_product
-            sel_prod_index = all_products.index(sel_prod_default) if sel_prod_default in all_products else 0
+            sel_prod_index = all_products.index(sel_prod_default) if all_products else 0
             selected_product = st.selectbox("MATERIAL", all_products, index=sel_prod_index, key="mat_sel")
 
             if period_labels:
@@ -1543,6 +1639,14 @@ if s_file and d_file and lt_file:
                                                   two_decimals_cols=['Pct_of_raw_sum']),
                              use_container_width=True)
 
+                # Export raw driver table
+                st.download_button(
+                    "📥 Export raw driver breakdown (CSV)",
+                    data=drv_df_display.to_csv(index=False),
+                    file_name=f"drivers_raw_{selected_product}_{period_label(selected_period)}.csv",
+                    mime="text/csv"
+                )
+
                 # B. SS Attribution — mutually exclusive components that sum to total SS
                 st.markdown("---")
                 st.markdown("#### B. SS Attribution — Mutually exclusive components that SUM EXACTLY to Total Safety Stock")
@@ -1627,10 +1731,19 @@ if s_file and d_file and lt_file:
                 st.plotly_chart(fig_drv, use_container_width=True)
 
                 st.markdown("SS Attribution table (numbers and % of total SS)")
-                st.dataframe(df_format_for_display(ss_drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2),
-                                                  cols=['Units','Pct_of_total_SS'],
-                                                  two_decimals_cols=['Pct_of_total_SS']),
+                ss_attrib_df_formatted = df_format_for_display(ss_drv_df_display.rename(columns={'driver':'Driver','amount':'Units','pct_of_total_ss':'Pct_of_total_SS'}).round(2),
+                                                               cols=['Units','Pct_of_total_SS'],
+                                                               two_decimals_cols=['Pct_of_total_SS'])
+                st.dataframe(ss_attrib_df_formatted,
                              use_container_width=True)
+
+                # Export SS attribution
+                st.download_button(
+                    "📥 Export SS attribution (CSV)",
+                    data=ss_drv_df_display.to_csv(index=False),
+                    file_name=f"ss_attribution_{selected_product}_{period_label(selected_period)}.csv",
+                    mime="text/csv"
+                )
 
                 grand_forecast = mat_period_df['Forecast'].sum()
                 grand_net = mat_period_df['Agg_Future_Demand'].sum()
@@ -1652,6 +1765,14 @@ if s_file and d_file and lt_file:
                 </div>
                 """
                 st.markdown(summary_html, unsafe_allow_html=True)
+
+                # Export underlying material-period table
+                st.download_button(
+                    "📥 Export material-period data (CSV)",
+                    data=mat_period_df.to_csv(index=False),
+                    file_name=f"material_view_{selected_product}_{period_label(selected_period)}.csv",
+                    mime="text/csv"
+                )
 
 else:
     st.info("Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer.")
