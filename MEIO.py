@@ -2328,7 +2328,7 @@ if s_file and d_file and lt_file:
             )
 
             st.header(
-                "📦 View by Material (Single Material Focus + 8 Reasons for Inventory)"
+                "📦 View by Material (+ 8 Reasons for Inventory)"
             )
             st.markdown(
                 f"**Selected**: {selected_product} — {period_label(selected_period)}"
@@ -2748,24 +2748,7 @@ if s_file and d_file and lt_file:
                     ss_attrib_df_formatted, use_container_width=True
                 )
 
-                grand_forecast = mat_period_df["Forecast"].sum()
-                grand_ss = mat_period_df["Safety_Stock"].sum()
-                summary_html = f"""
-                <div style="margin-top:12px; font-size:0.86rem;">
-                  <table style="border-collapse:collapse;">
-                    <tr>
-                      <td style="padding:2px 12px;">&nbsp;</td>
-                      <td style="padding:2px 12px;">Total Local Demand</td>
-                      <td style="padding:2px 12px;">Total Safety Stock</td>
-                    </tr>
-                    <tr style="color:#666">
-                      <td style="padding:6px 12px;"><strong>Grand Totals</strong></td>
-                      <td style="padding:6px 12px;"><strong>{euro_format(grand_forecast, True)}</strong></td>
-                      <td style="padding:6px 12px;"><strong>{euro_format(grand_ss, True)}</strong></td>
-                    </tr>
-                  </table>
-                </div>
-                """
+
                 st.markdown(summary_html, unsafe_allow_html=True)
 
 else:
