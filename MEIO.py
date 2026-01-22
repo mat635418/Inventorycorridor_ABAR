@@ -23,7 +23,7 @@ LOGO_BASE_WIDTH = 160
 # Fixed conversion (30 days/month)
 days_per_month = 30
 
-st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.97 — Jan 2026</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.972 — Jan 2026</h1>", unsafe_allow_html=True)
 
 # Global CSS
 st.markdown(
@@ -393,7 +393,7 @@ def period_label(ts):
 # ----------------------
 # SIDEBAR
 # ----------------------
-with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
+with st.sidebar.expander("⚙��� Service Level Configuration", expanded=True):
     service_level = st.slider(
         "Service Level (%) — end-nodes (hop 0)",
         50.0,
@@ -1094,6 +1094,7 @@ if s_file and d_file and lt_file:
                 0
             )
 
+            # ------------ ORIGINAL CHART (kept for comparison) ------------
             traces = [
                 go.Scatter(
                     x=plot_full["Period"],
@@ -1130,6 +1131,155 @@ if s_file and d_file and lt_file:
                 xaxis=dict(tickformat="%b\n%Y"),
             )
             st.plotly_chart(fig, use_container_width=True)
+
+            # ------------ NEW "RISK-FIRST" CORRIDOR CHART ------------
+            st.markdown(
+                "<div style='margin-top:10px; font-size:0.9rem; color:#666;'>"
+                "⬇︎ Experimental risk-focused view (for comparison)</div>",
+                unsafe_allow_html=True,
+            )
+
+            # Colors
+            color_ss_line = "#d32f2f"          # red
+            color_ss_fill = "rgba(211,47,47,0.18)"
+            color_fcst = "#212121"             # dark grey
+            color_ext = "#1976d2"              # blue
+            color_corridor = "rgba(0,0,0,0.12)"
+            color_corridor_points = "rgba(0,0,0,0.35)"
+
+            fig2 = go.Figure()
+
+            # 1) Local forecast line
+            fig2.add_trace(
+                go.Scatter(
+                    x=plot_full["Period"],
+                    y=plot_full["Forecast"],
+                    mode="lines",
+                    name="Local Forecast",
+                    line=dict(color=color_fcst, width=2, dash="dot"),
+                    hovertemplate="<b>%{x|%b %Y}</b><br>"
+                                  "Local Forecast: %{y:,.0f}<extra></extra>",
+                )
+            )
+
+            # 2) Safety Stock as risk band on top of forecast
+            fig2.add_trace(
+                go.Scatter(
+                    x=plot_full["Period"],
+                    y=plot_full["Forecast"] + plot_full["Safety_Stock"],
+                    mode="lines",
+                    name="Safety Stock (Risk Buffer)",
+                    line=dict(color=color_ss_line, width=2.5),
+                    fill="tonexty",
+                    fillcolor=color_ss_fill,
+                    hovertemplate="<b>%{x|%b %Y}</b><br>"
+                                  "Corridor top (Fcst + SS): %{y:,.0f}<extra></extra>",
+                )
+            )
+
+            # 3) External Network Demand
+            fig2.add_trace(
+                go.Scatter(
+                    x=plot_full["Period"],
+                    y=plot_full["Agg_Future_External"],
+                    mode="lines+markers",
+                    name="External Network Demand (Downstream)",
+                    line=dict(color=color_ext, width=2, dash="dash"),
+                    marker=dict(size=5, symbol="circle"),
+                    hovertemplate="<b>%{x|%b %Y}</b><br>"
+                                  "External Network Demand: %{y:,.0f}<extra></extra>",
+                )
+            )
+
+            # 4) Max corridor reference
+            fig2.add_trace(
+                go.Scatter(
+                    x=plot_full["Period"],
+                    y=plot_full["Max_Corridor"],
+                    mode="lines+markers",
+                    name="Max Corridor (SS + Forecast)",
+                    line=dict(color=color_corridor, width=1),
+                    marker=dict(size=4, color=color_corridor_points),
+                    hovertemplate="<b>%{x|%b %Y}</b><br>"
+                                  "Max Corridor: %{y:,.0f}<extra></extra>",
+                )
+            )
+
+            # --- Annotate current period & coverage ---
+            current_idx = None
+            if CURRENT_MONTH_TS in list(plot_full["Period"].values):
+                current_idx = list(plot_full["Period"].values).index(CURRENT_MONTH_TS)
+
+            if current_idx is not None:
+                current_x = plot_full["Period"].iloc[current_idx]
+                current_fcst = plot_full["Forecast"].iloc[current_idx]
+                current_ss = plot_full["Safety_Stock"].iloc[current_idx]
+
+                fig2.add_vline(
+                    x=current_x,
+                    line_width=1.5,
+                    line_dash="dot",
+                    line_color="#9e9e9e",
+                    annotation_text="Current period",
+                    annotation_position="top left",
+                    annotation_font=dict(size=11, color="#616161"),
+                )
+
+                row_current = results[
+                    (results["Product"] == sku)
+                    & (results["Location"] == loc)
+                    & (results["Period"] == CURRENT_MONTH_TS)
+                ]
+                if not row_current.empty:
+                    dcov = row_current["Days_Covered_by_SS"].iloc[0]
+                    if pd.notna(dcov):
+                        coverage_label = f"{dcov:.1f} days coverage"
+                        fig2.add_annotation(
+                            x=current_x,
+                            y=current_fcst + current_ss,
+                            text=coverage_label,
+                            showarrow=True,
+                            arrowhead=2,
+                            arrowsize=1,
+                            arrowwidth=1,
+                            ax=0,
+                            ay=-40,
+                            bgcolor="rgba(255,255,255,0.9)",
+                            bordercolor=color_ss_line,
+                            borderwidth=1,
+                            font=dict(color=color_ss_line, size=11),
+                        )
+
+            fig2.update_layout(
+                title=dict(
+                    text="Risk-focused Inventory Corridor (Safety Stock highlighted in red)",
+                    x=0,
+                    xanchor="left",
+                    font=dict(size=14),
+                ),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="left",
+                    x=0,
+                    font=dict(size=11),
+                ),
+                xaxis_title="Period",
+                yaxis_title="Units",
+                xaxis=dict(
+                    tickformat="%b\n%Y",
+                    showgrid=False,
+                ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridcolor="rgba(0,0,0,0.05)",
+                    zeroline=False,
+                ),
+                margin=dict(l=40, r=10, t=60, b=40),
+            )
+
+            st.plotly_chart(fig2, use_container_width=True)
 
     # ---------------- TAB 2 ----------------
     with tab2:
@@ -1606,14 +1756,14 @@ if s_file and d_file and lt_file:
                 st.markdown(
                     '<div class="export-csv-btn">', unsafe_allow_html=True
                 )
-                st.download_button(
-                    "💾 Export CSV",
-                    data=eff_export.to_csv(index=False),
-                    file_name=f"efficiency_{sku}_{period_label(snapshot_period) if snapshot_period is not None else 'all'}.csv",
-                    mime="text/csv",
-                    key="eff_export_btn",
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
+            st.download_button(
+                "💾 Export CSV",
+                data=eff_export.to_csv(index=False),
+                file_name=f"efficiency_{sku}_{period_label(snapshot_period) if snapshot_period is not None else 'all'}.csv",
+                mime="text/csv",
+                key="eff_export_btn",
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown(
                 "<div style='height:6px'></div>", unsafe_allow_html=True
