@@ -1959,7 +1959,7 @@ if s_file and d_file and lt_file:
                 ]
                 table_html = """
                 <div class="calc-mapping-container" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif; font-size:13px;">
-                  <table style="width:30%; border-collapse:collapse;">
+                  <table style="width:40%; border-collapse:collapse;">
                     <thead>
                       <tr style="background:#f3f6fb;">
                         <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;white-space:nowrap;">Hop</th>
@@ -2003,7 +2003,7 @@ if s_file and d_file and lt_file:
                 days_cov_txt = (
                     f"{days_cov:.1f}" if pd.notna(days_cov) else "N/A"
                 )
-
+                st.markdown("---")
                 summary_html = f"""
                 <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px; font-size:13px;">
                   <div style="flex:0 0 48%;background:#e8f0ff;border-radius:8px;padding:12px;">
