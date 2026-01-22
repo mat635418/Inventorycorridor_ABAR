@@ -137,11 +137,12 @@ st.markdown(
         color: #555555;
         font-weight: 500;
         white-space: nowrap;
+        text-align: left;
       }
       .kpi-value {
         color: #111111;
         font-weight: 700;
-        text-align: right;
+        text-align: left;   /* left-align the numbers */
         white-space: nowrap;
       }
       .violin-box {
@@ -913,7 +914,7 @@ if s_file and d_file and lt_file:
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
-            # 2x2 KPI table: Avg Daily Demand & SS coverage (new layout like pic2)
+            # KPI table: headers top row, values bottom row; left aligned
             try:
                 summary_row = results[
                     (results["Product"] == sku)
@@ -2842,11 +2843,10 @@ if s_file and d_file and lt_file:
                     height=430,
                 )
 
-            # ---------- Violin plots ----------
+            # ---------- Separate Demand & LT variability plots ----------
             st.markdown("---")
-            st.markdown("**Per-material variability (Demand & Lead Time) — violins**")
+            st.markdown("**Per-material variability — separate plots for Demand and Lead Time**")
 
-            # Only show for ACTIVE materials (with non-zero Safety Stock in this period)
             active_products = agg_all.loc[agg_all["Safety_Stock"] > 0, "Product"].unique().tolist()
             active_products = sorted(active_products)
 
@@ -2855,56 +2855,62 @@ if s_file and d_file and lt_file:
                 if sub.empty:
                     continue
 
-                violin_rows = []
-
-                # Demand variability (per-node monthly std dev from Agg_Std_Hist)
-                if "Agg_Std_Hist" in sub.columns:
-                    for val in sub["Agg_Std_Hist"].dropna():
-                        violin_rows.append(
-                            {
-                                "Metric": "Demand StdDev (monthly units)",
-                                "Value": float(val),
-                            }
-                        )
-
-                # Lead-time variability (per-node LT_Std)
-                if "LT_Std" in sub.columns:
-                    for val in sub["LT_Std"].dropna():
-                        violin_rows.append(
-                            {
-                                "Metric": "Lead Time StdDev (days)",
-                                "Value": float(val),
-                            }
-                        )
-
-                if not violin_rows:
-                    # Skip if no metrics for this product
-                    continue
-
-                vdf = pd.DataFrame(violin_rows)
-
-                # Wrap each product's violin in a grey border box
                 with st.container():
                     st.markdown(
                         f"<div class='violin-box'><div class='violin-box-title'>{prod}</div>",
                         unsafe_allow_html=True,
                     )
-                    fig_v = px.violin(
-                        vdf,
-                        x="Metric",
-                        y="Value",
-                        color="Metric",
-                        box=True,
-                        points="all",
-                    )
-                    fig_v.update_layout(
-                        xaxis_title=None,
-                        yaxis_title=None,
-                        legend_title_text="Metric",
-                        height=320,
-                    )
-                    # Use a unique key per product to avoid StreamlitDuplicateElementId
-                    st.plotly_chart(fig_v, use_container_width=True, key=f"violin_{prod}")
+
+                    # Demand variability plot
+                    if "Agg_Std_Hist" in sub.columns and not sub["Agg_Std_Hist"].dropna().empty:
+                        vdf_demand = pd.DataFrame(
+                            {
+                                "Metric": ["Demand StdDev (monthly units)"] * sub["Agg_Std_Hist"].dropna().shape[0],
+                                "Value": sub["Agg_Std_Hist"].dropna().astype(float),
+                            }
+                        )
+                        fig_v_d = px.violin(
+                            vdf_demand,
+                            x="Metric",
+                            y="Value",
+                            color="Metric",
+                            box=True,
+                            points="all",
+                        )
+                        fig_v_d.update_layout(
+                            xaxis_title=None,
+                            yaxis_title=None,
+                            legend_title_text="Metric",
+                            height=300,
+                            title="Demand variability",
+                        )
+                        st.plotly_chart(fig_v_d, use_container_width=True, key=f"violin_demand_{prod}")
+
+                    # LT variability plot
+                    if "LT_Std" in sub.columns and not sub["LT_Std"].dropna().empty:
+                        vdf_lt = pd.DataFrame(
+                            {
+                                "Metric": ["Lead Time StdDev (days)"] * sub["LT_Std"].dropna().shape[0],
+                                "Value": sub["LT_Std"].dropna().astype(float),
+                            }
+                        )
+                        fig_v_lt = px.violin(
+                            vdf_lt,
+                            x="Metric",
+                            y="Value",
+                            color="Metric",
+                            box=True,
+                            points="all",
+                        )
+                        fig_v_lt.update_layout(
+                            xaxis_title=None,
+                            yaxis_title=None,
+                            legend_title_text="Metric",
+                            height=300,
+                            title="Lead Time variability",
+                        )
+                        st.plotly_chart(fig_v_lt, use_container_width=True, key=f"violin_lt_{prod}")
+
                     st.markdown("</div>", unsafe_allow_html=True)
 
 else:
