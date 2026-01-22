@@ -55,6 +55,16 @@ st.markdown(
       .main, .block-container, .stDataFrame, .stMarkdown, .stMetric {
         font-size: 0.88rem;
       }
+
+      /* Global style for generic "Export to CSV" buttons */
+      .export-csv-btn button {
+        background-color: #0b3d91 !important;
+        color: #ffffff !important;
+        border-radius: 999px !important;
+        padding: 0.3rem 0.9rem !important;
+        font-size: 0.8rem !important;
+        font-weight: 600 !important;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -835,10 +845,10 @@ if s_file and d_file and lt_file:
 
             demand_lookup = {}
             for n in all_nodes:
-                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': np.nan})
+                demand_lookup[n] = label_data.get((sku, n), {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': 0})
 
             for n in sorted(all_nodes):
-                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': np.nan})
+                m = demand_lookup.get(n, {'Forecast': 0, 'Agg_Future_Internal': 0, 'Agg_Future_External': 0, 'Safety_Stock': 0, 'Tier_Hops': np.nan, 'Service_Level_Node': np.nan, 'D_day': 0, 'Days_Covered_by_SS': 0})
                 # Node considered 'used' visually if any of the metrics are > 0
                 used = (float(m.get('Agg_Future_External', 0)) > 0) or (float(m.get('Forecast', 0)) > 0)
 
@@ -974,14 +984,17 @@ if s_file and d_file and lt_file:
 
             f_period = [period_label_map[lbl] for lbl in f_period_labels] if f_period_labels else []
 
-            # Small export button right under filters
-            st.download_button(
-                "Export filtered plan (CSV)",
-                data=results.to_csv(index=False),
-                file_name="filtered_plan.csv",
-                mime="text/csv",
-                key="full_plan_export"
-            )
+            # Generic Export to CSV button
+            with st.container():
+                st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
+                st.download_button(
+                    "⬇ Export to CSV",
+                    data=results.to_csv(index=False),
+                    file_name="filtered_plan.csv",
+                    mime="text/csv",
+                    key="full_plan_export",
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1042,19 +1055,23 @@ if s_file and d_file and lt_file:
             else:
                 eff_period = CURRENT_MONTH_TS
 
-            # Export snapshot right below filters
+            # Export snapshot
             snapshot_period = eff_period if eff_period in all_periods else (all_periods[-1] if all_periods else None)
             if snapshot_period is None:
                 eff_export = results[results['Product'] == sku].copy()
             else:
                 eff_export = results[(results['Product'] == sku) & (results['Period'] == snapshot_period)].copy()
-            st.download_button(
-                "Export efficiency snapshot (CSV)",
-                data=eff_export.to_csv(index=False),
-                file_name=f"efficiency_{sku}_{period_label(snapshot_period) if snapshot_period is not None else 'all'}.csv",
-                mime="text/csv",
-                key="eff_export_btn"
-            )
+
+            with st.container():
+                st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
+                st.download_button(
+                    "⬇ Export to CSV",
+                    data=eff_export.to_csv(index=False),
+                    file_name=f"efficiency_{sku}_{period_label(snapshot_period) if snapshot_period is not None else 'all'}.csv",
+                    mime="text/csv",
+                    key="eff_export_btn"
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1209,17 +1226,33 @@ if s_file and d_file and lt_file:
                 export_data = pd.DataFrame()
             else:
                 export_data = row_export
-            st.download_button(
-                "Export calculation trace row (CSV)",
-                data=export_data.to_csv(index=False),
-                file_name=f"calc_trace_{calc_sku}_{calc_loc}_{period_label(calc_period)}.csv",
-                mime="text/csv",
-                key="calc_export_btn"
-            )
+
+            with st.container():
+                st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
+                st.download_button(
+                    "⬇ Export to CSV",
+                    data=export_data.to_csv(index=False),
+                    file_name=f"calc_trace_{calc_sku}_{calc_loc}_{period_label(calc_period)}.csv",
+                    mime="text/csv",
+                    key="calc_export_btn"
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
+            # Narrower layout for first mapping table
+            st.markdown(
+                """
+                <style>
+                  .calc-mapping-container {
+                    max-width: 560px;
+                  }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+
             # Show selection at the start of the tab
             st.markdown(f"**Selected**: {calc_sku} — {calc_loc} — {period_label(calc_period)}")
             st.header("🧮 Transparent Calculation Engine & Scenario Simulation")
@@ -1248,12 +1281,12 @@ if s_file and d_file and lt_file:
                     (3, "85%", "Level-2 hub")
                 ]
                 table_html = """
-                <div style="max-width:640px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif; font-size:13px;">
+                <div class="calc-mapping-container" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif; font-size:13px;">
                   <table style="width:100%; border-collapse:collapse;">
                     <thead>
                       <tr style="background:#f3f6fb;">
-                        <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;">Hop</th>
-                        <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;">Service Level</th>
+                        <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;white-space:nowrap;">Hop</th>
+                        <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;white-space:nowrap;">Service Level</th>
                         <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;">Example / Role</th>
                       </tr>
                     </thead>
@@ -1266,8 +1299,8 @@ if s_file and d_file and lt_file:
                         row_style = ""
                     table_html += f"""
                       <tr style="{row_style}">
-                        <td style="padding:8px 10px;border:1px solid #eef6ff;">{h}</td>
-                        <td style="padding:8px 10px;border:1px solid #eef6ff;">{sl}</td>
+                        <td style="padding:8px 10px;border:1px solid #eef6ff;white-space:nowrap;">{h}</td>
+                        <td style="padding:8px 10px;border:1px solid #eef6ff;white-space:nowrap;">{sl}</td>
                         <td style="padding:8px 10px;border:1px solid #eef6ff;">{example}</td>
                       </tr>
                     """
@@ -1278,7 +1311,7 @@ if s_file and d_file and lt_file:
                 """
                 st.markdown("**Applied Hop → Service Level mapping (highlight shows which row was used for this node):**")
                 try:
-                    components.html(table_html, height=180)
+                    components.html(table_html, height=200)
                 except Exception:
                     st.markdown(table_html, unsafe_allow_html=True)
 
@@ -1331,7 +1364,28 @@ if s_file and d_file and lt_file:
                 st.markdown("**Values used for the calculation (highlighted above):**")
                 st.markdown(summary_html, unsafe_allow_html=True)
 
+                # 3. Resulting SS vs implemented SS (must be BEFORE Zero Demand rule section)
                 st.markdown("---")
+                st.subheader("3. Statistical Result vs Implemented Policy")
+                st.markdown("""
+                The engine first calculates a **statistical** Safety Stock (`Pre_Rule_SS`) based purely on demand and lead‑time uncertainty.
+                Business rules can then modify this value (zero‑demand rule, caps, explicit overrides).
+                """)
+
+                pre_rule_text = euro_format(row['Pre_Rule_SS'], True)
+                impl_text = euro_format(row['Safety_Stock'], True)
+                st.markdown(f"""
+                <div style="background:#e8f3ff;border-radius:12px;padding:10px 14px;margin-bottom:6px;border:1px solid #c5dbff;">
+                  <span style="font-size:13px;"><strong>🧮 Resulting Pre-rule SS (node-level)</strong>: {pre_rule_text} units</span>
+                </div>
+                """, unsafe_allow_html=True)
+                st.markdown(f"""
+                <div style="background:#e8f3ff;border-radius:12px;padding:10px 14px;margin-bottom:16px;border:1px solid #c5dbff;">
+                  <span style="font-size:13px;"><strong>📦 Implemented Safety Stock (after business rules)</strong>: {impl_text} units</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # 2. Statistical Calculation (kept section number as in UI flow)
                 st.subheader("2. Statistical Calculation (Actual — uses node-level SL/Z)")
                 # Recompute the same steps shown in the pipeline but using node_z (the node-specific Z) to reflect implemented SS
                 sigma_d_day = float(row['Agg_Std_Hist']) / math.sqrt(float(days_per_month))
@@ -1360,7 +1414,7 @@ if s_file and d_file and lt_file:
     7. Pre-rule SS (max of raw vs floor) = {max(raw_ss_calc, ss_floor):.2f} units
     """)
 
-                # Move Zero Demand / Capping diagnostics here (before Section 3/4)
+                # Zero Demand / Capping diagnostics now come AFTER the Pre‑rule vs Implemented box
                 c1, c2 = st.columns(2)
                 with c1:
                     st.markdown("**Zero Demand Rule**")
@@ -1385,42 +1439,6 @@ if s_file and d_file and lt_file:
                     else:
                         st.write("Capping logic disabled.")
 
-                # Reworked explanation section: FIRST explain why Pre-rule vs Implemented can differ
-                st.markdown("### 3. Why do we sometimes use a different SS than the pure statistical value?")
-                st.markdown("""
-                The engine first calculates a **statistical** Safety Stock (`Pre_Rule_SS`) based purely on demand and lead‑time uncertainty.
-                Then, business rules can modify this number:
-
-                - **Zero-demand rule**: if there is no network demand, SS is forced to zero.
-                - **Capping**: SS is constrained between a minimum and maximum % of network demand.
-                - **Policy overrides**: specific locations (e.g. B616) can be forced to zero regardless of the statistical result.
-
-                The two boxes below show:
-                """)
-                st.markdown("""
-                <div style="margin:8px 0;">
-                  <ul style="margin-top:4px; margin-bottom:4px;">
-                    <li><strong>Resulting Pre‑rule SS (node-level)</strong>: the statistical result <em>before</em> any business rules.</li>
-                    <li><strong>Implemented Safety Stock (after business rules)</strong>: the final value actually used in planning.</li>
-                  </ul>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # Light-blue boxes as in screenshot
-                pre_rule_text = euro_format(row['Pre_Rule_SS'], True)
-                impl_text = euro_format(row['Safety_Stock'], True)
-                st.markdown(f"""
-                <div style="background:#e8f3ff;border-radius:12px;padding:10px 14px;margin-bottom:6px;border:1px solid #c5dbff;">
-                  <span style="font-size:13px;"><strong>🧮 Resulting Pre-rule SS (node-level)</strong>: {pre_rule_text} units</span>
-                </div>
-                """, unsafe_allow_html=True)
-                st.markdown(f"""
-                <div style="background:#e8f3ff;border-radius:12px;padding:10px 14px;margin-bottom:16px;border:1px solid #c5dbff;">
-                  <span style="font-size:13px;"><strong>📦 Implemented Safety Stock (after business rules)</strong>: {impl_text} units</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # Zero / capping diagnostics explanation moves into main explanation already; keep equations as Section 4
                 st.subheader("4. Business Rules & Diagnostics — explanation & diagnostics")
                 st.markdown(r"""
                 Background & explanation of the calculation steps and business-rule adjustments.
@@ -1439,22 +1457,51 @@ if s_file and d_file and lt_file:
                 """)
                 st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
-                # ---- Scenario planning moved to the bottom as a dedicated, collapsed section ----
+                # ---- Scenario planning section (collapsed, with stronger styling) ----
                 st.markdown("---")
-                scen_style = """
-                <style>
-                  details.scenario-expander summary {
-                    font-size: 0.95rem;
-                    font-weight: 700;
-                    color: #0b4f9c;
-                  }
-                </style>
-                """
-                st.markdown(scen_style, unsafe_allow_html=True)
-                with st.expander("Scenario Planning — simulate alternative SL / LT assumptions (analysis-only)", expanded=False):
+                st.markdown(
+                    """
+                    <style>
+                      details.scenario-expander summary {
+                        font-size: 0.98rem !important;
+                        font-weight: 750 !important;
+                        color: #0b3d91 !important;
+                        list-style: none;
+                      }
+                      details.scenario-expander summary::-webkit-details-marker {
+                        display: none;
+                      }
+                      details.scenario-expander {
+                        border-radius: 10px;
+                        margin-top: 4px;
+                      }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                with st.expander("", expanded=False):
+                    # Inject our own styled header inside the expander to get the desired blue/gold look
                     st.markdown(
                         """
-                        <div style="border:1px solid #0b4f9c;border-radius:10px;background:#fff9e0;padding:12px;color:#0b4f9c;font-size:0.95rem;">
+                        <div style="
+                            background:#ffecb3;
+                            border:1px solid #f9c74f;
+                            border-radius:10px;
+                            padding:10px 14px;
+                            margin-bottom:10px;
+                            font-size:0.97rem;
+                            color:#0b3d91;
+                            font-weight:700;">
+                          ▶ Scenario Planning — simulate alternative SL / LT assumptions (analysis-only)
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    st.markdown(
+                        """
+                        <div style="border:1px solid #0b3d91;border-radius:10px;background:#fff9e0;padding:12px;color:#0b3d91;font-size:0.95rem;">
                           Use scenarios to test sensitivity to Service Level or Lead Time. Scenarios do not change implemented policy — they are analysis-only.
                         </div>
                         """,
@@ -1533,15 +1580,19 @@ if s_file and d_file and lt_file:
             else:
                 selected_period = CURRENT_MONTH_TS
 
-            # Export material-period data right below filters
+            # Export material-period data
             mat_period_export = results[(results['Product'] == selected_product) & (results['Period'] == selected_period)].copy()
-            st.download_button(
-                "Export material-period data (CSV)",
-                data=mat_period_export.to_csv(index=False),
-                file_name=f"material_view_{selected_product}_{period_label(selected_period)}.csv",
-                mime="text/csv",
-                key="mat_export_btn"
-            )
+
+            with st.container():
+                st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
+                st.download_button(
+                    "⬇ Export to CSV",
+                    data=mat_period_export.to_csv(index=False),
+                    file_name=f"material_view_{selected_product}_{period_label(selected_period)}.csv",
+                    mime="text/csv",
+                    key="mat_export_btn"
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
