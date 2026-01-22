@@ -21,7 +21,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.977 — Jan 2026</h1>",
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.985 — Jan 2026</h1>",
     unsafe_allow_html=True,
 )
 
@@ -749,6 +749,7 @@ if s_file and d_file and lt_file:
 
     stats["Local_Std"] = stats.apply(fill_local_std, axis=1)
 
+    # FIX: use correct keyword lt_mode_param and pass service_level explicitly
     results, reachable_map = run_pipeline(
         df_d=df_d,
         stats=stats,
@@ -756,7 +757,7 @@ if s_file and d_file and lt_file:
         service_level=service_level,
         transitive=use_transitive,
         rho=var_rho,
-        lt_mode=lt_mode,
+        lt_mode_param=lt_mode,
         zero_if_no_net_fcst=zero_if_no_net_fcst,
         apply_cap=apply_cap,
         cap_range=cap_range,
@@ -2206,7 +2207,6 @@ if s_file and d_file and lt_file:
             )
             st.subheader("📦 View by Material (+ 8 Reasons for Inventory)")
 
-            # --- main material-level metrics & attribution (unchanged) ---
             mat_period_df = results[
                 (results["Product"] == selected_product)
                 & (results["Period"] == selected_period)
@@ -2220,11 +2220,6 @@ if s_file and d_file and lt_file:
             total_net = network_total_forecast
             total_ss = mat_period_df["Safety_Stock"].sum()
             nodes_count = mat_period_df["Location"].nunique()
-            avg_ss_per_node = (
-                mat_period_df["Safety_Stock"].mean()
-                if nodes_count > 0
-                else 0
-            )
 
             try:
                 avg_days_covered = mat_period_df[
@@ -2692,7 +2687,6 @@ if s_file and d_file and lt_file:
                 0.0,
             )
 
-            # Keep floats for key columns to match mock-up; integer-like formatting will be applied via euro_format
             for c in [
                 "Network_Demand_Month",
                 "Local_Forecast_Month",
@@ -2703,7 +2697,6 @@ if s_file and d_file and lt_file:
                 if c in agg_all.columns:
                     agg_all[c] = agg_all[c].fillna(0.0)
 
-            # Coverage and ratio remain numeric (float) for display with decimals
             if "Avg_Day_Demand" in agg_all.columns:
                 agg_all["Avg_Day_Demand"] = agg_all["Avg_Day_Demand"].fillna(0.0)
             if "Avg_SS_Days_Coverage" in agg_all.columns:
@@ -2763,7 +2756,7 @@ if s_file and d_file and lt_file:
                     "Safety_Stock": "Calculated Safety Stock",
                     "Avg_SS_Days_Coverage": "SS Coverage (days)",
                     "Local_Forecast_Month": "Local Forecast (month)",
-                    "SS_to_Demand_Ratio_%": "SS / Demand (%)",
+                    "SS_to_Demand_Ratio_%" : "SS / Demand (%)",
                 }
                 agg_view = agg_view.rename(columns=rename_map)
 
@@ -2799,4 +2792,3 @@ else:
     st.info(
         "Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer."
     )
-
