@@ -1959,7 +1959,7 @@ if s_file and d_file and lt_file:
                 ]
                 table_html = """
                 <div class="calc-mapping-container" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif; font-size:13px;">
-                  <table style="width:100%; border-collapse:collapse;">
+                  <table style="width:30%; border-collapse:collapse;">
                     <thead>
                       <tr style="background:#f3f6fb;">
                         <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;white-space:nowrap;">Hop</th>
@@ -2060,7 +2060,7 @@ if s_file and d_file and lt_file:
                         font-size:0.97rem;
                         color:#0b3d91;
                         font-weight:700;">
-                      ▶ Scenario Planning — simulate alternative SL / LT assumptions (analysis‑only)
+                      SCENARIO PLANNING TOOL — simulate alternative SL / LT assumptions (analysis‑only)
                     </div>
                     """,
                     unsafe_allow_html=True,
