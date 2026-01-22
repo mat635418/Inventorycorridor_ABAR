@@ -21,7 +21,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.973 — Jan 2026</h1>",
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.976 — Jan 2026</h1>",
     unsafe_allow_html=True,
 )
 
@@ -697,7 +697,7 @@ if s_file and d_file and lt_file:
         st.stop()
 
     df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
-    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").to_timestamp()
+    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
 
     df_s["Consumption"] = clean_numeric(df_s["Consumption"])
     df_s["Forecast"] = clean_numeric(df_s["Forecast"])
