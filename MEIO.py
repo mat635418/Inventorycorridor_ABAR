@@ -147,9 +147,14 @@ st.markdown(
       .violin-box {
         border: 1px solid #dddddd;
         border-radius: 8px;
-        padding: 8px 10px;
+        padding: 8px 10px 4px 10px;
         margin-bottom: 10px;
         background: #f7f7f7;
+      }
+      .violin-box-title {
+        font-weight: 600;
+        margin-bottom: 4px;
+        color: #333333;
       }
     </style>
     """,
@@ -2841,8 +2846,9 @@ if s_file and d_file and lt_file:
             st.markdown("---")
             st.markdown("**Per-material variability (Demand & Lead Time) — violins**")
 
-            # Only show for products that appear in this period snapshot
-            active_products = sorted(snapshot_all["Product"].unique().tolist())
+            # Only show for ACTIVE materials (with non-zero Safety Stock in this period)
+            active_products = agg_all.loc[agg_all["Safety_Stock"] > 0, "Product"].unique().tolist()
+            active_products = sorted(active_products)
 
             for prod in active_products:
                 sub = snapshot_all[snapshot_all["Product"] == prod].copy()
@@ -2878,8 +2884,11 @@ if s_file and d_file and lt_file:
                 vdf = pd.DataFrame(violin_rows)
 
                 # Wrap each product's violin in a grey border box
-                st.markdown(f"<div class='violin-box'><strong>{prod}</strong></div>", unsafe_allow_html=True)
                 with st.container():
+                    st.markdown(
+                        f"<div class='violin-box'><div class='violin-box-title'>{prod}</div>",
+                        unsafe_allow_html=True,
+                    )
                     fig_v = px.violin(
                         vdf,
                         x="Metric",
@@ -2894,7 +2903,9 @@ if s_file and d_file and lt_file:
                         legend_title_text="Metric",
                         height=320,
                     )
-                    st.plotly_chart(fig_v, use_container_width=True)
+                    # Use a unique key per product to avoid StreamlitDuplicateElementId
+                    st.plotly_chart(fig_v, use_container_width=True, key=f"violin_{prod}")
+                    st.markdown("</div>", unsafe_allow_html=True)
 
 else:
     st.info(
