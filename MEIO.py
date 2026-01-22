@@ -21,7 +21,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.985 — Jan 2026</h1>",
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.988 — Jan 2026</h1>",
     unsafe_allow_html=True,
 )
 
@@ -959,9 +959,14 @@ if s_file and d_file and lt_file:
             fig = go.Figure(traces)
             fig.update_layout(
                 legend=dict(orientation="h"),
-                xaxis_title="Period",
-                yaxis_title="Units",
-                xaxis=dict(tickformat="%b\n%Y"),
+                # Remove axis titles per request
+                xaxis_title=None,
+                yaxis_title=None,
+                xaxis=dict(
+                    tickformat="%b\n%Y",
+                    # Force showing every month on the x-axis
+                    dtick="M1",
+                ),
             )
             st.plotly_chart(fig, use_container_width=True)
 
@@ -1462,6 +1467,11 @@ if s_file and d_file and lt_file:
                     },
                     title="Policy Impact & Efficiency Ratio (Bubble Size = SS_to_FCST_Ratio)",
                 )
+                # Remove axis titles for this graph
+                fig_eff.update_layout(
+                    xaxis_title=None,
+                    yaxis_title=None,
+                )
                 st.plotly_chart(fig_eff, use_container_width=True)
             with c2:
                 st.markdown("**Status Breakdown**")
@@ -1620,6 +1630,11 @@ if s_file and d_file and lt_file:
                             line=dict(color="blue", dash="dot"),
                         ),
                     ]
+                )
+                # Remove axis titles for this graph (tab5)
+                fig_hist.update_layout(
+                    xaxis_title=None,
+                    yaxis_title=None,
                 )
                 st.plotly_chart(fig_hist, use_container_width=True)
 
@@ -2702,7 +2717,7 @@ if s_file and d_file and lt_file:
             if "Avg_SS_Days_Coverage" in agg_all.columns:
                 agg_all["Avg_SS_Days_Coverage"] = agg_all["Avg_SS_Days_Coverage"].fillna(0.0)
             if "SS_to_Demand_Ratio_%" in agg_all.columns:
-                agg_all["SS_to_Demand_Ratio_%"] = agg_all["SS_to_Demand_Ratio_%" ].fillna(0.0)
+                agg_all["SS_to_Demand_Ratio_%" ] = agg_all["SS_to_Demand_Ratio_%" ].fillna(0.0)
 
             with st.container():
                 st.markdown(
@@ -2792,3 +2807,4 @@ else:
     st.info(
         "Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer."
     )
+
