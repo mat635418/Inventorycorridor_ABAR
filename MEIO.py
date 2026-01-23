@@ -1096,6 +1096,12 @@ if s_file and d_file and lt_file:
                     },
                 )
 
+            # Assign fixed x positions for B616 (left), BEEX (middle), LUEX (right)
+            fixed_positions = {"B616": -400, "BEEX": 0, "LUEX": 400}
+            # Assign y = 0 for hubs, and stack other nodes vertically under the "closest" hub
+            y_by_hub = {"B616": 0, "BEEX": 0, "LUEX": 0}
+            hub_list = ["B616", "BEEX", "LUEX"]
+
             for n in sorted(all_nodes):
                 m = demand_lookup.get(
                     n,
@@ -1138,6 +1144,18 @@ if s_file and d_file and lt_file:
                     f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\n"
                     f"SL: {sl_label}"
                 )
+
+                if n in fixed_positions:
+                    x = fixed_positions[n]
+                    y = 0
+                    physics = False
+                else:
+                    # attach other nodes roughly under the middle hub by default
+                    x = fixed_positions["BEEX"]
+                    y_by_hub["BEEX"] -= 120
+                    y = y_by_hub["BEEX"]
+                    physics = True
+
                 net.add_node(
                     n,
                     label=lbl,
@@ -1145,6 +1163,10 @@ if s_file and d_file and lt_file:
                     color={"background": bg, "border": border},
                     shape="box",
                     font={"color": font_color, "size": size},
+                    x=x,
+                    y=y,
+                    fixed=True if n in fixed_positions else False,
+                    physics=physics,
                 )
 
             if not sku_lt.empty:
@@ -1167,6 +1189,7 @@ if s_file and d_file and lt_file:
                 """
                 {
                   "physics": {
+                    "enabled": true,
                     "stabilization": { "iterations": 200, "fit": true }
                   },
                   "nodes": { "borderWidthSelected": 2 },
@@ -1185,21 +1208,39 @@ if s_file and d_file and lt_file:
               .vis-network { display:block !important; margin: 0 auto !important; }
             </style>
             """
+            # Improved centering & zoom-out for initial view
             injection_js = """
             <script>
-              setTimeout(function(){
+              function centerAndZoomNetwork() {
                 try {
                   if (typeof network !== 'undefined') {
-                    network.fit();
+                    network.fit({animation: false});
                     var bounds = network.getBoundingBox();
                     if (bounds) {
                       var cx = (bounds.right + bounds.left) / 2;
                       var cy = (bounds.top + bounds.bottom) / 2;
-                      network.moveTo({position: {x: cx, y: cy}});
+                      var dx = bounds.right - bounds.left;
+                      var dy = bounds.top - bounds.bottom;
+                      var maxSpan = Math.max(dx, dy);
+                      var scale = 1.0;
+                      if (maxSpan > 0) {
+                        // Increase denominator if you want to zoom further out
+                        scale = 1.5 * (maxSpan / 1000.0);
+                      }
+                      if (!isFinite(scale) || scale <= 0) {
+                        scale = 1.0;
+                      }
+                      network.moveTo({
+                        position: {x: cx, y: cy},
+                        scale: 1.0 / scale,
+                        animation: false
+                      });
                     }
                   }
                 } catch (e) { console.warn("Network fit/center failed:", e); }
-              }, 700);
+              }
+              // run once after load
+              setTimeout(centerAndZoomNetwork, 800);
             </script>
             """
             if "</head>" in html_text:
@@ -1332,7 +1373,17 @@ if s_file and d_file and lt_file:
                 filtered = filtered[filtered["Period"].isin(f_period)]
             filtered = filtered.sort_values("Safety_Stock", ascending=False)
 
-            filtered_display = hide_zero_rows(filtered)
+            # remove fully-empty rows from the full plan view
+            filtered_display = hide_zero_rows(
+                filtered,
+                check_cols=[
+                    "Safety_Stock",
+                    "Forecast",
+                    "Agg_Future_Demand",
+                    "Agg_Future_Internal",
+                    "Agg_Future_External",
+                ],
+            )
 
             display_cols = [
                 c
@@ -1447,7 +1498,7 @@ if s_file and d_file and lt_file:
                 product=sku,
                 period_text=period_label(eff_period),
             )
-            st.subheader("⚖️ Efficiency & Policy Analysis")
+            st.subheader("⚖️ Efficiency & Policy Analysis — Ratio vs Safety Stock (scatter chart)")
 
             snapshot_period = (
                 eff_period
@@ -1493,31 +1544,47 @@ if s_file and d_file and lt_file:
             )
             m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
             st.markdown("---")
-            c1, c2 = st.columns([3, 2])
-            with c1:
-                fig_eff = px.scatter(
-                    eff_display,
-                    x="Agg_Future_Demand",
+
+            # New, more focused visualization:
+            # scatter of Nodes sorted by SS_to_FCST_Ratio vs Safety_Stock (log-scaled if needed)
+            if not eff_display.empty:
+                st.markdown(
+                    "This scatter plot shows, for the selected material and period, "
+                    "how much Safety Stock each node carries versus its SS-to-demand ratio. "
+                    "Use it to spot outlier nodes with unusually high ratios."
+                )
+                eff_display_plot = eff_display.copy()
+                eff_display_plot["Location_Label"] = eff_display_plot["Location"]
+                fig_eff_new = px.scatter(
+                    eff_display_plot,
+                    x="SS_to_FCST_Ratio",
                     y="Safety_Stock",
+                    hover_name="Location_Label",
                     color="Adjustment_Status",
-                    size="SS_to_FCST_Ratio",
-                    hover_name="Location",
                     color_discrete_map={
                         "Optimal (Statistical)": "#00CC96",
                         "Capped (High)": "#EF553B",
                         "Capped (Low)": "#636EFA",
                         "Forced to Zero": "#AB63FA",
                     },
-                    title="Policy Impact & Efficiency Ratio (Bubble Size = SS_to_FCST_Ratio)",
+                    labels={
+                        "SS_to_FCST_Ratio": "SS / Demand Ratio",
+                        "Safety_Stock": "Safety Stock (units)",
+                    },
+                    title=None,
                 )
-                fig_eff.update_layout(
-                    xaxis_title=None,
-                    yaxis_title=None,
+                fig_eff_new.update_layout(
+                    xaxis_title="SS / Demand Ratio",
+                    yaxis_title="Safety Stock (units)",
                 )
-                st.plotly_chart(fig_eff, use_container_width=True)
-            with c2:
+                st.plotly_chart(fig_eff_new, use_container_width=True)
+
+            st.markdown("---")
+            c1, c2 = st.columns([3, 2])
+            with c1:
                 st.markdown("**Status Breakdown**")
                 st.table(eff_display["Adjustment_Status"].value_counts())
+            with c2:
                 st.markdown(
                     "**Top Nodes by Safety Stock (snapshot)**"
                 )
@@ -1682,7 +1749,7 @@ if s_file and d_file and lt_file:
                 st.markdown("---")
 
                 st.subheader(
-                    "Aggregated Network History (Selected Product)"
+                    "Aggregated Network History (Selected Product) — formatted by month"
                 )
                 net_table = (
                     hist_net[hist_net["Product"] == h_sku]
@@ -1716,24 +1783,21 @@ if s_file and d_file and lt_file:
                 c_net1, c_net2 = st.columns([3, 1])
                 with c_net1:
                     if not net_table.empty:
+                        # format Period as JAN 2026 etc. and numbers as integer, '.' thousands separator
+                        net_table_fmt = net_table.copy()
+                        net_table_fmt["Period"] = net_table_fmt["Period"].apply(period_label)
+                        for col in ["Network_Consumption", "Network_Forecast_Hist"]:
+                            net_table_fmt[col] = net_table_fmt[col].apply(
+                                lambda v: euro_format(v, always_two_decimals=False, show_zero=True)
+                            )
                         st.dataframe(
-                            df_format_for_display(
-                                net_table[
-                                    [
-                                        "Period",
-                                        "Network_Consumption",
-                                        "Network_Forecast_Hist",
-                                    ]
-                                ].copy(),
-                                cols=[
+                            net_table_fmt[
+                                [
+                                    "Period",
                                     "Network_Consumption",
                                     "Network_Forecast_Hist",
-                                ],
-                                two_decimals_cols=[
-                                    "Network_Consumption",
-                                    "Network_Forecast_Hist",
-                                ],
-                            ),
+                                ]
+                            ],
                             use_container_width=True,
                         )
                     else:
