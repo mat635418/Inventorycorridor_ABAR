@@ -19,7 +19,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.998 — Jan 2026</h1>",
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v1.05 — Jan 2026</h1>",
     unsafe_allow_html=True,
 )
 
@@ -1422,25 +1422,27 @@ if s_file and d_file and lt_file:
                     (results["Product"] == sku)
                     & (results["Period"] == snapshot_period)
                 ].copy()
-            eff["SS_to_Demand_Ratio"] = (
-                eff["Safety_Stock"]
-                / eff["Agg_Future_Demand"].replace(0, np.nan)
+
+            # Ratio against local Forecast (FC), not Agg_Future_Demand
+            eff["SS_to_Forecast_Ratio"] = (
+                eff["Safety_Stock"] / eff["Forecast"].replace(0, np.nan)
             ).fillna(0)
+
             eff_display = hide_zero_rows(eff)
+
             total_ss_sku = eff["Safety_Stock"].sum()
-            total_net_demand_sku = eff["Agg_Future_Demand"].sum()
-            sku_ratio = total_ss_sku / total_net_demand_sku if total_net_demand_sku > 0 else 0
+            total_fc_sku = eff["Forecast"].sum()
+            sku_ratio = total_ss_sku / total_fc_sku if total_fc_sku > 0 else 0
+            sku_ratio_pct = sku_ratio * 100
+
             all_res = results[results["Period"] == snapshot_period] if snapshot_period is not None else results
-            global_ratio = (
-                all_res["Safety_Stock"].sum()
-                / all_res["Agg_Future_Demand"].replace(0, np.nan).sum()
-                if not all_res.empty
-                else 0
-            )
+            global_fc = all_res["Forecast"].sum() if not all_res.empty else 0
+            global_ratio = (all_res["Safety_Stock"].sum() / global_fc) if global_fc > 0 else 0
+            global_ratio_pct = global_ratio * 100
 
             m1, m2, m3 = st.columns(3)
-            m1.metric("Network Ratio (Material)", f"{sku_ratio:.2f}")
-            m2.metric("Global Network Ratio (All Items)", f"{global_ratio:.2f}")
+            m1.metric("Network Ratio (SS/FC)", f"{sku_ratio_pct:.0f}%")
+            m2.metric("Global Network Ratio (SS/FC)", f"{global_ratio_pct:.0f}%")
             m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
             st.markdown("---")
 
@@ -1455,7 +1457,7 @@ if s_file and d_file and lt_file:
                                 "Location",
                                 "Adjustment_Status",
                                 "Safety_Stock",
-                                "SS_to_Demand_Ratio",
+                                "SS_to_Forecast_Ratio",
                             ]
                         ]
                         .head(10)
@@ -1464,8 +1466,8 @@ if s_file and d_file and lt_file:
                     eff_top_display["Safety_Stock"] = eff_top_display["Safety_Stock"].round(0)
                     eff_top_fmt = df_format_for_display(
                         eff_top_display,
-                        cols=["Safety_Stock", "SS_to_Demand_Ratio"],
-                        two_decimals_cols=["SS_to_Demand_Ratio"],
+                        cols=["Safety_Stock", "SS_to_Forecast_Ratio"],
+                        two_decimals_cols=["SS_to_Forecast_Ratio"],
                     )
                     eff_top_styled = eff_top_fmt.style.set_table_styles(
                         [
