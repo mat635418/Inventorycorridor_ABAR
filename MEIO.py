@@ -1003,6 +1003,104 @@ if s_file and d_file and lt_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
+    # TAB 2 — Network Topology
+    with tab2:
+        col_main, col_badge = st.columns([17, 3])
+        with col_badge:
+            render_logo_above_parameters(scale=1.5)
+            nt_prod_default = default_product
+            nt_prod_index = all_products.index(nt_prod_default) if all_products else 0
+            nt_prod = st.selectbox("MATERIAL", all_products, index=nt_prod_index, key="nt_prod")
+
+            if period_labels:
+                try:
+                    nt_label_default = period_label(default_period) if default_period is not None else period_labels[-1]
+                    nt_period_index = (
+                        period_labels.index(nt_label_default)
+                        if nt_label_default in period_labels
+                        else len(period_labels) - 1
+                    )
+                except Exception:
+                    nt_period_index = len(period_labels) - 1
+                nt_label = st.selectbox("PERIOD", period_labels, index=nt_period_index, key="nt_period_label")
+                nt_period = period_label_map.get(nt_label, default_period)
+            else:
+                nt_period = CURRENT_MONTH_TS
+
+        with col_main:
+            render_selection_line("Selected:", product=nt_prod, period_text=period_label(nt_period))
+            st.subheader("🕸️ Network Topology")
+
+            # Filter edges for product (if Product column exists)
+            if "Product" in df_lt.columns:
+                edges_df = df_lt[df_lt["Product"] == nt_prod].copy()
+            else:
+                edges_df = df_lt.copy()
+
+            # Build node metrics from results for selected period/product
+            node_metrics = results[(results["Product"] == nt_prod) & (results["Period"] == nt_period)].copy()
+
+            # If no node metrics for the selected period, fall back to any period for the product
+            if node_metrics.empty:
+                node_metrics = results[results["Product"] == nt_prod].copy()
+
+            # Collect all nodes from edges and node_metrics
+            nodes_set = set(node_metrics["Location"].unique().tolist())
+            nodes_set |= set(edges_df["From_Location"].dropna().unique().tolist())
+            nodes_set |= set(edges_df["To_Location"].dropna().unique().tolist())
+
+            if len(nodes_set) == 0 and edges_df.empty:
+                st.warning("No network data available for the selected product.")
+            else:
+                # Prepare color mapping by adjustment status
+                color_map = {
+                    "Forced to Zero": "#e53935",
+                    "Capped (High)": "#fb8c00",
+                    "Capped (Low)": "#43a047",
+                    "Optimal (Statistical)": "#1e88e5",
+                }
+
+                # Create PyVis network
+                net = Network(height="640px", width="100%", bgcolor="#ffffff", font_color="#222")
+                net.barnes_hut(gravity=-20000, central_gravity=0.3, spring_length=150, spring_strength=0.02)
+
+                # Add nodes
+                for n in sorted(nodes_set):
+                    nm = node_metrics[node_metrics["Location"] == n]
+                    ss = float(nm["Safety_Stock"].sum()) if not nm.empty else 0.0
+                    fc = float(nm["Forecast"].sum()) if not nm.empty else 0.0
+                    status = nm["Adjustment_Status"].iloc[0] if not nm.empty else "Optimal (Statistical)"
+                    color = color_map.get(status, "#607D8B")
+
+                    # Node size scaled by sqrt(SS)
+                    size = int(10 + min(40, math.sqrt(max(ss, 0))))
+                    title = f"Location: {n}<br>Safety Stock: {int(ss):,}<br>Forecast: {int(fc):,}<br>Status: {status}"
+                    net.add_node(n, label=n, title=title, color=color, size=size)
+
+                # Add edges
+                for _, r in edges_df.iterrows():
+                    f = r.get("From_Location", None)
+                    t = r.get("To_Location", None)
+                    if pd.isna(f) or pd.isna(t):
+                        continue
+                    lt_mean = r.get("Lead_Time_Days", np.nan)
+                    lt_std = r.get("Lead_Time_Std_Dev", np.nan)
+                    title = f"LT: {'' if pd.isna(lt_mean) else int(lt_mean)} days ± {'' if pd.isna(lt_std) else int(lt_std)}"
+                    width = max(1, int((float(lt_mean) if not pd.isna(lt_mean) else 5) / 5))
+                    net.add_edge(str(f), str(t), title=title, color="#9E9E9E", width=width)
+
+                # Render to HTML and display
+                html_file = "network_topology.html"
+                try:
+                    net.show(html_file)
+                    with open(html_file, "r", encoding="utf-8") as f:
+                        html = f.read()
+                    components.html(html, height=660, scrolling=True)
+                except Exception as e:
+                    st.error(f"Unable to render network topology: {e}")
+                    st.write("Displaying a fallback table of routes:")
+                    st.dataframe(edges_df[["From_Location", "To_Location", "Lead_Time_Days", "Lead_Time_Std_Dev"]], use_container_width=True)
+
     # TAB 3
     with tab3:
         col_main, col_badge = st.columns([17, 3])
