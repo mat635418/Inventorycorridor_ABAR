@@ -549,7 +549,7 @@ def run_pipeline(
                 for k in kids:
                     if k not in visited:
                         visited.add(k)
-                        q.append(k, depth + 1)
+                        q.append((k, depth + 1))
             if not found:
                 distances[n] = 0
         return distances
