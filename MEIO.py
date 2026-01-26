@@ -1,6 +1,5 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — JAN 2026
-
 import os
 import math
 import collections
@@ -22,7 +21,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v1.08 — Jan 2026</h1>",
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.998 — Jan 2026</h1>",
     unsafe_allow_html=True,
 )
 
@@ -1425,26 +1424,26 @@ if s_file and d_file and lt_file:
                     (results["Product"] == sku)
                     & (results["Period"] == snapshot_period)
                 ].copy()
+
+            # Ratio per node in the table: SS / Forecast (months of FC held by SS)
             eff["SS_to_Demand_Ratio"] = (
-                eff["Safety_Stock"]
-                / eff["Agg_Future_Demand"].replace(0, np.nan)
+                eff["Safety_Stock"] / eff["Forecast"].replace(0, np.nan)
             ).fillna(0)
+
             eff_display = hide_zero_rows(eff)
+
+            # Totals for the selection
             total_ss_sku = eff["Safety_Stock"].sum()
-            total_net_demand_sku = eff["Agg_Future_Demand"].sum()
-            sku_ratio = total_ss_sku / total_net_demand_sku if total_net_demand_sku > 0 else 0
-            all_res = results[results["Period"] == snapshot_period] if snapshot_period is not None else results
-            global_ratio = (
-                all_res["Safety_Stock"].sum()
-                / all_res["Agg_Future_Demand"].replace(0, np.nan).sum()
-                if not all_res.empty
-                else 0
-            )
-
-            # NEW: total forecast for the selection (monthly local forecast sum)
             total_forecast_sku = eff["Forecast"].sum()
+            sku_ratio = total_ss_sku / total_forecast_sku if total_forecast_sku > 0 else 0
 
-            # UPDATED metrics (add Total Forecast and rename ratios; keep two decimals)
+            # Global totals for the snapshot period (all materials)
+            all_res = results[results["Period"] == snapshot_period] if snapshot_period is not None else results
+            global_total_ss = all_res["Safety_Stock"].sum()
+            global_total_fc = all_res["Forecast"].sum()
+            global_ratio = global_total_ss / global_total_fc if global_total_fc > 0 else 0
+
+            # Metrics block (two ratios + totals)
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Months of FC held by SS (selection)", f"{sku_ratio:.2f}")
             m2.metric("Months of FC held by SS (all materials)", f"{global_ratio:.2f}")
