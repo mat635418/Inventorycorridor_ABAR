@@ -159,7 +159,7 @@ st.markdown(
         white-space: nowrap;
       }}
 
-      /* Violin-style boxes (not heavily used but nice container) */
+      /* Violin-style boxes */
       .violin-box {{
         border: 1px solid #dddddd;
         border-radius: 8px;
@@ -454,7 +454,7 @@ def run_pipeline(
     Core MEIO pipeline.
     Incorporates hop-tier SL mapping, LT variance logic and business rules.
     """
-    # Hop → node SL (Image 3: “Operational control through statistical rigor”)
+    # Hop → node SL
     hop_to_sl = {0: 0.99, 1: 0.95, 2: 0.90, 3: 0.85}
 
     def sl_for_hop(h: int) -> float:
@@ -564,7 +564,7 @@ def run_pipeline(
     res["lt_component"] = np.array(lt_component_list)
     combined_variance = (demand_component + res["lt_component"]).clip(lower=0)
 
-    # Hop distances for SL tiering (Image 2 + 4 – network-level vs local)
+    # Hop distances for SL tiering
     def compute_hop_distances_for_product(p_lt_df, prod_nodes):
         children = {}
         for _, r in p_lt_df.iterrows():
@@ -626,7 +626,7 @@ def run_pipeline(
         nodes = prod_to_nodes.get(p, set())
         prod_distances[p] = compute_hop_distances_for_product(p_routes, nodes)
 
-    # Special policy overrides (aligned with your current logic)
+    # Special policy overrides
     special_hops = {"B616": 4, "BEEX": 3, "LUEX": 2}
     for p, distances in prod_distances.items():
         for node, fixed_hop in special_hops.items():
@@ -653,7 +653,7 @@ def run_pipeline(
     res["Service_Level_Node"] = np.array(sl_list)
     res["Z_node"] = res["Service_Level_Node"].apply(lambda x: float(norm.ppf(x)))
 
-    # Core SS statistic (before floors / caps)
+    # Core SS statistic
     res["SS_stat"] = res.apply(
         lambda r: r["Z_node"] * math.sqrt(max(0.0, (demand_component.loc[r.name] + r["lt_component"]))),
         axis=1,
@@ -756,7 +756,7 @@ with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
         help="Lower and upper bounds (as % of aggregated network demand) applied to Safety Stock.",
     )
 
-with st.sidebar.expander("📡 Operational Workflow (Slides 1–2)", expanded=True):
+with st.sidebar.expander("📡 Operational Workflow", expanded=True):
     st.markdown(
         """
         **1. Ingest** — Upload `sales.csv`, `demand.csv`, `leadtime.csv`  
@@ -837,7 +837,7 @@ if s_file and d_file and lt_file:
     df_lt["Lead_Time_Days"] = clean_numeric(df_lt["Lead_Time_Days"])
     df_lt["Lead_Time_Std_Dev"] = clean_numeric(df_lt["Lead_Time_Std_Dev"])
 
-    # Local stats (“Dynamic Safety Stock” building block – Image 3)
+    # Local stats
     stats = (
         df_s.groupby(["Product", "Location"])["Consumption"]
         .agg(["mean", "std"])
@@ -928,7 +928,7 @@ if s_file and d_file and lt_file:
     period_labels = list(period_label_map.keys())
 
     # -----------------------------------------------------------------
-    # TABS (aligned conceptually with your slides)
+    # TABS
     # -----------------------------------------------------------------
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
@@ -944,7 +944,7 @@ if s_file and d_file and lt_file:
         ]
     )
 
-    # TAB 1 – Inventory Corridor (ties to “Purpose” & “Key Benefits”)
+    # TAB 1 – Inventory Corridor
     with tab1:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -994,7 +994,7 @@ if s_file and d_file and lt_file:
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
-            # Small KPI tile (dynamic SS + days coverage)
+            # Small KPI tile
             try:
                 summary_row = results[
                     (results["Product"] == sku)
@@ -1106,7 +1106,7 @@ if s_file and d_file and lt_file:
                 unsafe_allow_html=True,
             )
 
-    # TAB 2 – Network Topology (Image 3 & 4)
+    # TAB 2 – Network Topology
     with tab2:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1339,7 +1339,7 @@ if s_file and d_file and lt_file:
                 unsafe_allow_html=True,
             )
 
-    # TAB 3 – Full Plan (export + exec table)
+    # TAB 3 – Full Plan
     with tab3:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1482,7 +1482,7 @@ if s_file and d_file and lt_file:
             )
             st.dataframe(disp, use_container_width=True, height=700)
 
-    # TAB 4 – Efficiency / Policy (months of FC, status mix)
+    # TAB 4 – Efficiency Analysis
     with tab4:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1625,7 +1625,7 @@ if s_file and d_file and lt_file:
                 else:
                     st.write("No non-zero nodes for this selection.")
 
-    # TAB 5 – Forecast Accuracy (network vs local)
+    # TAB 5 – Forecast Accuracy
     with tab5:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1880,9 +1880,11 @@ if s_file and d_file and lt_file:
                   </table>
                 </div>
                 """
+
                 st.markdown(
-                    "**Hop → Service Level mapping (highlight = hop used for this node):**"
+                    "**Hop → Service Level mapping (highlight = hop used for this node):**",
                 )
+                # BUG FIX: render as HTML, not code
                 st.markdown(table_html, unsafe_allow_html=True)
 
                 avg_daily = row.get("D_day", np.nan)
@@ -2090,7 +2092,7 @@ if s_file and d_file and lt_file:
                     )
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-    # TAB 7 – By Material: 8 reasons for SS, waterfall
+    # TAB 7 – By Material: 8 reasons for SS, with sunburst
     with tab7:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -2167,10 +2169,6 @@ if s_file and d_file and lt_file:
             ].copy()
             mat_period_df_display = hide_zero_rows(mat_period_df)
             total_forecast = mat_period_df["Forecast"].sum()
-            network_total_forecast = df_d[
-                (df_d["Product"] == selected_product)
-                & (df_d["Period"] == selected_period)
-            ]["Forecast"].sum()
             total_ss = mat_period_df["Safety_Stock"].sum()
             nodes_count = mat_period_df["Location"].nunique()
 
@@ -2264,58 +2262,55 @@ if s_file and d_file and lt_file:
                     * 100
                 )
 
-                st.markdown("#### A. Raw driver values (interpretation view)")
-                pastel_colors = px.colors.qualitative.Pastel
-                fig_drv_raw = go.Figure()
-                color_slice = (
-                    pastel_colors[: len(drv_df_display)]
-                    if len(drv_df_display) > 0
-                    else pastel_colors
-                )
-                fig_drv_raw.add_trace(
-                    go.Bar(
-                        x=drv_df_display["driver"],
-                        y=drv_df_display["amount"],
-                        marker_color=color_slice,
-                    )
-                )
-                annotations_raw = []
-                for _, rowd in drv_df_display.iterrows():
-                    annotations_raw.append(
-                        dict(
-                            x=rowd["driver"],
-                            y=rowd["amount"],
-                            text=f"{rowd['pct_of_total_ss']:.1f}%",
-                            showarrow=False,
-                            yshift=8,
-                        )
-                    )
-                fig_drv_raw.update_layout(
-                    title=f"{selected_product} — Raw Drivers (not SS-attribution)",
-                    xaxis_title="Driver",
-                    yaxis_title="Units",
-                    annotations=annotations_raw,
-                    height=420,
-                )
-                st.plotly_chart(fig_drv_raw, use_container_width=True)
-                st.dataframe(
-                    df_format_for_display(
-                        drv_df_display.rename(
-                            columns={
-                                "driver": "Driver",
-                                "amount": "Units",
-                                "pct_of_total_ss": "Pct_of_raw_sum",
-                            }
-                        ).round(2),
-                        cols=["Units", "Pct_of_raw_sum"],
-                        two_decimals_cols=["Pct_of_raw_sum"],
-                    ),
-                    use_container_width=True,
-                )
+                # NEW: table + sunburst side by side
+                st.markdown("### A. Raw driver values (interpretation view)")
+                left_col, right_col = st.columns([7, 3])
 
+                with left_col:
+                    st.dataframe(
+                        df_format_for_display(
+                            drv_df_display.rename(
+                                columns={
+                                    "driver": "Driver",
+                                    "amount": "Units",
+                                    "pct_of_total_ss": "Pct_of_raw_sum",
+                                }
+                            ).round(2),
+                            cols=["Units", "Pct_of_raw_sum"],
+                            two_decimals_cols=["Pct_of_raw_sum"],
+                        ),
+                        use_container_width=True,
+                    )
+
+                with right_col:
+                    if not drv_df_display.empty:
+                        sb = px.sunburst(
+                            drv_df_display,
+                            names="driver",
+                            parents=["Inventory Drivers"] * len(drv_df_display),
+                            values="amount",
+                            color="amount",
+                            color_continuous_scale=px.colors.sequential.Blues,
+                        )
+                        sb.update_layout(
+                            margin=dict(l=0, r=0, t=30, b=0),
+                            height=280,
+                            coloraxis_showscale=False,
+                            title=dict(
+                                text="Share of Raw Drivers",
+                                x=0.5,
+                                xanchor="center",
+                                font=dict(size=12),
+                            ),
+                        )
+                        st.plotly_chart(sb, use_container_width=True)
+                    else:
+                        st.write("No non-zero drivers to visualize.")
+
+                # Attribution waterfall (unchanged logic)
                 st.markdown("---")
                 st.markdown(
-                    "#### B. SS Attribution — mutually exclusive components that sum to total Safety Stock"
+                    "### B. SS Attribution — mutually exclusive components that sum to total Safety Stock"
                 )
                 per_node = mat.copy()
                 per_node["is_forced_zero"] = per_node["Adjustment_Status"] == "Forced to Zero"
@@ -2460,7 +2455,7 @@ if s_file and d_file and lt_file:
                 )
                 st.dataframe(ss_attrib_df_formatted, use_container_width=True)
 
-    # TAB 8 – All Materials Overview (exec)
+    # TAB 8 – All Materials Overview
     with tab8:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -2534,7 +2529,7 @@ if s_file and d_file and lt_file:
             if "Avg_SS_Days_Coverage" in agg_all.columns:
                 agg_all["Avg_SS_Days_Coverage"] = agg_all["Avg_SS_Days_Coverage"].fillna(0.0)
             if "SS_to_Demand_Ratio_%" in agg_all.columns:
-                agg_all["SS_to_Demand_Ratio_%"] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
+                agg_all["SS_to_Demand_Ratio_%" ] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
 
             with st.container():
                 st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
