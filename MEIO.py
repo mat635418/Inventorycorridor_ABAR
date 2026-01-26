@@ -103,11 +103,11 @@ st.markdown(
         display: none;
       }
       details summary:before {
-        content: "▶ ";
+        content: "> ";
         font-size: 0.8rem;
       }
       details[open] summary:before {
-        content: "▼ ";
+        content: "> ";
       }
       .all-mat-details {
         margin: 0;
@@ -549,7 +549,7 @@ def run_pipeline(
                 for k in kids:
                     if k not in visited:
                         visited.add(k)
-                        q.append((k, depth + 1))
+                        q.append(k, depth + 1)
             if not found:
                 distances[n] = 0
         return distances
@@ -1228,14 +1228,12 @@ if s_file and d_file and lt_file:
             # Display metrics: convert to decimal comma and add Total FC metric
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Months of FC held as SS (selection)", decimal_comma(sku_ratio, 2))
-            m2.metric("Months of FC held as SS (segment)", decimal_comma(global_ratio, 2))
+            m2.metric("Months of FC held as SS (all Materials)", decimal_comma(global_ratio, 2))
             m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
             m4.metric("Total FC for Material", euro_format(int(total_fc_sku), True))
 
-            # Explanatory sentence
-            st.markdown(
-                f"we are holding {decimal_comma(sku_ratio, 2)} months of FC as safety stock, while for the WHOLE segment we are holding {decimal_comma(global_ratio, 2)} months of FC"
-            )
+            # blank row instead of sentence
+            st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
             st.markdown("---")
 
@@ -1498,9 +1496,8 @@ if s_file and d_file and lt_file:
                 period_text=period_label(calc_period),
             )
             st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
-            st.write(
-                "See how changing service level or lead-time assumptions affects safety stock."
-            )
+            # blank row instead of explanatory sentence
+            st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
             z_current = norm.ppf(service_level)
 
@@ -2220,7 +2217,7 @@ if s_file and d_file and lt_file:
             with st.container():
                 st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
                 st.download_button(
-                    "💾 Export CSV (All Materials Snapshot)",
+                    "💾 Export CSV",
                     data=agg_all.to_csv(index=False),
                     file_name=f"all_materials_{period_label(selected_period_all)}.csv",
                     mime="text/csv",
@@ -2259,7 +2256,7 @@ if s_file and d_file and lt_file:
                     "Avg_Day_Demand": "Avg Daily Demand",
                     "Safety_Stock": "Calculated Safety Stock",
                     "Avg_SS_Days_Coverage": "SS Coverage (days)",
-                    "Local_Forecast (month)": "Local Forecast (month)",
+                    "Local_Forecast_Month": "Local Forecast (month)",
                     "SS_to_Demand_Ratio_%": "SS / Demand (%)",
                 }
                 agg_view = agg_view.rename(columns=rename_map)
