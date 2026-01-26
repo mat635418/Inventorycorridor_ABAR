@@ -1422,7 +1422,7 @@ if s_file and d_file and lt_file:
                     (results["Product"] == sku)
                     & (results["Period"] == snapshot_period)
                 ].copy()
-            eff["SS_to_FCST_Ratio"] = (
+            eff["SS_to_Demand_Ratio"] = (
                 eff["Safety_Stock"]
                 / eff["Agg_Future_Demand"].replace(0, np.nan)
             ).fillna(0)
@@ -1455,7 +1455,7 @@ if s_file and d_file and lt_file:
                                 "Location",
                                 "Adjustment_Status",
                                 "Safety_Stock",
-                                "SS_to_FCST_Ratio",
+                                "SS_to_Demand_Ratio",
                             ]
                         ]
                         .head(10)
@@ -1464,8 +1464,8 @@ if s_file and d_file and lt_file:
                     eff_top_display["Safety_Stock"] = eff_top_display["Safety_Stock"].round(0)
                     eff_top_fmt = df_format_for_display(
                         eff_top_display,
-                        cols=["Safety_Stock", "SS_to_FCST_Ratio"],
-                        two_decimals_cols=["SS_to_FCST_Ratio"],
+                        cols=["Safety_Stock", "SS_to_Demand_Ratio"],
+                        two_decimals_cols=["SS_to_Demand_Ratio"],
                     )
                     eff_top_styled = eff_top_fmt.style.set_table_styles(
                         [
