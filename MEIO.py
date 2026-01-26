@@ -1,6 +1,5 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — JAN 2026
-
 import os
 import math
 import collections
@@ -22,7 +21,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v1.05 — Jan 2026</h1>",
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.998 — Jan 2026</h1>",
     unsafe_allow_html=True,
 )
 
@@ -208,13 +207,6 @@ def euro_format(x, always_two_decimals: bool = True, show_zero: bool = False) ->
         rounded = int(round(abs(xv)))
         s = f"{rounded:,}".replace(",", ".")
         return f"-{s}" if neg else s
-    except Exception:
-        return str(x)
-
-
-def decimal_comma(x, digits: int = 2) -> str:
-    try:
-        return f"{float(x):.{digits}f}".replace(".", ",")
     except Exception:
         return str(x)
 
@@ -1006,6 +998,226 @@ if s_file and d_file and lt_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
+    # TAB 2
+    with tab2:
+        col_main, col_badge = st.columns([17, 3])
+        with col_badge:
+            render_logo_above_parameters(scale=1.5)
+
+            sku_default = default_product
+            sku_index = all_products.index(sku_default) if all_products else 0
+            sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="network_sku")
+
+            if period_labels:
+                try:
+                    default_label = period_label(default_period) if default_period is not None else period_labels[-1]
+                    period_index = period_labels.index(default_label) if default_label in period_labels else len(period_labels) - 1
+                except Exception:
+                    period_index = len(period_labels) - 1
+                chosen_label = st.selectbox(
+                    "PERIOD",
+                    period_labels,
+                    index=period_index,
+                    key="network_period",
+                )
+                chosen_period = period_label_map.get(chosen_label, default_period)
+            else:
+                chosen_period = CURRENT_MONTH_TS
+
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        with col_main:
+            render_selection_line("Selected:", product=sku, period_text=period_label(chosen_period))
+            st.subheader("🕸️ Network Topology")
+
+            st.markdown(
+                """
+                <style>
+                    iframe {
+                        display: block;
+                        margin-left: auto;
+                        margin-right: auto;
+                        border: none;
+                    }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            label_data = (
+                results[results["Period"] == chosen_period]
+                .set_index(["Product", "Location"])
+                .to_dict("index")
+            )
+            sku_lt = df_lt[df_lt["Product"] == sku] if "Product" in df_lt.columns else df_lt.copy()
+
+            net = Network(
+                height="1200px",
+                width="100%",
+                directed=True,
+                bgcolor="#ffffff",
+                font_color="#222222",
+            )
+
+            hubs = {"B616", "BEEX", "LUEX"}
+            if not sku_lt.empty:
+                froms = set(sku_lt["From_Location"].dropna().unique().tolist())
+                tos = set(sku_lt["To_Location"].dropna().unique().tolist())
+                all_nodes = froms.union(tos).union(hubs)
+            else:
+                all_nodes = set(hubs)
+
+            demand_lookup = {}
+            for n in all_nodes:
+                demand_lookup[n] = label_data.get(
+                    (sku, n),
+                    {
+                        "Forecast": 0,
+                        "Agg_Future_Internal": 0,
+                        "Agg_Future_External": 0,
+                        "Safety_Stock": 0,
+                        "Tier_Hops": np.nan,
+                        "Service_Level_Node": np.nan,
+                        "D_day": 0,
+                        "Days_Covered_by_SS": np.nan,
+                    },
+                )
+
+            for n in sorted(all_nodes):
+                m = demand_lookup.get(
+                    n,
+                    {
+                        "Forecast": 0,
+                        "Agg_Future_Internal": 0,
+                        "Agg_Future_External": 0,
+                        "Safety_Stock": 0,
+                        "Tier_Hops": np.nan,
+                        "Service_Level_Node": np.nan,
+                        "D_day": 0,
+                        "Days_Covered_by_SS": np.nan,
+                    },
+                )
+                used = float(m.get("Agg_Future_External", 0)) > 0 or float(m.get("Forecast", 0)) > 0
+
+                if n == "B616":
+                    bg, border, font_color, size = "#dcedc8", "#8bc34a", "#0b3d91", 14
+                elif n in {"BEEX", "LUEX"}:
+                    bg, border, font_color, size = "#bbdefb", "#64b5f6", "#0b3d91", 14
+                else:
+                    if used:
+                        bg, border, font_color, size = "#fff9c4", "#fbc02d", "#222222", 12
+                    else:
+                        bg, border, font_color, size = "#f7f7f7", "#e0e0e0", "#b0b0b0", 10
+
+                sl_node = m.get("Service_Level_Node", None)
+                if pd.notna(sl_node):
+                    try:
+                        sl_label = f"{float(sl_node) * 100:.2f}%"
+                    except Exception:
+                        sl_label = str(sl_node)
+                else:
+                    sl_label = "-"
+
+                lbl = (
+                    f"{n}\n"
+                    f"LDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\n"
+                    f"EXT: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\n"
+                    f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\n"
+                    f"SL: {sl_label}"
+                )
+                net.add_node(
+                    n,
+                    label=lbl,
+                    title=lbl,
+                    color={"background": bg, "border": border},
+                    shape="box",
+                    font={"color": font_color, "size": size},
+                )
+
+            if not sku_lt.empty:
+                for _, r in sku_lt.iterrows():
+                    from_n, to_n = r["From_Location"], r["To_Location"]
+                    if pd.isna(from_n) or pd.isna(to_n):
+                        continue
+                    from_used = float(demand_lookup.get(from_n, {}).get("Agg_Future_External", 0)) > 0 or float(
+                        demand_lookup.get(from_n, {}).get("Forecast", 0)
+                    ) > 0
+                    to_used = float(demand_lookup.get(to_n, {}).get("Agg_Future_External", 0)) > 0 or float(
+                        demand_lookup.get(to_n, {}).get("Forecast", 0)
+                    ) > 0
+                    edge_color = "#dddddd" if not from_used and not to_used else "#888888"
+                    lt_val = r.get("Lead_Time_Days", 0)
+                    label = f"{int(lt_val)}d" if not pd.isna(lt_val) else ""
+                    net.add_edge(from_n, to_n, label=label, color=edge_color)
+
+            net.set_options(
+                """
+                {
+                  "physics": {
+                    "enabled": true,
+                    "stabilization": { "iterations": 200, "fit": true }
+                  },
+                  "nodes": { "borderWidthSelected": 2 },
+                  "interaction": { "hover": true, "zoomView": true, "dragView": true, "dragNodes": true },
+                  "layout": { "improvedLayout": true }
+                }
+                """
+            )
+            tmpfile = "net.html"
+            net.save_graph(tmpfile)
+            html_text = open(tmpfile, "r", encoding="utf-8").read()
+            injection_css = """
+            <style>
+              html, body { height: 100%; margin: 0; padding: 0; }
+              #mynetwork {
+                display:flex !important;
+                align-items:center;
+                justify-content:center;
+                height:1200px !important;
+                width:100% !important;
+              }
+              .vis-network {
+                display:block !important;
+                margin: 0 auto !important;
+              }
+            </style>
+            """
+            injection_js = """
+            <script>
+              function fitAndCenterNetwork() {
+                try {
+                  if (typeof network !== 'undefined') {
+                    network.fit({ animation: false });
+                  }
+                } catch (e) {
+                  console.warn("Network fit failed:", e);
+                }
+              }
+              setTimeout(fitAndCenterNetwork, 700);
+            </script>
+            """
+            if "</head>" in html_text:
+                html_text = html_text.replace("</head>", injection_css + "</head>", 1)
+            if "</body>" in html_text:
+                html_text = html_text.replace("</body>", injection_js + "</body>", 1)
+            else:
+                html_text += injection_js
+            components.html(html_text, height=1250)
+
+            st.markdown(
+                """
+                <div style="text-align:center; font-size:12px; padding:8px 0;">
+                  <div style="display:inline-block; background:#f7f9fc; padding:8px 12px; border-radius:8px;">
+                    <strong>Legend:</strong><br/>
+                    LDD = Local Direct Demand (local forecast) &nbsp;&nbsp;|&nbsp;&nbsp;
+                    EXT = External Demand (downstream forecasts rolled-up) &nbsp;&nbsp;|&nbsp;&nbsp;
+                    SS  = Safety Stock (final policy value)
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
     # TAB 3
     with tab3:
         col_main, col_badge = st.columns([17, 3])
@@ -1212,34 +1424,26 @@ if s_file and d_file and lt_file:
                     (results["Product"] == sku)
                     & (results["Period"] == snapshot_period)
                 ].copy()
-
-            # Ratio against local Forecast (FC), not Agg_Future_Demand
-            eff["SS_to_Forecast_Ratio"] = (
-                eff["Safety_Stock"] / eff["Forecast"].replace(0, np.nan)
+            eff["SS_to_Demand_Ratio"] = (
+                eff["Safety_Stock"]
+                / eff["Agg_Future_Demand"].replace(0, np.nan)
             ).fillna(0)
-
             eff_display = hide_zero_rows(eff)
-
             total_ss_sku = eff["Safety_Stock"].sum()
-            total_fc_sku = eff["Forecast"].sum()
-            sku_ratio = total_ss_sku / total_fc_sku if total_fc_sku > 0 else 0  # months of FC held as SS
-
+            total_net_demand_sku = eff["Agg_Future_Demand"].sum()
+            sku_ratio = total_ss_sku / total_net_demand_sku if total_net_demand_sku > 0 else 0
             all_res = results[results["Period"] == snapshot_period] if snapshot_period is not None else results
-            global_fc = all_res["Forecast"].sum() if not all_res.empty else 0
-            global_ratio = (all_res["Safety_Stock"].sum() / global_fc) if global_fc > 0 else 0  # months of FC held as SS
-
-            # Display metrics: convert to decimal comma and add Total FC metric
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Months of FC held as SS (selection)", decimal_comma(sku_ratio, 2))
-            m2.metric("Months of FC held as SS (segment)", decimal_comma(global_ratio, 2))
-            m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
-            m4.metric("Total FC for Material", euro_format(int(total_fc_sku), True))
-
-            # Explanatory sentence
-            st.markdown(
-                f"we are holding {decimal_comma(sku_ratio, 2)} months of FC as safety stock, while for the WHOLE segment we are holding {decimal_comma(global_ratio, 2)} months of FC"
+            global_ratio = (
+                all_res["Safety_Stock"].sum()
+                / all_res["Agg_Future_Demand"].replace(0, np.nan).sum()
+                if not all_res.empty
+                else 0
             )
 
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Network Ratio (Material)", f"{sku_ratio:.2f}")
+            m2.metric("Global Network Ratio (All Items)", f"{global_ratio:.2f}")
+            m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
             st.markdown("---")
 
             c1, c2 = st.columns([7, 3])
@@ -1253,7 +1457,7 @@ if s_file and d_file and lt_file:
                                 "Location",
                                 "Adjustment_Status",
                                 "Safety_Stock",
-                                "SS_to_Forecast_Ratio",
+                                "SS_to_Demand_Ratio",
                             ]
                         ]
                         .head(10)
@@ -1262,8 +1466,8 @@ if s_file and d_file and lt_file:
                     eff_top_display["Safety_Stock"] = eff_top_display["Safety_Stock"].round(0)
                     eff_top_fmt = df_format_for_display(
                         eff_top_display,
-                        cols=["Safety_Stock", "SS_to_Forecast_Ratio"],
-                        two_decimals_cols=["SS_to_Forecast_Ratio"],
+                        cols=["Safety_Stock", "SS_to_Demand_Ratio"],
+                        two_decimals_cols=["SS_to_Demand_Ratio"],
                     )
                     eff_top_styled = eff_top_fmt.style.set_table_styles(
                         [
@@ -2262,7 +2466,7 @@ if s_file and d_file and lt_file:
                     "Avg_Day_Demand": "Avg Daily Demand",
                     "Safety_Stock": "Calculated Safety Stock",
                     "Avg_SS_Days_Coverage": "SS Coverage (days)",
-                    "Local_Forecast (month)": "Local Forecast (month)",
+                    "Local_Forecast_Month": "Local Forecast (month)",
                     "SS_to_Demand_Ratio_%": "SS / Demand (%)",
                 }
                 agg_view = agg_view.rename(columns=rename_map)
