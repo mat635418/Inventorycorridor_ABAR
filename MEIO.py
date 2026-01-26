@@ -1,5 +1,6 @@
 # Multi-Echelon Inventory Optimizer — Raw Materials
 # Developed by mat635418 — JAN 2026
+
 import os
 import math
 import collections
@@ -21,7 +22,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v0.998 — Jan 2026</h1>",
+    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v1.08 — Jan 2026</h1>",
     unsafe_allow_html=True,
 )
 
@@ -1440,10 +1441,15 @@ if s_file and d_file and lt_file:
                 else 0
             )
 
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Network Ratio (Material)", f"{sku_ratio:.2f}")
-            m2.metric("Global Network Ratio (All Items)", f"{global_ratio:.2f}")
+            # NEW: total forecast for the selection (monthly local forecast sum)
+            total_forecast_sku = eff["Forecast"].sum()
+
+            # UPDATED metrics (add Total Forecast and rename ratios; keep two decimals)
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Months of FC held by SS (selection)", f"{sku_ratio:.2f}")
+            m2.metric("Months of FC held by SS (all materials)", f"{global_ratio:.2f}")
             m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
+            m4.metric("Total Forecast", euro_format(int(total_forecast_sku), True))
             st.markdown("---")
 
             c1, c2 = st.columns([7, 3])
@@ -2427,7 +2433,7 @@ if s_file and d_file and lt_file:
             with st.container():
                 st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
                 st.download_button(
-                    "💾 Export CSV (All Materials Snapshot)",
+                    "💾 Export CSV",
                     data=agg_all.to_csv(index=False),
                     file_name=f"all_materials_{period_label(selected_period_all)}.csv",
                     mime="text/csv",
