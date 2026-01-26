@@ -1039,12 +1039,9 @@ if s_file and d_file and lt_file:
 
             # Build node metrics from results for selected period/product
             node_metrics = results[(results["Product"] == nt_prod) & (results["Period"] == nt_period)].copy()
-
-            # If no node metrics for the selected period, fall back to any period for the product
             if node_metrics.empty:
                 node_metrics = results[results["Product"] == nt_prod].copy()
 
-            # Collect all nodes from edges and node_metrics
             nodes_set = set(node_metrics["Location"].unique().tolist())
             nodes_set |= set(edges_df["From_Location"].dropna().unique().tolist())
             nodes_set |= set(edges_df["To_Location"].dropna().unique().tolist())
@@ -1060,46 +1057,93 @@ if s_file and d_file and lt_file:
                     "Optimal (Statistical)": "#1e88e5",
                 }
 
-                # Create PyVis network
-                net = Network(height="640px", width="100%", bgcolor="#ffffff", font_color="#222")
-                net.barnes_hut(gravity=-20000, central_gravity=0.3, spring_length=150, spring_strength=0.02)
-
-                # Add nodes
-                for n in sorted(nodes_set):
-                    nm = node_metrics[node_metrics["Location"] == n]
-                    ss = float(nm["Safety_Stock"].sum()) if not nm.empty else 0.0
-                    fc = float(nm["Forecast"].sum()) if not nm.empty else 0.0
-                    status = nm["Adjustment_Status"].iloc[0] if not nm.empty else "Optimal (Statistical)"
-                    color = color_map.get(status, "#607D8B")
-
-                    # Node size scaled by sqrt(SS)
-                    size = int(10 + min(40, math.sqrt(max(ss, 0))))
-                    title = f"Location: {n}<br>Safety Stock: {int(ss):,}<br>Forecast: {int(fc):,}<br>Status: {status}"
-                    net.add_node(n, label=n, title=title, color=color, size=size)
-
-                # Add edges
-                for _, r in edges_df.iterrows():
-                    f = r.get("From_Location", None)
-                    t = r.get("To_Location", None)
-                    if pd.isna(f) or pd.isna(t):
-                        continue
-                    lt_mean = r.get("Lead_Time_Days", np.nan)
-                    lt_std = r.get("Lead_Time_Std_Dev", np.nan)
-                    title = f"LT: {'' if pd.isna(lt_mean) else int(lt_mean)} days ± {'' if pd.isna(lt_std) else int(lt_std)}"
-                    width = max(1, int((float(lt_mean) if not pd.isna(lt_mean) else 5) / 5))
-                    net.add_edge(str(f), str(t), title=title, color="#9E9E9E", width=width)
-
-                # Render to HTML and display
-                html_file = "network_topology.html"
+                # Try PyVis; if it fails (e.g., template missing), fall back to Plotly Sankey
                 try:
-                    net.show(html_file)
-                    with open(html_file, "r", encoding="utf-8") as f:
-                        html = f.read()
+                    net = Network(height="640px", width="100%", bgcolor="#ffffff", font_color="#222")
+                    net.barnes_hut(gravity=-20000, central_gravity=0.3, spring_length=150, spring_strength=0.02)
+
+                    for n in sorted(nodes_set):
+                        nm = node_metrics[node_metrics["Location"] == n]
+                        ss = float(nm["Safety_Stock"].sum()) if not nm.empty else 0.0
+                        fc = float(nm["Forecast"].sum()) if not nm.empty else 0.0
+                        status = nm["Adjustment_Status"].iloc[0] if not nm.empty else "Optimal (Statistical)"
+                        color = color_map.get(status, "#607D8B")
+                        size = int(10 + min(40, math.sqrt(max(ss, 0))))
+                        title = f"Location: {n}<br>Safety Stock: {int(ss):,}<br>Forecast: {int(fc):,}<br>Status: {status}"
+                        net.add_node(str(n), label=str(n), title=title, color=color, size=size)
+
+                    for _, r in edges_df.iterrows():
+                        f = r.get("From_Location", None)
+                        t = r.get("To_Location", None)
+                        if pd.isna(f) or pd.isna(t):
+                            continue
+                        lt_mean = r.get("Lead_Time_Days", np.nan)
+                        lt_std = r.get("Lead_Time_Std_Dev", np.nan)
+                        title = f"LT: {'' if pd.isna(lt_mean) else int(lt_mean)} days ± {'' if pd.isna(lt_std) else int(lt_std)}"
+                        width = max(1, int((float(lt_mean) if not pd.isna(lt_mean) else 5) / 5))
+                        net.add_edge(str(f), str(t), title=title, color="#9E9E9E", width=width)
+
+                    # Prefer generate_html; if unavailable, save_graph
+                    html = None
+                    try:
+                        html = net.generate_html()
+                    except Exception:
+                        pass
+                    if html is None:
+                        html_file = "network_topology.html"
+                        net.save_graph(html_file)
+                        with open(html_file, "r", encoding="utf-8") as f:
+                            html = f.read()
                     components.html(html, height=660, scrolling=True)
+
                 except Exception as e:
-                    st.error(f"Unable to render network topology: {e}")
-                    st.write("Displaying a fallback table of routes:")
-                    st.dataframe(edges_df[["From_Location", "To_Location", "Lead_Time_Days", "Lead_Time_Std_Dev"]], use_container_width=True)
+                    st.warning("PyVis rendering failed. Showing fallback topology view.")
+                    # Fallback Plotly Sankey
+                    labels = sorted(list(nodes_set))
+                    index_map = {lbl: i for i, lbl in enumerate(labels)}
+                    sources = []
+                    targets = []
+                    values = []
+                    for _, r in edges_df.iterrows():
+                        f = r.get("From_Location", None)
+                        t = r.get("To_Location", None)
+                        if pd.isna(f) or pd.isna(t):
+                            continue
+                        if f in index_map and t in index_map:
+                            sources.append(index_map[f])
+                            targets.append(index_map[t])
+                            # Use forecast on 'from' node as proxy flow if available, else 1
+                            nm = node_metrics[node_metrics["Location"] == f]
+                            flow = float(nm["Forecast"].sum()) if not nm.empty else 1.0
+                            values.append(max(flow, 1.0))
+
+                    node_colors = []
+                    for lbl in labels:
+                        nm = node_metrics[node_metrics["Location"] == lbl]
+                        status = nm["Adjustment_Status"].iloc[0] if not nm.empty else "Optimal (Statistical)"
+                        node_colors.append(color_map.get(status, "#607D8B"))
+
+                    if sources and targets:
+                        sankey = go.Figure(
+                            go.Sankey(
+                                node=dict(
+                                    label=labels,
+                                    color=node_colors,
+                                    pad=12,
+                                    thickness=18,
+                                ),
+                                link=dict(
+                                    source=sources,
+                                    target=targets,
+                                    value=values,
+                                    color="rgba(158,158,158,0.4)",
+                                ),
+                            )
+                        )
+                        sankey.update_layout(height=640, margin=dict(l=10, r=10, t=10, b=10))
+                        st.plotly_chart(sankey, use_container_width=True)
+                    else:
+                        st.info("No directed routes to display for the selected product/period.")
 
     # TAB 3
     with tab3:
@@ -1308,7 +1352,6 @@ if s_file and d_file and lt_file:
                     & (results["Period"] == snapshot_period)
                 ].copy()
 
-            # Ratio against local Forecast (FC), not Agg_Future_Demand
             eff["SS_to_Forecast_Ratio"] = (
                 eff["Safety_Stock"] / eff["Forecast"].replace(0, np.nan)
             ).fillna(0)
@@ -1317,20 +1360,18 @@ if s_file and d_file and lt_file:
 
             total_ss_sku = eff["Safety_Stock"].sum()
             total_fc_sku = eff["Forecast"].sum()
-            sku_ratio = total_ss_sku / total_fc_sku if total_fc_sku > 0 else 0  # months of FC held as SS
+            sku_ratio = total_ss_sku / total_fc_sku if total_fc_sku > 0 else 0
 
             all_res = results[results["Period"] == snapshot_period] if snapshot_period is not None else results
             global_fc = all_res["Forecast"].sum() if not all_res.empty else 0
-            global_ratio = (all_res["Safety_Stock"].sum() / global_fc) if global_fc > 0 else 0  # months of FC held as SS
+            global_ratio = (all_res["Safety_Stock"].sum() / global_fc) if global_fc > 0 else 0
 
-            # Display metrics: convert to decimal comma and add Total FC metric
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Months of FC held as SS (selection)", decimal_comma(sku_ratio, 2))
             m2.metric("Months of FC held as SS (all Materials)", decimal_comma(global_ratio, 2))
             m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
             m4.metric("Total FC for Material", euro_format(int(total_fc_sku), True))
 
-            # blank row instead of sentence
             st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
             st.markdown("---")
@@ -1594,7 +1635,6 @@ if s_file and d_file and lt_file:
                 period_text=period_label(calc_period),
             )
             st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
-            # blank row instead of explanatory sentence
             st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
             z_current = norm.ppf(service_level)
