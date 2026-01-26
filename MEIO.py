@@ -1440,10 +1440,15 @@ if s_file and d_file and lt_file:
                 else 0
             )
 
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Network Ratio (Material)", f"{sku_ratio:.2f}")
-            m2.metric("Global Network Ratio (All Items)", f"{global_ratio:.2f}")
+            # NEW: total forecast for the selection (monthly local forecast sum)
+            total_forecast_sku = eff["Forecast"].sum()
+
+            # UPDATED metrics (add Total Forecast and rename 2 ratios)
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Months of FC held by SS (selection)", f"{sku_ratio:.2f}")
+            m2.metric("Months of FC held by SS (all materials)", f"{global_ratio:.2f}")
             m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
+            m4.metric("Total Forecast", euro_format(int(total_forecast_sku), True))
             st.markdown("---")
 
             c1, c2 = st.columns([7, 3])
@@ -2427,7 +2432,7 @@ if s_file and d_file and lt_file:
             with st.container():
                 st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
                 st.download_button(
-                    "💾 Export CSV (All Materials Snapshot)",
+                    "💾 Export CSV",
                     data=agg_all.to_csv(index=False),
                     file_name=f"all_materials_{period_label(selected_period_all)}.csv",
                     mime="text/csv",
