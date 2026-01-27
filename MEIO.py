@@ -20,6 +20,9 @@ LOGO_FILENAME = "GY_logo.jpg"
 LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
+# --- New: show logo.svg above the main title ---
+st.image("logo.svg", width=150)
+
 st.markdown(
     "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v1.05 — Jan 2026</h1>",
     unsafe_allow_html=True,
