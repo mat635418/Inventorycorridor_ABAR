@@ -214,13 +214,23 @@ def euro_format(x, always_two_decimals: bool = True, show_zero: bool = False) ->
         return str(x)
 
 
-def df_format_for_display(df: pd.DataFrame, cols=None, two_decimals_cols=None) -> pd.DataFrame:
+def df_format_for_display(
+    df: pd.DataFrame,
+    cols=None,
+    two_decimals_cols=None,
+) -> pd.DataFrame:
+    """
+    Format numeric columns in a DataFrame for display:
+    - Integers with euro_format (thousands separated by dots).
+    - Selected columns in `two_decimals_cols` forced to 2 decimals.
+    """
     d = df.copy()
     if cols is None:
         cols = [c for c in d.columns if d[c].dtype.kind in "biufc"]
+
     for c in cols:
         if c in d.columns:
-            if two_decimals_cols and c in two_decicals_cols:
+            if two_decimals_cols and c in two_decimals_cols:
                 d[c] = d[c].apply(
                     lambda v: (
                         "{:.2f}".format(v)
@@ -229,8 +239,64 @@ def df_format_for_display(df: pd.DataFrame, cols=None, two_decimals_cols=None) -
                     )
                 )
             else:
-                d[c] = d[c].apply(lambda v: euro_format(v, always_two_decicals=False))
+                d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=False))
     return d
+
+
+def get_active_mask(results: pd.DataFrame) -> pd.Series:
+    """
+    Active rows = rows where we actually have a corridor / meaningful numbers.
+    Use same logic as meaningful_results: any of Agg_Future_Demand, Forecast,
+    Safety_Stock, Pre_Rule_SS is non‑zero.
+    """
+    if results is None or results.empty:
+        return pd.Series(False, index=results.index if results is not None else [])
+    cols = ["Agg_Future_Demand", "Forecast", "Safety_Stock", "Pre_Rule_SS"]
+    existing = [c for c in cols if c in results.columns]
+    if not existing:
+        return pd.Series(False, index=results.index)
+    return (
+        results[existing]
+        .fillna(0)
+        .abs()
+        .sum(axis=1)
+        > 0
+    )
+
+
+def get_active_snapshot(results: pd.DataFrame, period) -> pd.DataFrame:
+    """Return only ACTIVE rows for a given period."""
+    if results is None or results.empty:
+        return results.iloc[0:0]
+    snap = results[results["Period"] == period].copy()
+    if snap.empty:
+        return snap
+    mask = get_active_mask(snap)
+    return snap[mask].copy()
+
+
+def active_materials(results: pd.DataFrame, period=None):
+    """Active materials = products with at least one ACTIVE row."""
+    df = results
+    if period is not None:
+        df = df[df["Period"] == period]
+    if df is None or df.empty:
+        return []
+    mask = get_active_mask(df)
+    return sorted(df[mask]["Product"].dropna().unique().tolist())
+
+
+def active_nodes(results: pd.DataFrame, period=None, product=None):
+    """Active nodes = locations with at least one ACTIVE row."""
+    df = results
+    if period is not None:
+        df = df[df["Period"] == period]
+    if product is not None:
+        df = df[df["Product"] == product]
+    if df is None or df.empty:
+        return []
+    mask = get_active_mask(df)
+    return sorted(df[mask]["Location"].dropna().unique().tolist())
 
 
 def hide_zero_rows(df: pd.DataFrame, check_cols=None) -> pd.DataFrame:
@@ -805,9 +871,7 @@ if s_file and d_file and lt_file:
     )
     meaningful_results = results[meaningful_mask].copy()
 
-    all_products = sorted(meaningful_results["Product"].unique().tolist())
-    if not all_products:
-        all_products = sorted(results["Product"].unique().tolist())
+    all_products = active_materials(results) or sorted(results["Product"].unique().tolist())
     default_product = (
         DEFAULT_PRODUCT_CHOICE
         if DEFAULT_PRODUCT_CHOICE in all_products
@@ -815,15 +879,9 @@ if s_file and d_file and lt_file:
     )
 
     def default_location_for(prod):
-        locs = sorted(
-            meaningful_results[meaningful_results["Product"] == prod]["Location"]
-            .unique()
-            .tolist()
+        locs = active_nodes(results, product=prod) or sorted(
+            results[results["Product"] == prod]["Location"].unique().tolist()
         )
-        if not locs:
-            locs = sorted(
-                results[results["Product"] == prod]["Location"].unique().tolist()
-            )
         return (
             DEFAULT_LOCATION_CHOICE
             if DEFAULT_LOCATION_CHOICE in locs
@@ -840,27 +898,17 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
-    # --- Global executive header with key KPIs and consistent branding ---
+    # --- Global executive header with key KPIs and consistent branding (ACTIVE only) ---
     if default_period is not None:
         global_period = default_period
-        global_snapshot = results[results["Period"] == global_period]
+        active_snapshot = get_active_snapshot(results, global_period)
 
-        # Active rows where we actually have a corridor (SS > 0)
-        active_snapshot = global_snapshot[global_snapshot["Safety_Stock"] > 0].copy()
-
-        # Total local demand (sum of local Forecast)
-        tot_local_demand = active_snapshot["Forecast"].sum()
-
-        # Total SS (sum of Safety_Stock)
-        tot_ss = active_snapshot["Safety_Stock"].sum()
-
-        # Coverage in months: SS / local demand (monthly)
+        tot_local_demand = active_snapshot["Forecast"].sum() if "Forecast" in active_snapshot.columns else 0.0
+        tot_ss = active_snapshot["Safety_Stock"].sum() if "Safety_Stock" in active_snapshot.columns else 0.0
         coverage_months = (tot_ss / tot_local_demand) if tot_local_demand > 0 else 0.0
         ss_ratio_pct = coverage_months * 100.0
-
-        # Active materials/nodes (with corridor)
-        n_active_materials = active_snapshot["Product"].nunique()
-        n_active_nodes = active_snapshot["Location"].nunique()
+        n_active_materials = active_snapshot["Product"].nunique() if "Product" in active_snapshot.columns else 0
+        n_active_nodes = active_snapshot["Location"].nunique() if "Location" in active_snapshot.columns else 0
 
         st.markdown(
             f"""
@@ -945,29 +993,9 @@ if s_file and d_file and lt_file:
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="tab1_sku")
 
-            loc_opts = sorted(
-                meaningful_results[
-                    (meaningful_results["Product"] == sku)
-                    & (meaningful_results["Period"] == CURRENT_MONTH_TS)
-                ]["Location"]
-                .unique()
-                .tolist()
-            )
+            loc_opts = active_nodes(results, period=CURRENT_MONTH_TS, product=sku)
             if not loc_opts:
-                loc_opts = sorted(
-                    results[
-                        (results["Product"] == sku)
-                        & (results["Period"] == CURRENT_MONTH_TS)
-                    ]["Location"]
-                    .unique()
-                    .tolist()
-                )
-            if not loc_opts:
-                loc_opts = sorted(
-                    meaningful_results[meaningful_results["Product"] == sku]["Location"]
-                    .unique()
-                    .tolist()
-                )
+                loc_opts = active_nodes(results, product=sku)
             if not loc_opts:
                 loc_opts = sorted(
                     results[results["Product"] == sku]["Location"].unique().tolist()
@@ -1044,7 +1072,6 @@ if s_file and d_file and lt_file:
             ]
             plot_full[num_cols] = plot_full[num_cols].fillna(0)
 
-            # Helper to format integers with dot as thousands separator in hover
             def int_dot(v):
                 try:
                     return "{:,.0f}".format(float(v)).replace(",", ".")
@@ -1114,7 +1141,6 @@ if s_file and d_file and lt_file:
                 )
             )
 
-            # Highlight current month with subtle vertical band if present
             if CURRENT_MONTH_TS in plot_full["Period"].values:
                 cm = CURRENT_MONTH_TS
                 try:
@@ -1222,11 +1248,20 @@ if s_file and d_file and lt_file:
             )
 
             hubs = {"B616", "BEEX", "LUEX"}
+
+            active_nodes_for_sku = set(
+                active_nodes(results, period=chosen_period, product=sku)
+            )
+
             if not sku_lt.empty:
                 froms = set(sku_lt["From_Location"].dropna().unique().tolist())
                 tos = set(sku_lt["To_Location"].dropna().unique().tolist())
-                all_nodes = froms.union(tos).union(hubs)
+                route_nodes = (froms.union(tos)).intersection(active_nodes_for_sku)
+                all_nodes = route_nodes.union(hubs)
             else:
+                all_nodes = set(hubs).union(active_nodes_for_sku)
+
+            if not all_nodes:
                 all_nodes = set(hubs)
 
             demand_lookup = {}
@@ -1300,6 +1335,8 @@ if s_file and d_file and lt_file:
                 for _, r in sku_lt.iterrows():
                     from_n, to_n = r["From_Location"], r["To_Location"]
                     if pd.isna(from_n) or pd.isna(to_n):
+                        continue
+                    if from_n not in all_nodes or to_n not in all_nodes:
                         continue
                     from_used = float(demand_lookup.get(from_n, {}).get("Agg_Future_External", 0)) > 0 or float(
                         demand_lookup.get(from_n, {}).get("Forecast", 0)
@@ -1387,16 +1424,8 @@ if s_file and d_file and lt_file:
             render_logo_above_parameters(scale=1.5)
             st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
 
-            prod_choices = (
-                sorted(meaningful_results["Product"].unique())
-                if not meaningful_results.empty
-                else sorted(results["Product"].unique())
-            )
-            loc_choices = (
-                sorted(meaningful_results["Location"].unique())
-                if not meaningful_results.empty
-                else sorted(results["Location"].unique())
-            )
+            prod_choices = active_materials(results) or sorted(results["Product"].unique())
+            loc_choices = active_nodes(results) or sorted(results["Location"].unique())
             period_choices_labels = period_labels
 
             default_prod_list = [default_product] if default_product in prod_choices else []
@@ -1470,6 +1499,7 @@ if s_file and d_file and lt_file:
                 filtered = filtered[filtered["Location"].isin(f_loc)]
             if f_period:
                 filtered = filtered[filtered["Period"].isin(f_period)]
+            filtered = filtered[get_active_mask(filtered)]
             filtered = filtered.sort_values("Safety_Stock", ascending=False)
 
             filtered_display = hide_zero_rows(
@@ -1556,10 +1586,8 @@ if s_file and d_file and lt_file:
             if snapshot_period is None:
                 eff_export = results[results["Product"] == sku].copy()
             else:
-                eff_export = results[
-                    (results["Product"] == sku)
-                    & (results["Period"] == snapshot_period)
-                ].copy()
+                eff_export = get_active_snapshot(results, snapshot_period)
+                eff_export = eff_export[eff_export["Product"] == sku]
 
             with st.container():
                 st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
@@ -1582,10 +1610,8 @@ if s_file and d_file and lt_file:
                 st.warning("No period data available for Efficiency Analysis.")
                 eff = results[(results["Product"] == sku)].copy()
             else:
-                eff = results[
-                    (results["Product"] == sku)
-                    & (results["Period"] == snapshot_period)
-                ].copy()
+                eff = get_active_snapshot(results, snapshot_period)
+                eff = eff[eff["Product"] == sku].copy()
 
             eff["SS_to_Demand_Ratio"] = (
                 eff["Safety_Stock"] / eff["Forecast"].replace(0, np.nan)
@@ -1597,7 +1623,7 @@ if s_file and d_file and lt_file:
             total_forecast_sku = eff["Forecast"].sum()
             sku_ratio = total_ss_sku / total_forecast_sku if total_forecast_sku > 0 else 0
 
-            all_res = results[results["Period"] == snapshot_period] if snapshot_period is not None else results
+            all_res = get_active_snapshot(results, snapshot_period) if snapshot_period is not None else results
             global_total_ss = all_res["Safety_Stock"].sum()
             global_total_fc = all_res["Forecast"].sum()
             global_ratio = global_total_ss / global_total_fc if global_total_fc > 0 else 0
@@ -1675,12 +1701,10 @@ if s_file and d_file and lt_file:
             h_sku_index = all_products.index(h_sku_default) if all_products else 0
             h_sku = st.selectbox("MATERIAL", all_products, index=h_sku_index, key="h1")
 
-            h_loc_opts = sorted(
-                results[results["Product"] == h_sku]["Location"].unique().tolist()
-            )
+            h_loc_opts = active_nodes(results, product=h_sku)
             if not h_loc_opts:
                 h_loc_opts = sorted(
-                    hist[hist["Product"] == h_sku]["Location"].unique().tolist()
+                    results[results["Product"] == h_sku]["Location"].unique().tolist()
                 )
             if not h_loc_opts:
                 h_loc_opts = ["(no location)"]
@@ -1791,11 +1815,7 @@ if s_file and d_file and lt_file:
             calc_sku_index = all_products.index(calc_sku_default) if all_products else 0
             calc_sku = st.selectbox("MATERIAL", all_products, index=calc_sku_index, key="c_sku")
 
-            avail_locs = sorted(
-                meaningful_results[meaningful_results["Product"] == calc_sku]["Location"]
-                .unique()
-                .tolist()
-            )
+            avail_locs = active_nodes(results, product=calc_sku)
             if not avail_locs:
                 avail_locs = sorted(
                     results[results["Product"] == calc_sku]["Location"].unique().tolist()
@@ -1830,10 +1850,10 @@ if s_file and d_file and lt_file:
                 chosen_label = period_label(CURRENT_MONTH_TS)
             calc_period = period_label_map.get(chosen_label, default_period)
 
-            row_export = results[
-                (results["Product"] == calc_sku)
-                & (results["Location"] == calc_loc)
-                & (results["Period"] == calc_period)
+            row_export = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
+            row_export = row_export[
+                (row_export["Product"] == calc_sku)
+                & (row_export["Location"] == calc_loc)
             ]
             export_data = row_export if not row_export.empty else pd.DataFrame()
 
@@ -1874,10 +1894,10 @@ if s_file and d_file and lt_file:
 
             z_current = norm.ppf(service_level)
 
-            row_df = results[
-                (results["Product"] == calc_sku)
-                & (results["Location"] == calc_loc)
-                & (results["Period"] == calc_period)
+            row_df = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
+            row_df = row_df[
+                (row_df["Product"] == calc_sku)
+                & (row_df["Location"] == calc_loc)
             ]
             if row_df.empty:
                 st.warning("Selection not found in results.")
@@ -2176,9 +2196,9 @@ if s_file and d_file and lt_file:
             else:
                 selected_period = CURRENT_MONTH_TS
 
-            mat_period_export = results[
-                (results["Product"] == selected_product)
-                & (results["Period"] == selected_period)
+            mat_period_export = get_active_snapshot(results, selected_period if selected_period is not None else default_period)
+            mat_period_export = mat_period_export[
+                (mat_period_export["Product"] == selected_product)
             ].copy()
 
             with st.container():
@@ -2212,9 +2232,9 @@ if s_file and d_file and lt_file:
             )
             st.subheader("📦 View by Material (+ 8 Reasons for Inventory)")
 
-            mat_period_df = results[
-                (results["Product"] == selected_product)
-                & (results["Period"] == selected_period)
+            mat_period_df = get_active_snapshot(results, selected_period if selected_period is not None else default_period)
+            mat_period_df = mat_period_df[
+                (mat_period_df["Product"] == selected_product)
             ].copy()
             mat_period_df_display = hide_zero_rows(mat_period_df)
             total_forecast = mat_period_df["Forecast"].sum()
@@ -2537,7 +2557,7 @@ if s_file and d_file and lt_file:
             else:
                 selected_period_all = CURRENT_MONTH_TS
 
-            snapshot_all = results[results["Period"] == selected_period_all].copy()
+            snapshot_all = get_active_snapshot(results, selected_period_all if selected_period_all is not None else default_period)
 
             agg_all = snapshot_all.groupby("Product", as_index=False).agg(
                 Network_Demand_Month=("Agg_Future_Demand", "sum"),
@@ -2605,7 +2625,7 @@ if s_file and d_file and lt_file:
 
             st.markdown(
                 "High-level snapshot by material (one row per material for the selected period). "
-                "Values are aggregated across all locations; all numeric values are rounded to integers."
+                "Values are aggregated across all ACTIVE locations; all numeric values are rounded to integers."
             )
 
             if agg_all.empty:
