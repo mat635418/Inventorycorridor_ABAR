@@ -220,7 +220,7 @@ def df_format_for_display(df: pd.DataFrame, cols=None, two_decimals_cols=None) -
         cols = [c for c in d.columns if d[c].dtype.kind in "biufc"]
     for c in cols:
         if c in d.columns:
-            if two_decimals_cols and c in two_decimals_cols:
+            if two_decimals_cols and c in two_decicals_cols:
                 d[c] = d[c].apply(
                     lambda v: (
                         "{:.2f}".format(v)
@@ -229,7 +229,7 @@ def df_format_for_display(df: pd.DataFrame, cols=None, two_decimals_cols=None) -
                     )
                 )
             else:
-                d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=False))
+                d[c] = d[c].apply(lambda v: euro_format(v, always_two_decicals=False))
     return d
 
 
@@ -845,12 +845,22 @@ if s_file and d_file and lt_file:
         global_period = default_period
         global_snapshot = results[results["Period"] == global_period]
 
-        tot_demand = global_snapshot["Agg_Future_Demand"].sum()
-        tot_ss = global_snapshot["Safety_Stock"].sum()
-        tot_fc = global_snapshot["Forecast"].sum()
-        ss_ratio = (tot_ss / tot_demand * 100) if tot_demand > 0 else 0
-        n_mat = global_snapshot["Product"].nunique()
-        n_nodes = global_snapshot["Location"].nunique()
+        # Active rows where we actually have a corridor (SS > 0)
+        active_snapshot = global_snapshot[global_snapshot["Safety_Stock"] > 0].copy()
+
+        # Total local demand (sum of local Forecast)
+        tot_local_demand = active_snapshot["Forecast"].sum()
+
+        # Total SS (sum of Safety_Stock)
+        tot_ss = active_snapshot["Safety_Stock"].sum()
+
+        # Coverage in months: SS / local demand (monthly)
+        coverage_months = (tot_ss / tot_local_demand) if tot_local_demand > 0 else 0.0
+        ss_ratio_pct = coverage_months * 100.0
+
+        # Active materials/nodes (with corridor)
+        n_active_materials = active_snapshot["Product"].nunique()
+        n_active_nodes = active_snapshot["Location"].nunique()
 
         st.markdown(
             f"""
@@ -867,25 +877,45 @@ if s_file and d_file and lt_file:
               <div style="flex:0 0 100%; font-weight:700; color:#0b3d91; font-size:0.9rem;">
                 Network snapshot – {period_label(global_period)}
               </div>
+
+              <!-- Total Local Demand -->
               <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
-                <div style="font-size:0.75rem; color:#607d8b;">Network Demand (month)</div>
-                <div style="font-size:1rem; font-weight:800; color:#0b3d91;">{euro_format(tot_demand, True)}</div>
+                <div style="font-size:0.75rem; color:#607d8b;">Total Local Demand (month)</div>
+                <div style="font-size:1rem; font-weight:800; color:#0b3d91;">
+                  {euro_format(tot_local_demand, True)}
+                </div>
               </div>
+
+              <!-- Total Safety Stock -->
               <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
                 <div style="font-size:0.75rem; color:#607d8b;">Safety Stock (sum)</div>
-                <div style="font-size:1rem; font-weight:800; color:#00695c;">{euro_format(tot_ss, True)}</div>
+                <div style="font-size:1rem; font-weight:800; color:#00695c;">
+                  {euro_format(tot_ss, True)}
+                </div>
               </div>
+
+              <!-- SS / Demand Coverage -->
               <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
-                <div style="font-size:0.75rem; color:#607d8b;">SS / Demand (%)</div>
-                <div style="font-size:1rem; font-weight:800; color:#ef6c00;">{ss_ratio:.1f}%</div>
+                <div style="font-size:0.75rem; color:#607d8b;">SS / Demand Coverage</div>
+                <div style="font-size:1rem; font-weight:800; color:#ef6c00;">
+                  {ss_ratio_pct:.1f}% &nbsp;({coverage_months:.2f} months)
+                </div>
               </div>
+
+              <!-- Active Materials -->
               <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
-                <div style="font-size:0.75rem; color:#607d8b;">Materials</div>
-                <div style="font-size:1rem; font-weight:800; color:#37474f;">{n_mat}</div>
+                <div style="font-size:0.75rem; color:#607d8b;">Active Materials (with corridor)</div>
+                <div style="font-size:1rem; font-weight:800; color:#37474f;">
+                  {n_active_materials}
+                </div>
               </div>
+
+              <!-- Active Nodes -->
               <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
-                <div style="font-size:0.75rem; color:#607d8b;">Nodes</div>
-                <div style="font-size:1rem; font-weight:800; color:#37474f;">{n_nodes}</div>
+                <div style="font-size:0.75rem; color:#607d8b;">Active Nodes (with corridor)</div>
+                <div style="font-size:1rem; font-weight:800; color:#37474f;">
+                  {n_active_nodes}
+                </div>
               </div>
             </div>
             """,
@@ -1014,7 +1044,13 @@ if s_file and d_file and lt_file:
             ]
             plot_full[num_cols] = plot_full[num_cols].fillna(0)
 
-            # --- Enhanced Inventory Corridor chart (visual + UX) ---
+            # Helper to format integers with dot as thousands separator in hover
+            def int_dot(v):
+                try:
+                    return "{:,.0f}".format(float(v)).replace(",", ".")
+                except Exception:
+                    return str(v)
+
             fig = go.Figure()
 
             fig.add_trace(
@@ -1024,7 +1060,11 @@ if s_file and d_file and lt_file:
                     name="Max Corridor (SS + Forecast)",
                     mode="lines",
                     line=dict(width=1.5, color="#9e9e9e", dash="dot"),
-                    hovertemplate="Period: %{x|%b %Y}<br>Max Corridor: %{y:.0f} units<extra></extra>",
+                    hovertemplate=(
+                        "Period: %{x|%b %Y}<br>"
+                        "Max Corridor: %{customdata} units<extra></extra>"
+                    ),
+                    customdata=plot_full["Max_Corridor"].apply(int_dot),
                 )
             )
             fig.add_trace(
@@ -1036,7 +1076,11 @@ if s_file and d_file and lt_file:
                     line=dict(width=0.5, color="#42a5f5"),
                     fill="tozeroy",
                     fillcolor="rgba(66,165,245,0.25)",
-                    hovertemplate="Period: %{x|%b %Y}<br>Safety Stock: %{y:.0f} units<extra></extra>",
+                    hovertemplate=(
+                        "Period: %{x|%b %Y}<br>"
+                        "Safety Stock: %{customdata} units<extra></extra>"
+                    ),
+                    customdata=plot_full["Safety_Stock"].apply(int_dot),
                 )
             )
             fig.add_trace(
@@ -1047,7 +1091,11 @@ if s_file and d_file and lt_file:
                     mode="lines+markers",
                     line=dict(color="#212121", width=2),
                     marker=dict(size=5),
-                    hovertemplate="Period: %{x|%b %Y}<br>Local Forecast: %{y:.0f} units<extra></extra>",
+                    hovertemplate=(
+                        "Period: %{x|%b %Y}<br>"
+                        "Local Forecast: %{customdata} units<extra></extra>"
+                    ),
+                    customdata=plot_full["Forecast"].apply(int_dot),
                 )
             )
             fig.add_trace(
@@ -1058,7 +1106,11 @@ if s_file and d_file and lt_file:
                     mode="lines+markers",
                     line=dict(color="#00897b", width=2, dash="dash"),
                     marker=dict(size=5),
-                    hovertemplate="Period: %{x|%b %Y}<br>External Demand: %{y:.0f} units<extra></extra>",
+                    hovertemplate=(
+                        "Period: %{x|%b %Y}<br>"
+                        "External Demand: %{customdata} units<extra></extra>"
+                    ),
+                    customdata=plot_full["Agg_Future_External"].apply(int_dot),
                 )
             )
 
@@ -1074,7 +1126,6 @@ if s_file and d_file and lt_file:
                         layer="below",
                     )
                 except Exception:
-                    # If Period is not a Timestamp type, skip vrect
                     pass
 
             fig.update_layout(
@@ -1536,25 +1587,21 @@ if s_file and d_file and lt_file:
                     & (results["Period"] == snapshot_period)
                 ].copy()
 
-            # Ratio per node in the table: SS / Forecast (months of FC held by SS)
             eff["SS_to_Demand_Ratio"] = (
                 eff["Safety_Stock"] / eff["Forecast"].replace(0, np.nan)
             ).fillna(0)
 
             eff_display = hide_zero_rows(eff)
 
-            # Totals for the selection
             total_ss_sku = eff["Safety_Stock"].sum()
             total_forecast_sku = eff["Forecast"].sum()
             sku_ratio = total_ss_sku / total_forecast_sku if total_forecast_sku > 0 else 0
 
-            # Global totals for the snapshot period (all materials)
             all_res = results[results["Period"] == snapshot_period] if snapshot_period is not None else results
             global_total_ss = all_res["Safety_Stock"].sum()
             global_total_fc = all_res["Forecast"].sum()
             global_ratio = global_total_ss / global_total_fc if global_total_fc > 0 else 0
 
-            # Metrics block (two ratios + totals)
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Months of FC held by SS (selection)", f"{sku_ratio:.2f}")
             m2.metric("Months of FC held by SS (all materials)", f"{global_ratio:.2f}")
