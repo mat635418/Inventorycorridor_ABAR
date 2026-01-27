@@ -1891,7 +1891,7 @@ if s_file and d_file and lt_file:
                 st.markdown(
                     "**Hop → Service Level mapping (highlight = hop used for this node):**",
                 )
-                # FIX: render HTML, not as a literal code block
+                # Make sure this is rendered as HTML, not shown as literal text
                 st.markdown(table_html, unsafe_allow_html=True)
 
                 avg_daily = row.get("D_day", np.nan)
@@ -2302,10 +2302,8 @@ if s_file and d_file and lt_file:
                             "Policy Overrides": "#B0BEC5",        # grey
                             "Other / Forecast Mix": "#607D8B",     # blue-grey for residual
                         }
-                        drv_df_display["color"] = drv_df_display["driver_group"].map(
-                            lambda k: driver_colors.get(k, "#90A4AE")
-                        )
 
+                        # Build labels and parents so that textinfo works without update_traces (simpler)
                         sb = px.sunburst(
                             drv_df_display,
                             names="driver_group",
@@ -2314,9 +2312,9 @@ if s_file and d_file and lt_file:
                             color="driver_group",
                             color_discrete_map=driver_colors,
                         )
+                        # Avoid using unsupported attributes (fixes ValueError)
                         sb.update_traces(
                             textinfo="percent+label",
-                            insidetextorientation="radial",
                             hovertemplate="<b>%{label}</b><br>%{percentParent:.0%} of total<br>%{value:.0f} units<extra></extra>",
                         )
                         sb.update_layout(
@@ -2413,7 +2411,7 @@ if s_file and d_file and lt_file:
                     "Direct Local Forecast (SS portion)": per_node["direct_retained_ss"].sum(),
                     "Indirect Network Demand (SS portion)": per_node["indirect_retained_ss"].sum(),
                     "Caps — Reductions (policy lowering SS)": per_node["cap_reduction"].sum(),
-                    "Caps — Increases (policy increasing SS)": per_node["cap_increase"].sum(),
+                    "Caps �� Increases (policy increasing SS)": per_node["cap_increase"].sum(),
                     "Forced Zero Overrides (policy)": per_node["forced_zero_amount"].sum(),
                     "B616 Policy Override": per_node["b616_override_amount"].sum(),
                 }
@@ -2590,6 +2588,8 @@ if s_file and d_file and lt_file:
                     "SS_to_Demand_Ratio_%",
                 ]
                 display_cols_all = [c for c in display_cols_all if c in agg_all.columns]
+
+           
 
                 agg_view = agg_all.sort_values("Avg_Day_Demand", ascending=False)[display_cols_all].reset_index(
                     drop=True
