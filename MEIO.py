@@ -21,10 +21,10 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 # --- New: show logo.svg above the main title ---
-st.image("logo.jpg", width=150)
+st.image("logo.jpg", width=240)
 
 st.markdown(
-    "<h1 style='margin:0; padding-top:6px;'>MEIO for Raw Materials — v1.05 — Jan 2026</h1>",
+    "<h2 style='margin:0; padding-top:6px;'>v1.05 — Jan 2026</h2>",
     unsafe_allow_html=True,
 )
 
