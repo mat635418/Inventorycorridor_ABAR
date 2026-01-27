@@ -20,7 +20,7 @@ from scipy.stats import norm
 # GLOBAL CONFIG / BRANDING
 # ---------------------------------------------------------------------
 
-APP_VERSION = "1.05"
+APP_VERSION = "1.15"
 APP_RELEASE = "Jan 2026"
 
 st.set_page_config(page_title="MEIO for Raw Materials", layout="wide")
@@ -177,10 +177,14 @@ st.markdown(
       .keyterm-ribbon {{
         background:#ffeb3b33;
         border-left:4px solid #fdd835;
-        padding:6px 10px;
+        padding:8px 12px;
         border-radius:6px;
-        font-size:0.85rem;
-        margin:6px 0 10px 0;
+        font-size:0.95rem;
+        margin:10px 0 12px 0;
+        line-height:1.35;
+      }}
+      .keyterm-ribbon strong {{
+        font-size:1.03rem;
       }}
     </style>
     """,
@@ -1096,11 +1100,13 @@ if s_file and d_file and lt_file:
             )
             st.plotly_chart(fig, use_container_width=True)
 
+            # Enlarged yellow ribbon with bold Bullwhip Effect wording
             st.markdown(
                 """
                 <div class="keyterm-ribbon">
                   <strong>Key Idea:</strong> Instead of sizing safety stock locally, MEIO protects the <em>aggregated</em> demand
-                  that flows through the node (internal consumption + downstream needs). This mitigates the Bullwhip Effect.
+                  that flows through the node (internal consumption + downstream needs). This mitigates the
+                  <strong>Bullwhip Effect</strong>.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1141,10 +1147,11 @@ if s_file and d_file and lt_file:
                 "Shows upstream/downstream dependencies and for each node: **local demand, external demand, SS and SL**."
             )
 
+            # Updated yellow ribbon with larger font and bold Bullwhip Effect
             st.markdown(
                 """
                 <div class="keyterm-ribbon">
-                  <strong>Key Term – Bullwhip Effect:</strong> Isolated local planning amplifies errors.  
+                  <strong>Key Term – <strong>Bullwhip Effect</strong>:</strong> Isolated local planning amplifies errors.  
                   Here, nodes are linked via network demand propagation, so we size SS on the <em>network</em>, not just the local forecast.
                 </div>
                 """,
@@ -1884,7 +1891,7 @@ if s_file and d_file and lt_file:
                 st.markdown(
                     "**Hop → Service Level mapping (highlight = hop used for this node):**",
                 )
-                # BUG FIX: render as HTML, not code
+                # FIX: render HTML, not as a literal code block
                 st.markdown(table_html, unsafe_allow_html=True)
 
                 avg_daily = row.get("D_day", np.nan)
@@ -2238,32 +2245,36 @@ if s_file and d_file and lt_file:
                 )
 
                 raw_drivers = {
-                    "Demand Uncertainty (z*sqrt(term1))": mat["demand_uncertainty_raw"].sum(),
-                    "Lead-time Uncertainty (z*sqrt(term2))": mat["lt_uncertainty_raw"].sum(),
-                    "Direct Local Forecast (sum Fcst)": mat["direct_forecast_raw"].sum(),
-                    "Indirect Network Demand (sum extra downstream)": mat["indirect_network_raw"].sum(),
-                    "Caps — Reductions (policy lowering SS)": mat["cap_reduction_raw"].sum(),
-                    "Caps — Increases (policy increasing SS)": mat["cap_increase_raw"].sum(),
-                    "Forced Zero Overrides (policy)": mat["forced_zero_raw"].sum(),
-                    "B616 Policy Override": mat["b616_override_raw"].sum(),
+                    "Demand Uncertainty": mat["demand_uncertainty_raw"].sum(),
+                    "Lead-time Uncertainty": mat["lt_uncertainty_raw"].sum(),
+                    "Policy Overrides": (
+                        mat["cap_reduction_raw"].sum()
+                        + mat["cap_increase_raw"].sum()
+                        + mat["forced_zero_raw"].sum()
+                        + mat["b616_override_raw"].sum()
+                    ),
+                    "Other / Forecast Mix": (
+                        mat["direct_forecast_raw"].sum()
+                        + mat["indirect_network_raw"].sum()
+                    ),
                 }
 
                 drv_df = pd.DataFrame(
                     {
-                        "driver": list(raw_drivers.keys()),
+                        "driver_group": list(raw_drivers.keys()),
                         "amount": [float(v) for v in raw_drivers.values()],
                     }
                 )
                 drv_df_display = drv_df[drv_df["amount"] != 0].copy()
                 drv_denom = drv_df["amount"].sum()
-                drv_df_display["pct_of_total_ss"] = (
+                drv_df_display["pct_of_total"] = (
                     drv_df_display["amount"]
                     / (drv_denom if drv_denom > 0 else 1.0)
                     * 100
                 )
 
-                # NEW: table + sunburst side by side
-                st.markdown("### A. Raw driver values (interpretation view)")
+                # NEW: table + sunburst side by side, styled like reference donut
+                st.markdown("### A. SS Driver Breakdown (interpretation view)")
                 left_col, right_col = st.columns([7, 3])
 
                 with left_col:
@@ -2271,43 +2282,59 @@ if s_file and d_file and lt_file:
                         df_format_for_display(
                             drv_df_display.rename(
                                 columns={
-                                    "driver": "Driver",
+                                    "driver_group": "Driver Group",
                                     "amount": "Units",
-                                    "pct_of_total_ss": "Pct_of_raw_sum",
+                                    "pct_of_total": "Pct_of_total",
                                 }
                             ).round(2),
-                            cols=["Units", "Pct_of_raw_sum"],
-                            two_decimals_cols=["Pct_of_raw_sum"],
+                            cols=["Units", "Pct_of_total"],
+                            two_decimals_cols=["Pct_of_total"],
                         ),
                         use_container_width=True,
                     )
 
                 with right_col:
                     if not drv_df_display.empty:
+                        # Color palette inspired by reference image
+                        driver_colors = {
+                            "Demand Uncertainty": "#004C8C",       # dark navy
+                            "Lead-time Uncertainty": "#D5A628",    # golden yellow
+                            "Policy Overrides": "#B0BEC5",        # grey
+                            "Other / Forecast Mix": "#607D8B",     # blue-grey for residual
+                        }
+                        drv_df_display["color"] = drv_df_display["driver_group"].map(
+                            lambda k: driver_colors.get(k, "#90A4AE")
+                        )
+
                         sb = px.sunburst(
                             drv_df_display,
-                            names="driver",
-                            parents=["Inventory Drivers"] * len(drv_df_display),
+                            names="driver_group",
+                            parents=["8 Reasons for Inventory"] * len(drv_df_display),
                             values="amount",
-                            color="amount",
-                            color_continuous_scale=px.colors.sequential.Blues,
+                            color="driver_group",
+                            color_discrete_map=driver_colors,
+                        )
+                        sb.update_traces(
+                            textinfo="percent+label",
+                            insidetextorientation="radial",
+                            hovertemplate="<b>%{label}</b><br>%{percentParent:.0%} of total<br>%{value:.0f} units<extra></extra>",
                         )
                         sb.update_layout(
-                            margin=dict(l=0, r=0, t=30, b=0),
-                            height=280,
-                            coloraxis_showscale=False,
+                            margin=dict(l=0, r=0, t=40, b=0),
+                            height=300,
                             title=dict(
-                                text="Share of Raw Drivers",
+                                text="SS Driver Breakdown",
                                 x=0.5,
                                 xanchor="center",
-                                font=dict(size=12),
+                                font=dict(size=14, color="#000000"),
                             ),
+                            uniformtext=dict(minsize=10, mode="show"),
                         )
                         st.plotly_chart(sb, use_container_width=True)
                     else:
                         st.write("No non-zero drivers to visualize.")
 
-                # Attribution waterfall (unchanged logic)
+                # Attribution waterfall (unchanged logic, but labels synced)
                 st.markdown("---")
                 st.markdown(
                     "### B. SS Attribution — mutually exclusive components that sum to total Safety Stock"
