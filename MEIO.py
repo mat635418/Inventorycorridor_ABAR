@@ -21,7 +21,7 @@ LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
 # --- New: show logo.svg above the main title ---
-st.image("logo.jpg", width=240)
+st.image("logo.jpg", width=300)
 
 st.markdown(
     "<h2 style='margin:0; padding-top:6px;'>v1.05 — Jan 2026</h2>",
@@ -840,6 +840,58 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
+    # --- Global executive header with key KPIs and consistent branding ---
+    if default_period is not None:
+        global_period = default_period
+        global_snapshot = results[results["Period"] == global_period]
+
+        tot_demand = global_snapshot["Agg_Future_Demand"].sum()
+        tot_ss = global_snapshot["Safety_Stock"].sum()
+        tot_fc = global_snapshot["Forecast"].sum()
+        ss_ratio = (tot_ss / tot_demand * 100) if tot_demand > 0 else 0
+        n_mat = global_snapshot["Product"].nunique()
+        n_nodes = global_snapshot["Location"].nunique()
+
+        st.markdown(
+            f"""
+            <div style="
+                margin-top:8px;
+                margin-bottom:8px;
+                padding:10px 14px;
+                border-radius:10px;
+                background:linear-gradient(90deg,#e3f2fd,#e8f5e9);
+                display:flex;
+                flex-wrap:wrap;
+                gap:10px;
+                align-items:center;">
+              <div style="flex:0 0 100%; font-weight:700; color:#0b3d91; font-size:0.9rem;">
+                Network snapshot – {period_label(global_period)}
+              </div>
+              <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
+                <div style="font-size:0.75rem; color:#607d8b;">Network Demand (month)</div>
+                <div style="font-size:1rem; font-weight:800; color:#0b3d91;">{euro_format(tot_demand, True)}</div>
+              </div>
+              <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
+                <div style="font-size:0.75rem; color:#607d8b;">Safety Stock (sum)</div>
+                <div style="font-size:1rem; font-weight:800; color:#00695c;">{euro_format(tot_ss, True)}</div>
+              </div>
+              <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
+                <div style="font-size:0.75rem; color:#607d8b;">SS / Demand (%)</div>
+                <div style="font-size:1rem; font-weight:800; color:#ef6c00;">{ss_ratio:.1f}%</div>
+              </div>
+              <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
+                <div style="font-size:0.75rem; color:#607d8b;">Materials</div>
+                <div style="font-size:1rem; font-weight:800; color:#37474f;">{n_mat}</div>
+              </div>
+              <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
+                <div style="font-size:0.75rem; color:#607d8b;">Nodes</div>
+                <div style="font-size:1rem; font-weight:800; color:#37474f;">{n_nodes}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         [
             "📈 Inventory Corridor",
@@ -962,43 +1014,99 @@ if s_file and d_file and lt_file:
             ]
             plot_full[num_cols] = plot_full[num_cols].fillna(0)
 
-            traces = [
+            # --- Enhanced Inventory Corridor chart (visual + UX) ---
+            fig = go.Figure()
+
+            fig.add_trace(
                 go.Scatter(
                     x=plot_full["Period"],
                     y=plot_full["Max_Corridor"],
                     name="Max Corridor (SS + Forecast)",
-                    line=dict(width=1, color="rgba(0,0,0,0.1)"),
-                ),
+                    mode="lines",
+                    line=dict(width=1.5, color="#9e9e9e", dash="dot"),
+                    hovertemplate="Period: %{x|%b %Y}<br>Max Corridor: %{y:.0f} units<extra></extra>",
+                )
+            )
+            fig.add_trace(
                 go.Scatter(
                     x=plot_full["Period"],
                     y=plot_full["Safety_Stock"],
                     name="Safety Stock",
-                    fill="tonexty",
-                    fillcolor="rgba(0,176,246,0.2)",
-                ),
+                    mode="lines",
+                    line=dict(width=0.5, color="#42a5f5"),
+                    fill="tozeroy",
+                    fillcolor="rgba(66,165,245,0.25)",
+                    hovertemplate="Period: %{x|%b %Y}<br>Safety Stock: %{y:.0f} units<extra></extra>",
+                )
+            )
+            fig.add_trace(
                 go.Scatter(
                     x=plot_full["Period"],
                     y=plot_full["Forecast"],
                     name="Local Direct Demand (Internal)",
-                    line=dict(color="black", dash="dot"),
-                ),
+                    mode="lines+markers",
+                    line=dict(color="#212121", width=2),
+                    marker=dict(size=5),
+                    hovertemplate="Period: %{x|%b %Y}<br>Local Forecast: %{y:.0f} units<extra></extra>",
+                )
+            )
+            fig.add_trace(
                 go.Scatter(
                     x=plot_full["Period"],
                     y=plot_full["Agg_Future_External"],
                     name="External Network Demand (Downstream)",
-                    line=dict(color="blue", dash="dash"),
-                ),
-            ]
-            fig = go.Figure(traces)
+                    mode="lines+markers",
+                    line=dict(color="#00897b", width=2, dash="dash"),
+                    marker=dict(size=5),
+                    hovertemplate="Period: %{x|%b %Y}<br>External Demand: %{y:.0f} units<extra></extra>",
+                )
+            )
+
+            # Highlight current month with subtle vertical band if present
+            if CURRENT_MONTH_TS in plot_full["Period"].values:
+                cm = CURRENT_MONTH_TS
+                try:
+                    fig.add_vrect(
+                        x0=cm - pd.Timedelta(days=15),
+                        x1=cm + pd.Timedelta(days=15),
+                        fillcolor="rgba(255,235,59,0.18)",
+                        line_width=0,
+                        layer="below",
+                    )
+                except Exception:
+                    # If Period is not a Timestamp type, skip vrect
+                    pass
+
             fig.update_layout(
-                legend=dict(orientation="h"),
-                xaxis_title=None,
-                yaxis_title=None,
+                template="plotly_white",
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="left",
+                    x=0,
+                    bgcolor="rgba(255,255,255,0.8)",
+                    bordercolor="#e0e0e0",
+                    borderwidth=1,
+                    font=dict(size=10),
+                ),
+                margin=dict(l=20, r=10, t=10, b=10),
+                xaxis_title="Period",
+                yaxis_title="Units",
                 xaxis=dict(
                     tickformat="%b\n%Y",
                     dtick="M1",
+                    showgrid=True,
+                    gridcolor="rgba(0,0,0,0.05)",
                 ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridcolor="rgba(0,0,0,0.05)",
+                    zeroline=False,
+                ),
+                hovermode="x unified",
             )
+
             st.plotly_chart(fig, use_container_width=True)
 
     # TAB 2
