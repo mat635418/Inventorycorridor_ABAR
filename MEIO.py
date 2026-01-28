@@ -1367,29 +1367,29 @@ if s_file and d_file and lt_file:
                 )
 
             # Add only edges between nodes that actually exist in the active view
-visible_nodes = {n["id"] for n in net.nodes}
-if not sku_lt.empty:
-    for _, r in sku_lt.iterrows():
-        from_n, to_n = r["From_Location"], r["To_Location"]
-        if pd.isna(from_n) or pd.isna(to_n):
-            continue
-        if (from_n not in visible_nodes) or (to_n not in visible_nodes):
-            continue
-        edge_color = "#888888"
-        lt_val = r.get("Lead_Time_Days", 0)
-        label = f"{int(lt_val)}d" if not pd.isna(lt_val) else ""
-        net.add_edge(
-            from_n,
-            to_n,
-            label=label,
-            color=edge_color,
-            # Make arrows visually longer / more separated
-            smooth={
-                "enabled": True,
-                "type": "dynamic",
-                "roundness": 0.4,
-            },
-        )
+            visible_nodes = {n["id"] for n in net.nodes}
+            if not sku_lt.empty:
+                for _, r in sku_lt.iterrows():
+                    from_n, to_n = r["From_Location"], r["To_Location"]
+                    if pd.isna(from_n) or pd.isna(to_n):
+                        continue
+                    if (from_n not in visible_nodes) or (to_n not in visible_nodes):
+                        continue
+                    edge_color = "#888888"
+                    lt_val = r.get("Lead_Time_Days", 0)
+                    label = f"{int(lt_val)}d" if not pd.isna(lt_val) else ""
+                    net.add_edge(
+                        from_n,
+                        to_n,
+                        label=label,
+                        color=edge_color,
+                        # Make arrows visually longer / more separated
+                        smooth={
+                            "enabled": True,
+                            "type": "dynamic",
+                            "roundness": 0.4,
+                        },
+                    )
 
             net.set_options(
                 """
@@ -1403,8 +1403,7 @@ if not sku_lt.empty:
                   "layout": { "improvedLayout": true }
                 }
                 """
-            )
-            tmpfile = "net.html"
+            )            tmpfile = "net.html"
             net.save_graph(tmpfile)
             html_text = open(tmpfile, "r", encoding="utf-8").read()
             injection_css = """
