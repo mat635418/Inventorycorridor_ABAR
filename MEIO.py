@@ -243,18 +243,30 @@ def df_format_for_display(
     return d
 
 
+# ------------------------------------------------------------------
+# ACTIVE DEFINITIONS (single source of truth)
+# ------------------------------------------------------------------
 def get_active_mask(results: pd.DataFrame) -> pd.Series:
     """
-    Active rows = rows where we actually have a corridor / meaningful numbers.
-    Use same logic as meaningful_results: any of Agg_Future_Demand, Forecast,
-    Safety_Stock, Pre_Rule_SS is non‑zero.
+    Row is ACTIVE if there is any meaningful demand or final corridor
+    implemented on that row.
+
+    We consider as signals:
+      - Agg_Future_Demand  (network demand seen by node)
+      - Forecast           (local demand)
+      - Safety_Stock       (final implemented SS)
+      - Max_Corridor       (SS + Forecast, final corridor)
+
+    Any of these being non-zero marks the row as active.
     """
     if results is None or results.empty:
         return pd.Series(False, index=results.index if results is not None else [])
-    cols = ["Agg_Future_Demand", "Forecast", "Safety_Stock", "Pre_Rule_SS"]
+
+    cols = ["Agg_Future_Demand", "Forecast", "Safety_Stock", "Max_Corridor"]
     existing = [c for c in cols if c in results.columns]
     if not existing:
         return pd.Series(False, index=results.index)
+
     return (
         results[existing]
         .fillna(0)
@@ -276,7 +288,12 @@ def get_active_snapshot(results: pd.DataFrame, period) -> pd.DataFrame:
 
 
 def active_materials(results: pd.DataFrame, period=None):
-    """Active materials = products with at least one ACTIVE row."""
+    """
+    Active materials = products with at least one ACTIVE row.
+
+    If period is provided, we restrict to that period. Otherwise, any period
+    counts.
+    """
     df = results
     if period is not None:
         df = df[df["Period"] == period]
@@ -287,7 +304,13 @@ def active_materials(results: pd.DataFrame, period=None):
 
 
 def active_nodes(results: pd.DataFrame, period=None, product=None):
-    """Active nodes = locations with at least one ACTIVE row."""
+    """
+    Active nodes = locations with at least one ACTIVE row.
+
+    Optional filters:
+      - period: only rows from that Period
+      - product: only rows for that Product
+    """
     df = results
     if period is not None:
         df = df[df["Period"] == period]
@@ -810,7 +833,7 @@ if s_file and d_file and lt_file:
         st.stop()
 
     df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
-    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
+    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").to_timestamp()
 
     df_s["Consumption"] = clean_numeric(df_s["Consumption"])
     df_s["Forecast"] = clean_numeric(df_s["Forecast"])
@@ -862,13 +885,8 @@ if s_file and d_file and lt_file:
         Network_Forecast_Hist=("Forecast", "sum"),
     )
 
-    meaningful_mask = (
-        results[["Agg_Future_Demand", "Forecast", "Safety_Stock", "Pre_Rule_SS"]]
-        .fillna(0)
-        .abs()
-        .sum(axis=1)
-        > 0
-    )
+    # active / meaningful rows
+    meaningful_mask = get_active_mask(results)
     meaningful_results = results[meaningful_mask].copy()
 
     all_products = active_materials(results) or sorted(results["Product"].unique().tolist())
@@ -993,6 +1011,7 @@ if s_file and d_file and lt_file:
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="tab1_sku")
 
+            # only ACTIVE nodes for this material in CURRENT_MONTH_TS
             loc_opts = active_nodes(results, period=CURRENT_MONTH_TS, product=sku)
             if not loc_opts:
                 loc_opts = active_nodes(results, product=sku)
@@ -1249,20 +1268,28 @@ if s_file and d_file and lt_file:
 
             hubs = {"B616", "BEEX", "LUEX"}
 
+            # ACTIVE nodes for this material & period (with implemented corridor or demand)
             active_nodes_for_sku = set(
                 active_nodes(results, period=chosen_period, product=sku)
             )
 
+            # count of active nodes used in snapshot: hubs + active children that are really active
+            # (for display consistency in banner / user expectations)
+            # Not printed here, but the logic is single-source-of-truth through active_nodes().
+
+            # Route nodes restricted to active nodes
             if not sku_lt.empty:
                 froms = set(sku_lt["From_Location"].dropna().unique().tolist())
                 tos = set(sku_lt["To_Location"].dropna().unique().tolist())
                 route_nodes = (froms.union(tos)).intersection(active_nodes_for_sku)
-                all_nodes = route_nodes.union(hubs)
+                all_nodes = route_nodes.union(hubs.intersection(active_nodes_for_sku))
             else:
-                all_nodes = set(hubs).union(active_nodes_for_sku)
+                all_nodes = hubs.intersection(active_nodes_for_sku)
 
+            # If nothing is active, fall back to hubs only so chart isn't empty,
+            # but in that case there is truly no active node for that material/period.
             if not all_nodes:
-                all_nodes = set(hubs)
+                all_nodes = hubs
 
             demand_lookup = {}
             for n in all_nodes:
@@ -1277,6 +1304,7 @@ if s_file and d_file and lt_file:
                         "Service_Level_Node": np.nan,
                         "D_day": 0,
                         "Days_Covered_by_SS": np.nan,
+                        "Max_Corridor": 0,
                     },
                 )
 
@@ -1292,19 +1320,30 @@ if s_file and d_file and lt_file:
                         "Service_Level_Node": np.nan,
                         "D_day": 0,
                         "Days_Covered_by_SS": np.nan,
+                        "Max_Corridor": 0,
                     },
                 )
-                used = float(m.get("Agg_Future_External", 0)) > 0 or float(m.get("Forecast", 0)) > 0
+
+                # ACTIVE flag: consistent with get_active_mask (but on this row)
+                node_active = (
+                    abs(float(m.get("Agg_Future_Demand", 0) if "Agg_Future_Demand" in m else 0))
+                    + abs(float(m.get("Forecast", 0)))
+                    + abs(float(m.get("Safety_Stock", 0)))
+                    + abs(float(m.get("Max_Corridor", float(m.get("Safety_Stock", 0)) + float(m.get("Forecast", 0)))))
+                    > 0
+                )
+
+                if not node_active:
+                    # If the node has truly no activity signals, skip it entirely:
+                    continue
 
                 if n == "B616":
                     bg, border, font_color, size = "#dcedc8", "#8bc34a", "#0b3d91", 14
                 elif n in {"BEEX", "LUEX"}:
                     bg, border, font_color, size = "#bbdefb", "#64b5f6", "#0b3d91", 14
                 else:
-                    if used:
-                        bg, border, font_color, size = "#fff9c4", "#fbc02d", "#222222", 12
-                    else:
-                        bg, border, font_color, size = "#f7f7f7", "#e0e0e0", "#b0b0b0", 10
+                    # all other nodes are active (yellow)
+                    bg, border, font_color, size = "#fff9c4", "#fbc02d", "#222222", 12
 
                 sl_node = m.get("Service_Level_Node", None)
                 if pd.notna(sl_node):
@@ -1331,20 +1370,16 @@ if s_file and d_file and lt_file:
                     font={"color": font_color, "size": size},
                 )
 
+            # Add only edges between nodes that actually exist in the active view
+            visible_nodes = {n["id"] for n in net.nodes}
             if not sku_lt.empty:
                 for _, r in sku_lt.iterrows():
                     from_n, to_n = r["From_Location"], r["To_Location"]
                     if pd.isna(from_n) or pd.isna(to_n):
                         continue
-                    if from_n not in all_nodes or to_n not in all_nodes:
+                    if (from_n not in visible_nodes) or (to_n not in visible_nodes):
                         continue
-                    from_used = float(demand_lookup.get(from_n, {}).get("Agg_Future_External", 0)) > 0 or float(
-                        demand_lookup.get(from_n, {}).get("Forecast", 0)
-                    ) > 0
-                    to_used = float(demand_lookup.get(to_n, {}).get("Agg_Future_External", 0)) > 0 or float(
-                        demand_lookup.get(to_n, {}).get("Forecast", 0)
-                    ) > 0
-                    edge_color = "#dddddd" if not from_used and not to_used else "#888888"
+                    edge_color = "#888888"
                     lt_val = r.get("Lead_Time_Days", 0)
                     label = f"{int(lt_val)}d" if not pd.isna(lt_val) else ""
                     net.add_edge(from_n, to_n, label=label, color=edge_color)
