@@ -1403,7 +1403,8 @@ if s_file and d_file and lt_file:
                   "layout": { "improvedLayout": true }
                 }
                 """
-            )            tmpfile = "net.html"
+            )            
+            tmpfile = "net.html"
             net.save_graph(tmpfile)
             html_text = open(tmpfile, "r", encoding="utf-8").read()
             injection_css = """
