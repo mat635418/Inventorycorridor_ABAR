@@ -1404,7 +1404,7 @@ if s_file and d_file and lt_file:
         "barnesHut": {
           "gravitationalConstant": -3000,
           "centralGravity": 0.1,
-          "springLength": 100,
+          "springLength": 50,
           "springConstant": 0.02,
           "damping": 0.09,
           "avoidOverlap": 1.0
