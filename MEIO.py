@@ -833,7 +833,7 @@ if s_file and d_file and lt_file:
         st.stop()
 
     df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
-    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").to_timestamp()
+    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
 
     df_s["Consumption"] = clean_numeric(df_s["Consumption"])
     df_s["Forecast"] = clean_numeric(df_s["Forecast"])
@@ -1268,14 +1268,10 @@ if s_file and d_file and lt_file:
 
             hubs = {"B616", "BEEX", "LUEX"}
 
-            # ACTIVE nodes for this material & period (with implemented corridor or demand)
+            # ACTIVE nodes for this material & period
             active_nodes_for_sku = set(
                 active_nodes(results, period=chosen_period, product=sku)
             )
-
-            # count of active nodes used in snapshot: hubs + active children that are really active
-            # (for display consistency in banner / user expectations)
-            # Not printed here, but the logic is single-source-of-truth through active_nodes().
 
             # Route nodes restricted to active nodes
             if not sku_lt.empty:
@@ -1286,8 +1282,7 @@ if s_file and d_file and lt_file:
             else:
                 all_nodes = hubs.intersection(active_nodes_for_sku)
 
-            # If nothing is active, fall back to hubs only so chart isn't empty,
-            # but in that case there is truly no active node for that material/period.
+            # If nothing is active, fall back to hubs only so chart isn't empty
             if not all_nodes:
                 all_nodes = hubs
 
@@ -1305,6 +1300,7 @@ if s_file and d_file and lt_file:
                         "D_day": 0,
                         "Days_Covered_by_SS": np.nan,
                         "Max_Corridor": 0,
+                        "Agg_Future_Demand": 0,
                     },
                 )
 
@@ -1321,12 +1317,13 @@ if s_file and d_file and lt_file:
                         "D_day": 0,
                         "Days_Covered_by_SS": np.nan,
                         "Max_Corridor": 0,
+                        "Agg_Future_Demand": 0,
                     },
                 )
 
-                # ACTIVE flag: consistent with get_active_mask (but on this row)
+                # ACTIVE flag: aligned with get_active_mask
                 node_active = (
-                    abs(float(m.get("Agg_Future_Demand", 0) if "Agg_Future_Demand" in m else 0))
+                    abs(float(m.get("Agg_Future_Demand", 0)))
                     + abs(float(m.get("Forecast", 0)))
                     + abs(float(m.get("Safety_Stock", 0)))
                     + abs(float(m.get("Max_Corridor", float(m.get("Safety_Stock", 0)) + float(m.get("Forecast", 0)))))
@@ -1334,7 +1331,7 @@ if s_file and d_file and lt_file:
                 )
 
                 if not node_active:
-                    # If the node has truly no activity signals, skip it entirely:
+                    # Truly inactive: do not draw (no grey boxes)
                     continue
 
                 if n == "B616":
@@ -1342,7 +1339,6 @@ if s_file and d_file and lt_file:
                 elif n in {"BEEX", "LUEX"}:
                     bg, border, font_color, size = "#bbdefb", "#64b5f6", "#0b3d91", 14
                 else:
-                    # all other nodes are active (yellow)
                     bg, border, font_color, size = "#fff9c4", "#fbc02d", "#222222", 12
 
                 sl_node = m.get("Service_Level_Node", None)
@@ -2685,7 +2681,7 @@ if s_file and d_file and lt_file:
                     "Safety_Stock": "Calculated Safety Stock",
                     "Avg_SS_Days_Coverage": "SS Coverage (days)",
                     "Local_Forecast_Month": "Local Forecast (month)",
-                    "SS_to_Demand_Ratio_%": "SS / Demand (%)",
+                    "SS_to_Demand_Ratio_%" : "SS / Demand (%)",
                 }
                 agg_view = agg_view.rename(columns=rename_map)
 
