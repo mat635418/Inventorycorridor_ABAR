@@ -287,9 +287,7 @@ def active_materials(results: pd.DataFrame, period=None):
 
 
 def active_nodes(results: pd.DataFrame, period=None, product=None):
-    """
-    Active nodes = locations with at least one ACTIVE row.
-    """
+    """Active nodes = locations with at least one ACTIVE row."""
     df = results
     if period is not None:
         df = df[df["Period"] == period]
@@ -811,13 +809,8 @@ if s_file and d_file and lt_file:
         st.error(f"leadtime.csv missing columns: {needed_lt_cols - set(df_lt.columns)}")
         st.stop()
 
-    # ---- Robust month-normalised Period handling for both sales and demand ----
-    # Always convert to datetime first, then to Period(M), then back to Timestamp.
-    df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce")
-    df_s["Period"] = df_s["Period"].dt.to_period("M").dt.to_timestamp()
-
-    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce")
-    df_d["Period"] = df_d["Period"].dt.to_period("M").dt.to_timestamp()
+    df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
+    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
 
     df_s["Consumption"] = clean_numeric(df_s["Consumption"])
     df_s["Forecast"] = clean_numeric(df_s["Forecast"])
@@ -915,7 +908,6 @@ if s_file and d_file and lt_file:
         coverage_months = (tot_ss / tot_local_demand) if tot_local_demand > 0 else 0.0
         ss_ratio_pct = coverage_months * 100.0
         n_active_materials = active_snapshot["Product"].nunique() if "Product" in active_snapshot.columns else 0
-        # count ACTIVE nodes only, based on active_snapshot (already filtered with get_active_mask)
         n_active_nodes = active_snapshot["Location"].nunique() if "Location" in active_snapshot.columns else 0
 
         st.markdown(
@@ -1240,17 +1232,11 @@ if s_file and d_file and lt_file:
                 unsafe_allow_html=True,
             )
 
-            # --- ACTIVE snapshot for this product & period (used for both count and filtering) ---
-            active_snapshot_net = get_active_snapshot(results, chosen_period)
-            active_snapshot_net = active_snapshot_net[active_snapshot_net["Product"] == sku].copy()
-
-            # Label data only for ACTIVE rows
             label_data = (
-                active_snapshot_net
+                results[results["Period"] == chosen_period]
                 .set_index(["Product", "Location"])
                 .to_dict("index")
             )
-
             sku_lt = df_lt[df_lt["Product"] == sku] if "Product" in df_lt.columns else df_lt.copy()
 
             net = Network(
@@ -1263,16 +1249,18 @@ if s_file and d_file and lt_file:
 
             hubs = {"B616", "BEEX", "LUEX"}
 
-            # ACTIVE nodes only for this sku & period
             active_nodes_for_sku = set(
                 active_nodes(results, period=chosen_period, product=sku)
             )
 
-            # Nodes allowed in the graph = active nodes plus hubs that are also active
-            hubs_active = active_nodes_for_sku.intersection(hubs)
-            all_nodes = active_nodes_for_sku.union(hubs_active)
+            if not sku_lt.empty:
+                froms = set(sku_lt["From_Location"].dropna().unique().tolist())
+                tos = set(sku_lt["To_Location"].dropna().unique().tolist())
+                route_nodes = (froms.union(tos)).intersection(active_nodes_for_sku)
+                all_nodes = route_nodes.union(hubs)
+            else:
+                all_nodes = set(hubs).union(active_nodes_for_sku)
 
-            # If nothing is active we keep the original fallback to show hubs only
             if not all_nodes:
                 all_nodes = set(hubs)
 
@@ -1292,7 +1280,6 @@ if s_file and d_file and lt_file:
                     },
                 )
 
-            # ---- Nodes (ACTIVE only) ----
             for n in sorted(all_nodes):
                 m = demand_lookup.get(
                     n,
@@ -1307,15 +1294,17 @@ if s_file and d_file and lt_file:
                         "Days_Covered_by_SS": np.nan,
                     },
                 )
+                used = float(m.get("Agg_Future_External", 0)) > 0 or float(m.get("Forecast", 0)) > 0
 
-                # since we restrict all_nodes to ACTIVE, everything here is active
-                # so we only use "active" color schemes (no grey)
                 if n == "B616":
                     bg, border, font_color, size = "#dcedc8", "#8bc34a", "#0b3d91", 14
                 elif n in {"BEEX", "LUEX"}:
                     bg, border, font_color, size = "#bbdefb", "#64b5f6", "#0b3d91", 14
                 else:
-                    bg, border, font_color, size = "#fff9c4", "#fbc02d", "#222222", 12
+                    if used:
+                        bg, border, font_color, size = "#fff9c4", "#fbc02d", "#222222", 12
+                    else:
+                        bg, border, font_color, size = "#f7f7f7", "#e0e0e0", "#b0b0b0", 10
 
                 sl_node = m.get("Service_Level_Node", None)
                 if pd.notna(sl_node):
@@ -1342,7 +1331,6 @@ if s_file and d_file and lt_file:
                     font={"color": font_color, "size": size},
                 )
 
-            # ---- Edges: keep only edges whose BOTH endpoints are ACTIVE ----
             if not sku_lt.empty:
                 for _, r in sku_lt.iterrows():
                     from_n, to_n = r["From_Location"], r["To_Location"]
@@ -1350,10 +1338,15 @@ if s_file and d_file and lt_file:
                         continue
                     if from_n not in all_nodes or to_n not in all_nodes:
                         continue
+                    from_used = float(demand_lookup.get(from_n, {}).get("Agg_Future_External", 0)) > 0 or float(
+                        demand_lookup.get(from_n, {}).get("Forecast", 0)
+                    ) > 0
+                    to_used = float(demand_lookup.get(to_n, {}).get("Agg_Future_External", 0)) > 0 or float(
+                        demand_lookup.get(to_n, {}).get("Forecast", 0)
+                    ) > 0
+                    edge_color = "#dddddd" if not from_used and not to_used else "#888888"
                     lt_val = r.get("Lead_Time_Days", 0)
                     label = f"{int(lt_val)}d" if not pd.isna(lt_val) else ""
-                    # all kept edges link active nodes, so we use the "used" color
-                    edge_color = "#888888"
                     net.add_edge(from_n, to_n, label=label, color=edge_color)
 
             net.set_options(
@@ -2612,7 +2605,7 @@ if s_file and d_file and lt_file:
             if "Avg_SS_Days_Coverage" in agg_all.columns:
                 agg_all["Avg_SS_Days_Coverage"] = agg_all["Avg_SS_Days_Coverage"].fillna(0.0)
             if "SS_to_Demand_Ratio_%" in agg_all.columns:
-                agg_all["SS_to_Demand_Ratio_%" ] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
+                agg_all["SS_to_Demand_Ratio_%"] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
 
             with st.container():
                 st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
