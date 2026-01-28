@@ -1392,18 +1392,46 @@ if s_file and d_file and lt_file:
                     )
 
             net.set_options(
-                """
-                {
-                  "physics": {
-                    "enabled": true,
-                    "stabilization": { "iterations": 200, "fit": true }
-                  },
-                  "nodes": { "borderWidthSelected": 2 },
-                  "interaction": { "hover": true, "zoomView": true, "dragView": true, "dragNodes": true },
-                  "layout": { "improvedLayout": true }
-                }
-                """
-            )            
+    """
+    {
+      "physics": {
+        "enabled": true,
+        "stabilization": {
+          "enabled": true,
+          "iterations": 300,
+          "fit": true
+        },
+        "barnesHut": {
+          "gravitationalConstant": -3000,
+          "centralGravity": 0.1,
+          "springLength": 220,
+          "springConstant": 0.02,
+          "damping": 0.09,
+          "avoidOverlap": 1.0
+        }
+      },
+      "nodes": {
+        "borderWidthSelected": 2
+      },
+      "edges": {
+        "smooth": {
+          "enabled": true,
+          "type": "dynamic",
+          "roundness": 0.4
+        }
+      },
+      "interaction": {
+        "hover": true,
+        "zoomView": true,
+        "dragView": true,
+        "dragNodes": true
+      },
+      "layout": {
+        "improvedLayout": true
+      }
+    }
+    """
+)            
             tmpfile = "net.html"
             net.save_graph(tmpfile)
             html_text = open(tmpfile, "r", encoding="utf-8").read()
