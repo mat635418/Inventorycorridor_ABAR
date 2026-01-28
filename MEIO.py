@@ -24,7 +24,7 @@ days_per_month = 30
 st.image("logo.jpg", width=300)
 
 st.markdown(
-    "<h3 style='margin:0; padding-top:6px;'>v1.08 — Jan 2026</h3>",
+    "<h3 style='margin:0; padding-top:6px;'>v1.05 — Jan 2026</h3>",
     unsafe_allow_html=True,
 )
 
@@ -811,8 +811,13 @@ if s_file and d_file and lt_file:
         st.error(f"leadtime.csv missing columns: {needed_lt_cols - set(df_lt.columns)}")
         st.stop()
 
-    df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
-    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").to_timestamp()
+    # ---- Robust month-normalised Period handling for both sales and demand ----
+    # Always convert to datetime first, then to Period(M), then back to Timestamp.
+    df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce")
+    df_s["Period"] = df_s["Period"].dt.to_period("M").dt.to_timestamp()
+
+    df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce")
+    df_d["Period"] = df_d["Period"].dt.to_period("M").dt.to_timestamp()
 
     df_s["Consumption"] = clean_numeric(df_s["Consumption"])
     df_s["Forecast"] = clean_numeric(df_s["Forecast"])
@@ -1264,7 +1269,6 @@ if s_file and d_file and lt_file:
             )
 
             # Nodes allowed in the graph = active nodes plus hubs that are also active
-            # (this ensures the count and the rendered nodes are aligned)
             hubs_active = active_nodes_for_sku.intersection(hubs)
             all_nodes = active_nodes_for_sku.union(hubs_active)
 
@@ -2608,7 +2612,7 @@ if s_file and d_file and lt_file:
             if "Avg_SS_Days_Coverage" in agg_all.columns:
                 agg_all["Avg_SS_Days_Coverage"] = agg_all["Avg_SS_Days_Coverage"].fillna(0.0)
             if "SS_to_Demand_Ratio_%" in agg_all.columns:
-                agg_all["SS_to_Demand_Ratio_%"] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
+                agg_all["SS_to_Demand_Ratio_%" ] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
 
             with st.container():
                 st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
