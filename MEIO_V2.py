@@ -218,12 +218,12 @@ st.markdown(
         margin-bottom: 4px;
         color: #333333;
       }
-      /* Compact run configuration + snapshot header */
+      /* Compact run configuration + snapshot header (single-row snapshot) */
       .run-snapshot-container {
         display: grid;
         grid-template-columns: minmax(220px, 1.2fr) repeat(3, minmax(180px, 1fr));
         gap: 10px;
-        margin: 10px 0 6px 0;
+        margin: 8px 0 4px 0;
       }
       .run-card,
       .snap-card {
@@ -265,12 +265,22 @@ st.markdown(
       }
       .run-snapshot-header {
         padding: 6px 10px 4px 10px;
-        margin: 4px 0 2px 0;
-        border-radius: 8px;
+        margin: 0;
+        border-radius: 8px 8px 0 0;
         background: linear-gradient(90deg,#e3f2fd,#e8f5e9);
         font-size: 0.80rem;
         font-weight: 700;
         color: #0b3d91;
+      }
+      .run-snapshot-wrapper {
+        border-radius: 8px;
+        background: linear-gradient(90deg,#e3f2fd,#e8f5e9);
+        padding: 0;
+        margin-top: 6px;
+        margin-bottom: 4px;
+      }
+      .run-snapshot-inner {
+        padding: 6px 8px 8px 8px;
       }
       .exec-takeaway-selection {
         color: #b71c1c;
@@ -342,50 +352,59 @@ def render_run_and_snapshot_header(
     n_active_materials: int,
     n_active_nodes: int,
 ):
-    """Single banner that matches the pic2 layout: snapshot row on top, run config at bottom-left."""
+    """Collapsible banner: single-row snapshot + run configuration, initially collapsed."""
+    with st.expander("📊 Network snapshot & run configuration", expanded=False):
+        st.markdown(
+            f"""
+            <div class="run-snapshot-wrapper">
+              <div class="run-snapshot-header">
+                Network snapshot – {snapshot_label}
+              </div>
+              <div class="run-snapshot-inner">
+                <div class="run-snapshot-container">
+                  <div class="snap-card">
+                    <div class="snap-card-label">Total Local Demand (month)</div>
+                    <div class="snap-card-value">{euro_format(tot_local_demand, True)}</div>
+                  </div>
+                  <div class="snap-card">
+                    <div class="snap-card-label">Safety Stock (sum)</div>
+                    <div class="snap-card-value snap-card-value-green">{euro_format(tot_ss, True)}</div>
+                  </div>
+                  <div class="snap-card">
+                    <div class="snap-card-label">SS / Demand Coverage</div>
+                    <div class="snap-card-value snap-card-value-orange">
+                      {ss_ratio_pct:.1f}%&nbsp;({coverage_months:.2f} months)
+                    </div>
+                  </div>
+                  <div class="snap-card">
+                    <div class="snap-card-label">Active Materials (with corridor)</div>
+                    <div class="snap-card-value">{n_active_materials}</div>
+                  </div>
+                </div>
+                <div class="run-snapshot-container" style="grid-template-columns: minmax(260px, 1.4fr) repeat(1, minmax(180px, 1fr)); margin-top:6px;">
+                  <div class="run-card">
+                    <div class="run-card-title">Run configuration</div>
+                    <div class="run-card-body">
+                      <div><strong>ID:</strong> {run_id}</div>
+                      <div><strong>Time:</strong> {now_str}</div>
+                      <div><strong>End-node SL:</strong> {service_level*100:.2f}%</div>
+                      <div><strong>Zero SS if no demand:</strong> {str(zero_if_no_net_fcst)}</div>
+                      <div><strong>SS capping:</strong> {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)</div>
+                    </div>
+                  </div>
+                  <div class="snap-card">
+                    <div class="snap-card-label">Active Nodes (with corridor)</div>
+                    <div class="snap-card-value">{n_active_nodes}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    # space + horizontal marker before tabs
     st.markdown(
-        f"""
-        <div class="run-snapshot-header">
-          Network snapshot – {snapshot_label}
-        </div>
-        <div class="run-snapshot-container">
-          <div class="snap-card">
-            <div class="snap-card-label">Total Local Demand (month)</div>
-            <div class="snap-card-value">{euro_format(tot_local_demand, True)}</div>
-          </div>
-          <div class="snap-card">
-            <div class="snap-card-label">Safety Stock (sum)</div>
-            <div class="snap-card-value snap-card-value-green">{euro_format(tot_ss, True)}</div>
-          </div>
-          <div class="snap-card">
-            <div class="snap-card-label">SS / Demand Coverage</div>
-            <div class="snap-card-value snap-card-value-orange">
-              {ss_ratio_pct:.1f}%&nbsp;({coverage_months:.2f} months)
-            </div>
-          </div>
-          <div class="snap-card">
-            <div class="snap-card-label">Active Materials (with corridor)</div>
-            <div class="snap-card-value">{n_active_materials}</div>
-          </div>
-        </div>
-        <div class="run-snapshot-container" style="grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(180px, 1fr)); margin-top:4px;">
-          <div class="run-card">
-            <div class="run-card-title">Run configuration</div>
-            <div class="run-card-body">
-              <div><strong>ID:</strong> {run_id}</div>
-              <div><strong>Time:</strong> {now_str}</div>
-              <div><strong>End-node SL:</strong> {service_level*100:.2f}%</div>
-              <div><strong>Zero SS if no demand:</strong> {str(zero_if_no_net_fcst)}</div>
-              <div><strong>SS capping:</strong> {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)</div>
-            </div>
-          </div>
-          <div class="snap-card">
-            <div class="snap-card-label">Active Nodes (with corridor)</div>
-            <div class="snap-card-value">{n_active_nodes}</div>
-          </div>
-          <div></div>
-        </div>
-        """,
+        "<div style='margin-top:6px; margin-bottom:6px;'><hr style='border:none;border-top:1px solid #d0d0d0;'/></div>",
         unsafe_allow_html=True,
     )
 
@@ -1248,7 +1267,7 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
-    # --- New combined banner matching pic2 layout (ACTIVE only) ---
+    # --- Combined banner as collapsible (ACTIVE only) ---
     run_id = datetime.now().strftime("RUN-%Y%m%d-%H%M%S")
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
