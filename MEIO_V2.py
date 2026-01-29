@@ -408,24 +408,30 @@ def render_tab1_explainer():
 
 
 def render_tab7_explainer():
-    """Short guide for the 'By Material' / 8 reasons tab."""
-    with st.expander("ℹ️ How to interpret the 8 Inventory Reasons", expanded=False):
+    """Short guide for the 'By Material' / SS attribution tab."""
+    with st.expander("ℹ️ How to interpret the SS attribution view", expanded=False):
         st.markdown(
             """
-            **Core drivers (statistical):**
-            - **Demand Uncertainty**: SS needed because forecast varies month to month.
-            - **Lead‑time Uncertainty**: SS needed because supply lead times are volatile.
-            - **Direct Local Forecast**: share of SS linked to protecting a node's own demand.
-            - **Indirect Network Demand**: share of SS linked to protecting downstream locations.
+            This tab explains **why we hold Safety Stock (SS)** for a given material and period
+            by decomposing the implemented SS into **mutually exclusive components** that
+            **sum exactly** to the total SS.
 
-            **Policy / rule‑based effects:**
-            - **Caps — Reductions**: rules that reduce SS vs the raw statistical suggestion.
-            - **Caps — Increases**: rules that increase SS (e.g. minimum coverage).
-            - **Forced Zero Overrides**: decisions to set SS to zero even if statistics would suggest > 0.
+            The components are grouped as:
+
+            **Statistical drivers (what the math suggests):**
+            - **Demand Uncertainty (SS portion)**: part of SS driven by forecast variability.
+            - **Lead‑time Uncertainty (SS portion)**: part of SS driven by supply lead‑time volatility.
+            - **Direct Local Forecast (SS portion)**: SS share linked to protecting a node's own demand.
+            - **Indirect Network Demand (SS portion)**: SS share linked to protecting downstream locations.
+
+            **Policy / rule‑based effects (how policy reshapes SS):**
+            - **Caps — Reductions**: policy rules that reduce SS vs the raw statistical result.
+            - **Caps — Increases**: policy rules that increase SS (e.g. minimum coverage).
+            - **Forced Zero Overrides**: decisions that set SS to zero even if statistics suggest > 0.
             - **B616 Policy Override**: specific override for location B616 in this model.
 
-            Together, these eight components **sum exactly** to the implemented Safety Stock
-            for the material and period, so you can explain “why we carry this SS” in business terms.
+            Use the waterfall chart and the table to **trace the contribution of each driver**
+            to the final implemented SS for the selected material and period.
             """,
             unsafe_allow_html=True,
         )
@@ -1495,7 +1501,6 @@ if s_file and d_file and lt_file:
                 unsafe_allow_html=True,
             )
             render_tab1_explainer()
-
 
     # TAB 2 -----------------------------------------------------------------
     with tab2:
@@ -2638,6 +2643,14 @@ if s_file and d_file and lt_file:
                   div[data-testid="stVerticalBlock"] div:nth-child(7) .stMarkdown p {
                     font-size: 0.82rem !important;
                   }
+                  .exec-takeaway-selection {
+                    color: #b71c1c;
+                    font-weight: 700;
+                  }
+                  .exec-takeaway-percentage {
+                    color: #b71c1c;
+                    font-weight: 700;
+                  }
                 </style>
                 """,
                 unsafe_allow_html=True,
@@ -2648,7 +2661,7 @@ if s_file and d_file and lt_file:
                 product=selected_product,
                 period_text=period_label(selected_period),
             )
-            st.subheader("📦 View by Material (+ 8 Reasons for Inventory)")
+            st.subheader("📦 View by Material (+ SS attribution)")
             render_tab7_explainer()
 
             mat_period_df = get_active_snapshot(results, selected_period if selected_period is not None else default_period)
@@ -2679,7 +2692,8 @@ if s_file and d_file and lt_file:
             )
 
             st.markdown("---")
-            st.markdown("### Why do we carry this SS? — 8 Reasons breakdown")
+            st.markdown("### Why do we carry this SS? — SS attribution")
+
             if mat_period_df_display.empty:
                 st.warning("No data for this material/period (non-zero rows filtered).")
             else:
@@ -2699,6 +2713,7 @@ if s_file and d_file and lt_file:
                 ]:
                     mat[c] = mat[c].fillna(0)
 
+                # Rebuild the intermediate terms needed for attribution
                 mat["term1"] = (mat["Agg_Std_Hist"] ** 2 / float(days_per_month)) * mat["LT_Mean"]
                 mat["term2"] = (mat["LT_Std"] ** 2) * (
                     mat["Agg_Future_Demand"] / float(days_per_month)
@@ -2706,103 +2721,7 @@ if s_file and d_file and lt_file:
                 z_current = norm.ppf(service_level)
                 mat["demand_uncertainty_raw"] = z_current * np.sqrt(mat["term1"].clip(lower=0))
                 mat["lt_uncertainty_raw"] = z_current * np.sqrt(mat["term2"].clip(lower=0))
-                mat["direct_forecast_raw"] = mat["Forecast"].clip(lower=0)
-                mat["indirect_network_raw"] = mat["Agg_Future_External"].clip(lower=0)
-                mat["cap_reduction_raw"] = (
-                    (mat["Pre_Rule_SS"] - mat["Safety_Stock"]).clip(lower=0)
-                ).fillna(0)
-                mat["cap_increase_raw"] = (
-                    (mat["Safety_Stock"] - mat["Pre_Rule_SS"]).clip(lower=0)
-                ).fillna(0)
-                mat["forced_zero_raw"] = mat.apply(
-                    lambda r: r["Pre_Rule_SS"] if r["Adjustment_Status"] == "Forced to Zero" else 0,
-                    axis=1,
-                )
-                mat["b616_override_raw"] = mat.apply(
-                    lambda r: r["Pre_Rule_SS"]
-                    if (r["Location"] == "B616" and r["Safety_Stock"] == 0)
-                    else 0,
-                    axis=1,
-                )
 
-                raw_drivers = {
-                    "Demand Uncertainty (z*sqrt(term1))": mat["demand_uncertainty_raw"].sum(),
-                    "Lead-time Uncertainty (z*sqrt(term2))": mat["lt_uncertainty_raw"].sum(),
-                    "Direct Local Forecast (sum Fcst)": mat["direct_forecast_raw"].sum(),
-                    "Indirect Network Demand (sum extra downstream)": mat["indirect_network_raw"].sum(),
-                    "Caps — Reductions (policy lowering SS)": mat["cap_reduction_raw"].sum(),
-                    "Caps — Increases (policy increasing SS)": mat["cap_increase_raw"].sum(),
-                    "Forced Zero Overrides (policy)": mat["forced_zero_raw"].sum(),
-                    "B616 Policy Override": mat["b616_override_raw"].sum(),
-                }
-
-                drv_df = pd.DataFrame(
-                    {
-                        "driver": list(raw_drivers.keys()),
-                        "amount": [float(v) for v in raw_drivers.values()],
-                    }
-                )
-                drv_df_display = drv_df[drv_df["amount"] != 0].copy()
-                drv_denom = drv_df["amount"].sum()
-                drv_df_display["pct_of_total_ss"] = (
-                    drv_df_display["amount"]
-                    / (drv_denom if drv_denom > 0 else 1.0)
-                    * 100
-                )
-
-                st.markdown("#### A. Original — Raw driver values (interpretation view)")
-                pastel_colors = px.colors.qualitative.Pastel
-                fig_drv_raw = go.Figure()
-                color_slice = (
-                    pastel_colors[: len(drv_df_display)]
-                    if len(drv_df_display) > 0
-                    else pastel_colors
-                )
-                fig_drv_raw.add_trace(
-                    go.Bar(
-                        x=drv_df_display["driver"],
-                        y=drv_df_display["amount"],
-                        marker_color=color_slice,
-                    )
-                )
-                annotations_raw = []
-                for _, rowd in drv_df_display.iterrows():
-                    annotations_raw.append(
-                        dict(
-                            x=rowd["driver"],
-                            y=rowd["amount"],
-                            text=f"{rowd['pct_of_total_ss']:.1f}%",
-                            showarrow=False,
-                            yshift=8,
-                        )
-                    )
-                fig_drv_raw.update_layout(
-                    title=f"{selected_product} — Raw Drivers (not SS-attribution)",
-                    xaxis_title="Driver",
-                    yaxis_title="Units",
-                    annotations=annotations_raw,
-                    height=420,
-                )
-                st.plotly_chart(fig_drv_raw, use_container_width=True)
-                st.dataframe(
-                    df_format_for_display(
-                        drv_df_display.rename(
-                            columns={
-                                "driver": "Driver",
-                                "amount": "Units",
-                                "pct_of_total_ss": "Pct_of_raw_sum",
-                            }
-                        ).round(2),
-                        cols=["Units", "Pct_of_raw_sum"],
-                        two_decimals_cols=["Pct_of_raw_sum"],
-                    ),
-                    use_container_width=True,
-                )
-
-                st.markdown("---")
-                st.markdown(
-                    "#### B. SS Attribution — Mutually exclusive components that SUM EXACTLY to Total Safety Stock"
-                )
                 per_node = mat.copy()
                 per_node["is_forced_zero"] = per_node["Adjustment_Status"] == "Forced to Zero"
                 per_node["is_b616_override"] = (per_node["Location"] == "B616") & (
@@ -2946,24 +2865,27 @@ if s_file and d_file and lt_file:
                 )
                 st.dataframe(ss_attrib_df_formatted, use_container_width=True)
 
-                # Executive takeaway with bold percentages and larger font
+                # Executive takeaway with extra blank line and strong red highlights
                 try:
                     top3 = ss_drv_df_display.sort_values("pct_of_total_ss", ascending=False).head(3)
                     pieces = []
                     for _, r in top3.iterrows():
                         pieces.append(
-                            f"{r['driver']} (<strong>{r['pct_of_total_ss']:.1f}%</strong>)"
+                            f"{r['driver']} "
+                            f"(<span class=\"exec-takeaway-percentage\">{r['pct_of_total_ss']:.1f}%</span>)"
                         )
                     if pieces:
                         takeaway = (
-                            f"For <strong>{selected_product}</strong> in <strong>{period_label(selected_period)}</strong>, "
+                            f"For <span class=\"exec-takeaway-selection\">{selected_product}</span> "
+                            f"in <span class=\"exec-takeaway-selection\">{period_label(selected_period)}</span>, "
                             f"safety stock is mainly explained by: " + "; ".join(pieces) + "."
                         )
                         st.markdown(
                             f"""
                             <div style="margin-top:8px;padding:8px 10px;border-radius:8px;
                                 background:#f5f9ff;border:1px solid #c5cae9;font-size:1.1rem;">
-                              <strong>Executive takeaway:</strong><br/>
+                              <strong>Executive takeaway:</strong>
+
                               {takeaway}
                             </div>
                             """,
