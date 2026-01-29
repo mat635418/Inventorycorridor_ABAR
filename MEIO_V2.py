@@ -24,7 +24,66 @@ days_per_month = 30
 st.image("logo.jpg", width=300)
 
 st.markdown(
-    "<h3 style='margin:0; padding-top:6px;'>v2.0 — Feb 2026</h3>",
+    """
+    <div style="
+        display:flex;
+        align-items:center;
+        gap:10px;
+        margin:4px 0 0 0;
+        font-size:0.9rem;
+    ">
+      <span style="
+          display:inline-flex;
+          align-items:center;
+          gap:6px;
+          padding:4px 10px;
+          border-radius:999px;
+          background:#e3f2fd;
+          color:#0b3d91;
+          font-weight:600;
+      ">
+        <span style="
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            width:18px;
+            height:18px;
+            border-radius:50%;
+            background:#0b3d91;
+            color:#ffffff;
+            font-size:0.75rem;
+        ">
+          V
+        </span>
+        v2.0
+      </span>
+      <span style="
+          display:inline-flex;
+          align-items:center;
+          gap:6px;
+          padding:4px 10px;
+          border-radius:999px;
+          background:#f3e5f5;
+          color:#6a1b9a;
+          font-weight:600;
+      ">
+        <span style="
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            width:18px;
+            height:18px;
+            border-radius:50%;
+            background:#6a1b9a;
+            color:#ffffff;
+            font-size:0.75rem;
+        ">
+          ⏱
+        </span>
+        Released Feb&nbsp;2026
+      </span>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
