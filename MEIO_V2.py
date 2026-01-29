@@ -402,12 +402,6 @@ def render_run_and_snapshot_header(
             """,
             unsafe_allow_html=True,
         )
-    # space + horizontal marker before tabs
-    st.markdown(
-        "<div style='margin-top:6px; margin-bottom:6px;'><hr style='border:none;border-top:1px solid #d0d0d0;'/></div>",
-        unsafe_allow_html=True,
-    )
-
 
 def render_tab1_explainer():
     """Short guide for reading the Inventory Corridor tab."""
