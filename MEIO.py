@@ -1982,7 +1982,7 @@ if s_file and d_file and lt_file:
                     "**Applied Hop → Service Level mapping (highlight shows which row was used for this node):**"
                 )
                 # Safely load the network hop illustration from the app root
-                hop_image_path = "network_hop_service_levels.png"
+                hop_image_path = "HOP_SLjpg.jpg"
                 if os.path.exists(hop_image_path):
                     st.image(hop_image_path, use_column_width=True)
                 else:
