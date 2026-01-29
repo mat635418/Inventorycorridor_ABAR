@@ -274,23 +274,28 @@ def render_ss_formula_explainer():
             r"""
             The scenario engine uses the classical formula:
 
-            \[
-            SS = z \cdot \sqrt{\underbrace{\mathrm{Var}(D)\cdot LT_{\text{mean}}}_{\text{demand uncertainty}} \;+\;
-                             \underbrace{(LT_{\text{std}}^2)\cdot D^2}_{\text{lead‑time uncertainty}}}
-            \]
+            $$
+            SS = z \cdot \sqrt{
+                \underbrace{\mathrm{Var}(D)\cdot LT_{\text{mean}}}_{\text{demand uncertainty}}
+                \;+\;
+                \underbrace{(LT_{\text{std}})^2\cdot D^2}_{\text{lead-time uncertainty}}
+            }
+            $$
 
             where:
-            - \(z\) is the z‑score for the chosen Service Level (e.g. 99% ⇒ ~2.33),
-            - \(D\) is the average daily demand,
-            - \(\mathrm{Var}(D)\) is the variance of daily demand,
-            - \(LT_{\text{mean}}\) is the average lead time (days),
-            - \(LT_{\text{std}}\) is the lead‑time standard deviation (days).
+
+            - $z$ is the z-score for the chosen Service Level (e.g. $99\% \Rightarrow 2.33$),
+            - $D$ is the average daily demand,
+            - $\mathrm{Var}(D)$ is the variance of daily demand,
+            - $LT_{\text{mean}}$ is the average lead time (days),
+            - $LT_{\text{std}}$ is the lead-time standard deviation (days).
 
             Additional rules applied:
-            - For very low monthly demand, we enforce **Var(D) ≥ D** (Poisson‑like floor).
-            - A small **floor** of 1% of mean demand over lead time is also enforced, so tiny
-              variances do not result in zero SS.
-            - Scenario SS is for **analysis only** and does not overwrite the implemented policy.
+
+            - For very low monthly demand, we enforce $\mathrm{Var}(D) \ge D$ (Poisson-like floor).
+            - A small floor of $1\%$ of the mean demand over lead time is also enforced,  
+              so tiny variances do not result in zero $SS$.
+            - Scenario $SS$ is for **analysis only** and does not overwrite the implemented policy.
             """,
             unsafe_allow_html=True,
         )
@@ -916,7 +921,7 @@ lt_mode = "Apply LT variance"
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Sources (CSV)")
-render_data_dictionary()  # New: show schema help in sidebar
+render_data_dictionary()
 DEFAULT_FILES = {
     "sales": "sales.csv",
     "demand": "demand.csv",
@@ -977,9 +982,6 @@ if s_file and d_file and lt_file:
         st.stop()
 
     # Period parsing with explicit diagnostics
-    raw_len_s = len(df_s)
-    raw_len_d = len(df_d)
-
     df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
     df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
 
@@ -1056,7 +1058,6 @@ if s_file and d_file and lt_file:
         Network_Forecast_Hist=("Forecast", "sum"),
     )
 
-    # active / meaningful rows
     meaningful_mask = get_active_mask(results)
     meaningful_results = results[meaningful_mask].copy()
 
@@ -1087,7 +1088,7 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
-    # --- Global executive header with key KPIs and consistent branding (ACTIVE only) ---
+    # --- Global executive header with key KPIs (ACTIVE only) ---
     if default_period is not None:
         global_period = default_period
         active_snapshot = get_active_snapshot(results, global_period)
@@ -1115,7 +1116,6 @@ if s_file and d_file and lt_file:
                 Network snapshot – {period_label(global_period)}
               </div>
 
-              <!-- Total Local Demand -->
               <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
                 <div style="font-size:0.75rem; color:#607d8b;">Total Local Demand (month)</div>
                 <div style="font-size:1rem; font-weight:800; color:#0b3d91;">
@@ -1123,7 +1123,6 @@ if s_file and d_file and lt_file:
                 </div>
               </div>
 
-              <!-- Total Safety Stock -->
               <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
                 <div style="font-size:0.75rem; color:#607d8b;">Safety Stock (sum)</div>
                 <div style="font-size:1rem; font-weight:800; color:#00695c;">
@@ -1131,7 +1130,6 @@ if s_file and d_file and lt_file:
                 </div>
               </div>
 
-              <!-- SS / Demand Coverage -->
               <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
                 <div style="font-size:0.75rem; color:#607d8b;">SS / Demand Coverage</div>
                 <div style="font-size:1rem; font-weight:800; color:#ef6c00;">
@@ -1139,7 +1137,6 @@ if s_file and d_file and lt_file:
                 </div>
               </div>
 
-              <!-- Active Materials -->
               <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
                 <div style="font-size:0.75rem; color:#607d8b;">Active Materials (with corridor)</div>
                 <div style="font-size:1rem; font-weight:800; color:#37474f;">
@@ -1147,7 +1144,6 @@ if s_file and d_file and lt_file:
                 </div>
               </div>
 
-              <!-- Active Nodes -->
               <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
                 <div style="font-size:0.75rem; color:#607d8b;">Active Nodes (with corridor)</div>
                 <div style="font-size:1rem; font-weight:800; color:#37474f;">
@@ -1172,7 +1168,7 @@ if s_file and d_file and lt_file:
         ]
     )
 
-    # TAB 1
+    # TAB 1 -----------------------------------------------------------------
     with tab1:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1182,7 +1178,6 @@ if s_file and d_file and lt_file:
             sku_index = all_products.index(sku_default) if sku_default in all_products else 0
             sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="tab1_sku")
 
-            # only ACTIVE nodes for this material in CURRENT_MONTH_TS
             loc_opts = active_nodes(results, period=CURRENT_MONTH_TS, product=sku)
             if not loc_opts:
                 loc_opts = active_nodes(results, product=sku)
@@ -1235,7 +1230,7 @@ if s_file and d_file and lt_file:
         with col_main:
             render_selection_line("Selected:", product=sku, location=loc)
             st.subheader("📈 Inventory Corridor")
-            render_tab1_explainer()  # <--- New explainer
+            render_tab1_explainer()
 
             plot_df = results[(results["Product"] == sku) & (results["Location"] == loc)].sort_values("Period")
             df_all_periods = pd.DataFrame({"Period": all_periods})
@@ -1377,7 +1372,7 @@ if s_file and d_file and lt_file:
 
             st.plotly_chart(fig, use_container_width=True)
 
-    # TAB 2
+    # TAB 2 -----------------------------------------------------------------
     with tab2:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1450,12 +1445,10 @@ if s_file and d_file and lt_file:
 
             hubs = {"B616", "BEEX", "LUEX"}
 
-            # ACTIVE nodes for this material & period
             active_nodes_for_sku = set(
                 active_nodes(results, period=chosen_period, product=sku)
             )
 
-            # Route nodes restricted to active nodes
             if not sku_lt.empty:
                 froms = set(sku_lt["From_Location"].dropna().unique().tolist())
                 tos = set(sku_lt["To_Location"].dropna().unique().tolist())
@@ -1464,7 +1457,6 @@ if s_file and d_file and lt_file:
             else:
                 all_nodes = hubs.intersection(active_nodes_for_sku)
 
-            # If nothing is active, fall back to hubs only so chart isn't empty
             if not all_nodes:
                 all_nodes = hubs
 
@@ -1503,7 +1495,6 @@ if s_file and d_file and lt_file:
                     },
                 )
 
-                # ACTIVE flag: aligned with get_active_mask
                 node_active = (
                     abs(float(m.get("Agg_Future_Demand", 0)))
                     + abs(float(m.get("Forecast", 0)))
@@ -1513,7 +1504,6 @@ if s_file and d_file and lt_file:
                 )
 
                 if not node_active:
-                    # Truly inactive: do not draw (no grey boxes)
                     continue
 
                 tier_hops = m.get("Tier_Hops", np.nan)
@@ -1522,13 +1512,11 @@ if s_file and d_file and lt_file:
                 except Exception:
                     hops_val = 0
 
-                # Light‑to‑darker color scale by hop distance
                 if n == "B616":
                     bg, border, font_color, size = "#dcedc8", "#8bc34a", "#0b3d91", 14
                 elif n in {"BEEX", "LUEX"}:
                     bg, border, font_color, size = "#bbdefb", "#64b5f6", "#0b3d91", 14
                 else:
-                    # map hops 0..3+ to 3 yellows
                     if hops_val <= 0:
                         bg = "#fffde7"
                         border = "#fbc02d"
@@ -1568,7 +1556,6 @@ if s_file and d_file and lt_file:
                     font={"color": font_color, "size": size},
                 )
 
-            # Add only edges between nodes that actually exist in the active view
             visible_nodes = {n["id"] for n in net.nodes}
             if not sku_lt.empty:
                 for _, r in sku_lt.iterrows():
@@ -1585,55 +1572,50 @@ if s_file and d_file and lt_file:
                         to_n,
                         label=label,
                         color=edge_color,
-                        # Make arrows visually longer / more separated
-                        smooth={
-                            "enabled": True,
-                            "type": "dynamic",
-                            "roundness": 0.4,
-                        },
+                        smooth={"enabled": True, "type": "dynamic", "roundness": 0.4},
                     )
 
             net.set_options(
-    """
-    {
-      "physics": {
-        "enabled": true,
-        "stabilization": {
-          "enabled": true,
-          "iterations": 300,
-          "fit": true
-        },
-        "barnesHut": {
-          "gravitationalConstant": -3000,
-          "centralGravity": 0.1,
-          "springLength": 50,
-          "springConstant": 0.02,
-          "damping": 0.09,
-          "avoidOverlap": 1.0
-        }
-      },
-      "nodes": {
-        "borderWidthSelected": 2
-      },
-      "edges": {
-        "smooth": {
-          "enabled": true,
-          "type": "dynamic",
-          "roundness": 0.4
-        }
-      },
-      "interaction": {
-        "hover": true,
-        "zoomView": true,
-        "dragView": true,
-        "dragNodes": true
-      },
-      "layout": {
-        "improvedLayout": true
-      }
-    }
-    """
-)
+                """
+                {
+                  "physics": {
+                    "enabled": true,
+                    "stabilization": {
+                      "enabled": true,
+                      "iterations": 300,
+                      "fit": true
+                    },
+                    "barnesHut": {
+                      "gravitationalConstant": -3000,
+                      "centralGravity": 0.1,
+                      "springLength": 50,
+                      "springConstant": 0.02,
+                      "damping": 0.09,
+                      "avoidOverlap": 1.0
+                    }
+                  },
+                  "nodes": {
+                    "borderWidthSelected": 2
+                  },
+                  "edges": {
+                    "smooth": {
+                      "enabled": true,
+                      "type": "dynamic",
+                      "roundness": 0.4
+                    }
+                  },
+                  "interaction": {
+                    "hover": true,
+                    "zoomView": true,
+                    "dragView": true,
+                    "dragNodes": true
+                  },
+                  "layout": {
+                    "improvedLayout": true
+                  }
+                }
+                """
+            )
             tmpfile = "net.html"
             net.save_graph(tmpfile)
             html_text = open(tmpfile, "r", encoding="utf-8").read()
@@ -1690,7 +1672,7 @@ if s_file and d_file and lt_file:
                 unsafe_allow_html=True,
             )
 
-    # TAB 3
+    # TAB 3 -----------------------------------------------------------------
     with tab3:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1725,7 +1707,6 @@ if s_file and d_file and lt_file:
                 default=default_period_list,
                 key="full_f_period",
             )
-
             f_period = [period_label_map[lbl] for lbl in f_period_labels] if f_period_labels else []
 
             with st.container():
@@ -1825,7 +1806,7 @@ if s_file and d_file and lt_file:
             )
             st.dataframe(disp, use_container_width=True, height=700)
 
-    # TAB 4
+    # TAB 4 -----------------------------------------------------------------
     with tab4:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1964,7 +1945,7 @@ if s_file and d_file and lt_file:
                 else:
                     st.write("No non-zero nodes for this selection.")
 
-    # TAB 5
+    # TAB 5 -----------------------------------------------------------------
     with tab5:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -2078,7 +2059,7 @@ if s_file and d_file and lt_file:
                     c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                     st.metric("Network WAPE (%)", c_val)
 
-    # TAB 6
+    # TAB 6 -----------------------------------------------------------------
     with tab6:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -2165,7 +2146,7 @@ if s_file and d_file and lt_file:
                 "See how changing the **end-node** service level (SL) or lead-time assumptions affects safety stock. "
                 "Hop 1–3 service levels are automatically recomputed to keep the same relative gaps as in the base policy."
             )
-            render_ss_formula_explainer()  # detailed formula explainer
+            render_ss_formula_explainer()
 
             z_current = norm.ppf(service_level)
 
@@ -2179,8 +2160,9 @@ if s_file and d_file and lt_file:
             else:
                 row = row_df.iloc[0]
 
-                # Base hop SLs used in the policy (as percentages) – will be used as reference ratios
                 base_hop_sl = {0: 99.0, 1: 95.0, 2: 90.0, 3: 85.0}
+                base_end_sl_pct = base_hop_sl[0]
+                hop_ratios = {h: base_hop_sl[h] / base_end_sl_pct for h in base_hop_sl}
 
                 node_sl = float(row.get("Service_Level_Node", service_level))
                 node_z = float(row.get("Z_node", norm.ppf(node_sl)))
@@ -2196,7 +2178,7 @@ if s_file and d_file and lt_file:
                     st.info(
                         "Network hop illustration not found on the server "
                         f"(expected at '{hop_image_path}'). "
-                        "Please add this image file next to MEIO.py."
+                        "Please add this image file next to MEIO_V2.py."
                     )
 
                 avg_daily = row.get("D_day", np.nan)
@@ -2264,12 +2246,7 @@ if s_file and d_file and lt_file:
                     unsafe_allow_html=True,
                 )
 
-                # For Scenario planning we use ratios to keep hop SL gaps constant vs the base grid
-                base_end_sl_pct = base_hop_sl[0]
-                hop_ratios = {h: base_hop_sl[h] / base_end_sl_pct for h in base_hop_sl}
-
                 with st.expander("Show detailed scenario controls", expanded=False):
-                    # Explanation only, no inner text that creates a second marker
                     st.markdown(
                         """
                         Use the sliders below to set an **end-node** Service Level (SL) for each scenario.
@@ -2308,7 +2285,6 @@ if s_file and d_file and lt_file:
                                 help="End-node Service Level used for this scenario. Hop 1–3 SLs are recomputed automatically.",
                                 key=f"sc_sl_{s}",
                             )
-                            # Compute derived hop SLs using the same relative ratios as the base grid
                             hop0 = sc_sl
                             hop1 = max(0.0, min(99.9, hop0 * hop_ratios[1]))
                             hop2 = max(0.0, min(99.9, hop0 * hop_ratios[2]))
@@ -2355,7 +2331,6 @@ if s_file and d_file and lt_file:
 
                     scen_rows = []
                     for idx, sc in enumerate(scenarios):
-                        # Scenario SS calculation uses the scenario end-node SL
                         sc_z = norm.ppf(sc["SL_pct"] / 100.0)
                         d_day = float(row["Agg_Future_Demand"]) / float(days_per_month)
                         sigma_d_day = float(row["Agg_Std_Hist"]) / math.sqrt(float(days_per_month))
@@ -2479,7 +2454,7 @@ if s_file and d_file and lt_file:
                     )
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-    # TAB 7
+    # TAB 7 -----------------------------------------------------------------
     with tab7:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -2557,10 +2532,6 @@ if s_file and d_file and lt_file:
             ].copy()
             mat_period_df_display = hide_zero_rows(mat_period_df)
             total_forecast = mat_period_df["Forecast"].sum()
-            network_total_forecast = df_d[
-                (df_d["Product"] == selected_product)
-                & (df_d["Period"] == selected_period)
-            ]["Forecast"].sum()
             total_ss = mat_period_df["Safety_Stock"].sum()
             nodes_count = mat_period_df["Location"].nunique()
 
@@ -2867,7 +2838,8 @@ if s_file and d_file and lt_file:
                             f"""
                             <div style="margin-top:8px;padding:8px 10px;border-radius:8px;
                                 background:#f5f9ff;border:1px solid #c5cae9;font-size:1.1rem;">
-                              <strong>Executive takeaway:</strong> {takeaway}
+                              <strong>Executive takeaway:</strong><br/>
+                              {takeaway}
                             </div>
                             """,
                             unsafe_allow_html=True,
@@ -2875,7 +2847,7 @@ if s_file and d_file and lt_file:
                 except Exception:
                     pass
 
-    # TAB 8
+    # TAB 8 -----------------------------------------------------------------
     with tab8:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
