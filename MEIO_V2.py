@@ -20,13 +20,36 @@ LOGO_FILENAME = "GY_logo.jpg"
 LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
-# --- New: show logo.svg above the main title ---
-st.image("logo.jpg", width=300)
+# --- Header layout: run configuration (left) + logo (right) ---
+header_col_conf, header_col_logo = st.columns([7, 3])
 
-st.markdown(
-    "<h3 style='margin:0; padding-top:6px;'>v2.0 — Feb 2026</h3>",
-    unsafe_allow_html=True,
-)
+with header_col_logo:
+    st.image("logo.jpg", width=300)
+
+with header_col_conf:
+    st.markdown(
+        "<h3 style='margin:0; padding-top:6px;'>v2.0 — Feb 2026</h3>",
+        unsafe_allow_html=True,
+    )
+
+    def render_run_header(service_level, zero_if_no_net_fcst, apply_cap, cap_range):
+        """Show a small, copy‑paste‑able run configuration header for traceability."""
+        with st.expander("🧾 Run configuration (for screenshots / traceability)", expanded=False):
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            run_id = datetime.now().strftime("RUN-%Y%m%d-%H%M%S")
+            st.markdown(
+                f"""
+                **Run ID:** `{run_id}`  
+                **Timestamp:** {now_str}  
+
+                **Key parameters:**
+                - End‑node Service Level target: **{service_level*100:.2f}%**
+                - Zero SS if no demand: **{str(zero_if_no_net_fcst)}**
+                - SS capping enabled: **{str(apply_cap)}**
+                - Cap range: **{cap_range[0]}–{cap_range[1]} % of network demand**
+                """,
+                unsafe_allow_html=True,
+            )
 
 st.markdown(
     """
@@ -204,7 +227,6 @@ def render_data_dictionary():
             """,
             unsafe_allow_html=True,
         )
-
 
 def render_run_header(service_level, zero_if_no_net_fcst, apply_cap, cap_range):
     """Show a small, copy‑paste‑able run configuration header for traceability."""
