@@ -1172,8 +1172,7 @@ if s_file and d_file and lt_file:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         run_id = datetime.now().strftime("RUN-%Y%m%d-%H%M%S")
 
-        # direct HTML, not wrapped in markdown-style code fences
-        st.write(
+        st.markdown(
             f"""
 <div style="
     margin-top:8px;
@@ -2976,7 +2975,7 @@ if s_file and d_file and lt_file:
                 )
                 st.dataframe(ss_attrib_df_formatted, use_container_width=True)
 
-                # Executive takeaway with blank line before main sentence
+                # Executive takeaway with blank line between label and content
                 try:
                     top3 = ss_drv_df_display.sort_values("pct_of_total_ss", ascending=False).head(3)
                     pieces = []
