@@ -1984,7 +1984,7 @@ if s_file and d_file and lt_file:
                 # Safely load the network hop illustration from the app root
                 hop_image_path = "HOP_SLjpg.jpg"
                 if os.path.exists(hop_image_path):
-                    st.image(hop_image_path, use_column_width=True)
+                    st.image(hop_image_path, width=400)
                 else:
                     st.info(
                         "Network hop illustration not found on the server "
