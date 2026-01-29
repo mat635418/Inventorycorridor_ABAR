@@ -218,12 +218,38 @@ st.markdown(
         margin-bottom: 4px;
         color: #333333;
       }
-      /* Compact run configuration + snapshot header (single-row snapshot) */
-      .run-snapshot-container {
+
+      /* Compact run configuration + snapshot header (white cards on first row) */
+      .run-snapshot-wrapper {
+        border-radius: 8px;
+        background: linear-gradient(90deg,#e3f2fd,#e8f5e9);
+        padding: 0;
+        margin-top: 6px;
+        margin-bottom: 4px;
+      }
+      .run-snapshot-header {
+        padding: 6px 10px 4px 10px;
+        margin: 0;
+        border-radius: 8px 8px 0 0;
+        background: linear-gradient(90deg,#e3f2fd,#e8f5e9);
+        font-size: 0.80rem;
+        font-weight: 700;
+        color: #0b3d91;
+      }
+      .run-snapshot-inner {
+        padding: 6px 8px 8px 8px;
+      }
+      /* TOP ROW: all white metric cards */
+      .run-snapshot-row-top {
         display: grid;
-        grid-template-columns: minmax(220px, 1.2fr) repeat(3, minmax(180px, 1fr));
+        grid-template-columns: repeat(5, minmax(150px, 1fr));
         gap: 10px;
-        margin: 8px 0 4px 0;
+        margin-bottom: 8px;
+      }
+      /* BOTTOM ROW: run configuration only */
+      .run-snapshot-row-bottom {
+        display: grid;
+        grid-template-columns: minmax(260px, 1fr);
       }
       .run-card,
       .snap-card {
@@ -262,25 +288,6 @@ st.markdown(
         font-size: 0.75rem;
         color: #666666;
         margin-top: 2px;
-      }
-      .run-snapshot-header {
-        padding: 6px 10px 4px 10px;
-        margin: 0;
-        border-radius: 8px 8px 0 0;
-        background: linear-gradient(90deg,#e3f2fd,#e8f5e9);
-        font-size: 0.80rem;
-        font-weight: 700;
-        color: #0b3d91;
-      }
-      .run-snapshot-wrapper {
-        border-radius: 8px;
-        background: linear-gradient(90deg,#e3f2fd,#e8f5e9);
-        padding: 0;
-        margin-top: 6px;
-        margin-bottom: 4px;
-      }
-      .run-snapshot-inner {
-        padding: 6px 8px 8px 8px;
       }
       .exec-takeaway-selection {
         color: #b71c1c;
@@ -352,7 +359,7 @@ def render_run_and_snapshot_header(
     n_active_materials: int,
     n_active_nodes: int,
 ):
-    """Collapsible banner: single-row snapshot + run configuration, initially collapsed."""
+    """Collapsible banner: snapshot cards in first row, run configuration below."""
     with st.expander("📊 Network snapshot & run configuration", expanded=False):
         st.markdown(
             f"""
@@ -361,7 +368,9 @@ def render_run_and_snapshot_header(
                 Network snapshot – {snapshot_label}
               </div>
               <div class="run-snapshot-inner">
-                <div class="run-snapshot-container">
+
+                <!-- FIRST ROW: all white boxes (5 cards) -->
+                <div class="run-snapshot-row-top">
                   <div class="snap-card">
                     <div class="snap-card-label">Total Local Demand (month)</div>
                     <div class="snap-card-value">{euro_format(tot_local_demand, True)}</div>
@@ -380,8 +389,14 @@ def render_run_and_snapshot_header(
                     <div class="snap-card-label">Active Materials (with corridor)</div>
                     <div class="snap-card-value">{n_active_materials}</div>
                   </div>
+                  <div class="snap-card">
+                    <div class="snap-card-label">Active Nodes (with corridor)</div>
+                    <div class="snap-card-value">{n_active_nodes}</div>
+                  </div>
                 </div>
-                <div class="run-snapshot-container" style="grid-template-columns: minmax(260px, 1.4fr) repeat(1, minmax(180px, 1fr)); margin-top:6px;">
+
+                <!-- SECOND ROW: run configuration only -->
+                <div class="run-snapshot-row-bottom">
                   <div class="run-card">
                     <div class="run-card-title">Run configuration</div>
                     <div class="run-card-body">
@@ -392,16 +407,14 @@ def render_run_and_snapshot_header(
                       <div><strong>SS capping:</strong> {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)</div>
                     </div>
                   </div>
-                  <div class="snap-card">
-                    <div class="snap-card-label">Active Nodes (with corridor)</div>
-                    <div class="snap-card-value">{n_active_nodes}</div>
-                  </div>
                 </div>
+
               </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+
 
 def render_tab1_explainer():
     """Short guide for reading the Inventory Corridor tab."""
