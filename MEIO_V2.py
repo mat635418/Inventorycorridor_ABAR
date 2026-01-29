@@ -55,7 +55,7 @@ st.markdown(
         ">
           V
         </span>
-        v2.0
+        v1.15
       </span>
       <span style="
           display:inline-flex;
@@ -308,10 +308,10 @@ def render_tab1_explainer():
     with st.expander("ℹ️ How to read this view", expanded=False):
         st.markdown(
             """
-            - **Max Corridor (SS + Forecast)**: the upper bound of the inventory corridor for the node.
-            - **Safety Stock**: the buffer inventory needed to protect against uncertainty.
-            - **Local Direct Demand (Internal)**: the node's own demand (forecast).
-            - **External Network Demand (Downstream)**: rolled‑up demand of downstream nodes that this node serves.
+            - **Max Corridor (SS + FC)**: the upper bound of the inventory corridor for the node.
+            - **SS (Safety Stock)**: the buffer inventory needed to protect against uncertainty.
+            - **FC (Local Forecast)**: the node's own demand (local forecast).
+            - **DFC (Downstream FC — rolled‑up)**: aggregated demand of downstream nodes that this node serves.
 
             Reading tip: for a healthy node, **Max Corridor** should move broadly in line with
             total demand; if SS grows much faster than demand, the node becomes more inventory‑intensive.
@@ -1172,137 +1172,136 @@ if s_file and d_file and lt_file:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         run_id = datetime.now().strftime("RUN-%Y%m%d-%H%M%S")
 
-        st.markdown(
+        # direct HTML, not wrapped in markdown-style code fences
+        st.write(
             f"""
-            <div style="
-                margin-top:8px;
-                margin-bottom:8px;
-                border-radius:10px;
-                background:linear-gradient(90deg,#e3f2fd,#e8f5e9);
-                padding:8px 10px;
-            ">
-              <div style="
-                  display:flex;
-                  flex-wrap:wrap;
-                  gap:10px;
-                  align-items:stretch;
-              ">
+<div style="
+    margin-top:8px;
+    margin-bottom:8px;
+    border-radius:10px;
+    background:linear-gradient(90deg,#e3f2fd,#e8f5e9);
+    padding:8px 10px;
+">
+  <div style="
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:stretch;
+  ">
 
-                <!-- Left: run configuration (narrow panel) -->
-                <div style="
-                    flex:0 0 23%;
-                    min-width:250px;
-                    background:rgba(255,255,255,0.9);
-                    border-radius:8px;
-                    padding:8px 10px;
-                    box-shadow:0 0 0 1px rgba(224,224,224,0.7);
-                    font-size:0.78rem;
-                ">
-                  <div style="font-weight:700;color:#0b3d91;margin-bottom:4px;">
-                    Run configuration
-                  </div>
-                  <div><strong>ID:</strong> <code>{run_id}</code></div>
-                  <div><strong>Time:</strong> {now_str}</div>
-                  <div><strong>End-node SL:</strong> {service_level*100:.2f}%</div>
-                  <div><strong>Zero SS if no demand:</strong> {str(zero_if_no_net_fcst)}</div>
-                  <div>
-                    <strong>SS capping:</strong>
-                    {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)
-                  </div>
-                </div>
+    <div style="
+        flex:0 0 23%;
+        min-width:250px;
+        background:rgba(255,255,255,0.9);
+        border-radius:8px;
+        padding:8px 10px;
+        box-shadow:0 0 0 1px rgba(224,224,224,0.7);
+        font-size:0.78rem;
+    ">
+      <div style="font-weight:700;color:#0b3d91;margin-bottom:4px;">
+        Run configuration
+      </div>
+      <div><strong>ID:</strong> <code>{run_id}</code></div>
+      <div><strong>Time:</strong> {now_str}</div>
+      <div><strong>End-node SL:</strong> {service_level*100:.2f}%</div>
+      <div><strong>Zero SS if no demand:</strong> {str(zero_if_no_net_fcst)}</div>
+      <div>
+        <strong>SS capping:</strong>
+        {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)
+      </div>
+    </div>
 
-                <!-- Right: network snapshot KPIs (wide panel) -->
-                <div style="
-                    flex:1 1 auto;
-                    background:linear-gradient(90deg,#e3f2fd,#e8f5e9);
-                    border-radius:8px;
-                    padding:8px 10px;
-                    box-shadow:0 0 0 1px rgba(224,224,224,0.7);
-                    font-size:0.8rem;
-                ">
-                  <div style="font-weight:700;color:#0b3d91;margin-bottom:6px;">
-                    Network snapshot – {period_label(global_period)}
-                  </div>
+    <div style="
+        flex:1 1 auto;
+        background:linear-gradient(90deg,#e3f2fd,#e8f5e9);
+        border-radius:8px;
+        padding:8px 10px;
+        box-shadow:0 0 0 1px rgba(224,224,224,0.7);
+        font-size:0.8rem;
+    ">
+      <div style="font-weight:700;color:#0b3d91;margin-bottom:6px;">
+        Network snapshot – {period_label(global_period)}
+      </div>
 
-                  <div style="
-                      display:flex;
-                      flex-wrap:wrap;
-                      gap:10px;
-                  ">
-                    <div style="
-                        flex:1 1 18%;
-                        min-width:180px;
-                        background:#ffffff;
-                        border-radius:8px;
-                        padding:8px 10px;
-                        border:1px solid #e0e0e0;
-                    ">
-                      <div style="font-size:0.75rem;color:#607d8b;">Total Local Demand (month)</div>
-                      <div style="font-size:1rem;font-weight:800;color:#0b3d91;">
-                        {euro_format(tot_local_demand, True)}
-                      </div>
-                    </div>
+      <div style="
+          display:flex;
+          flex-wrap:wrap;
+          gap:10px;
+      ">
+        <div style="
+            flex:1 1 18%;
+            min-width:180px;
+            background:#ffffff;
+            border-radius:8px;
+            padding:8px 10px;
+            border:1px solid #e0e0e0;
+        ">
+          <div style="font-size:0.75rem;color:#607d8b;">Total Local Demand (month)</div>
+          <div style="font-size:1rem;font-weight:800;color:#0b3d91;">
+            {euro_format(tot_local_demand, True)}
+          </div>
+        </div>
 
-                    <div style="
-                        flex:1 1 18%;
-                        min-width:180px;
-                        background:#ffffff;
-                        border-radius:8px;
-                        padding:8px 10px;
-                        border:1px solid #e0e0e0;
-                    ">
-                      <div style="font-size:0.75rem;color:#607d8b;">Safety Stock (sum)</div>
-                      <div style="font-size:1rem;font-weight:800;color:#00695c;">
-                        {euro_format(tot_ss, True)}
-                      </div>
-                    </div>
+        <div style="
+            flex:1 1 18%;
+            min-width:180px;
+            background:#ffffff;
+            border-radius:8px;
+            padding:8px 10px;
+            border:1px solid #e0e0e0;
+        ">
+          <div style="font-size:0.75rem;color:#607d8b;">Safety Stock (sum)</div>
+          <div style="font-size:1rem;font-weight:800;color:#00695c;">
+            {euro_format(tot_ss, True)}
+          </div>
+        </div>
 
-                    <div style="
-                        flex:1 1 18%;
-                        min-width:180px;
-                        background:#ffffff;
-                        border-radius:8px;
-                        padding:8px 10px;
-                        border:1px solid #e0e0e0;
-                    ">
-                      <div style="font-size:0.75rem;color:#607d8b;">SS / Demand Coverage</div>
-                      <div style="font-size:1rem;font-weight:800;color:#ef6c00;">
-                        {ss_ratio_pct:.1f}% &nbsp;({coverage_months:.2f} months)
-                      </div>
-                    </div>
+        <div style="
+            flex:1 1 18%;
+            min-width:180px;
+            background:#ffffff;
+            border-radius:8px;
+            padding:8px 10px;
+            border:1px solid #e0e0e0;
+        ">
+          <div style="font-size:0.75rem;color:#607d8b;">SS / Demand Coverage</div>
+          <div style="font-size:1rem;font-weight:800;color:#ef6c00;">
+            {ss_ratio_pct:.1f}% &nbsp;({coverage_months:.2f} months)
+          </div>
+        </div>
 
-                    <div style="
-                        flex:1 1 18%;
-                        min-width:160px;
-                        background:#ffffff;
-                        border-radius:8px;
-                        padding:8px 10px;
-                        border:1px solid #e0e0e0;
-                    ">
-                      <div style="font-size:0.75rem;color:#607d8b;">Active Materials (with corridor)</div>
-                      <div style="font-size:1rem;font-weight:800;color:#37474f;">
-                        {n_active_materials}
-                      </div>
-                    </div>
+        <div style="
+            flex:1 1 18%;
+            min-width:160px;
+            background:#ffffff;
+            border-radius:8px;
+            padding:8px 10px;
+            border:1px solid #e0e0e0;
+        ">
+          <div style="font-size:0.75rem;color:#607d8b;">Active Materials (with corridor)</div>
+          <div style="font-size:1rem;font-weight:800;color:#37474f;">
+            {n_active_materials}
+          </div>
+        </div>
 
-                    <div style="
-                        flex:1 1 18%;
-                        min-width:160px;
-                        background:#ffffff;
-                        border-radius:8px;
-                        padding:8px 10px;
-                        border:1px solid #e0e0e0;
-                    ">
-                      <div style="font-size:0.75rem;color:#607d8b;">Active Nodes (with corridor)</div>
-                      <div style="font-size:1rem;font-weight:800;color:#37474f;">
-                        {n_active_nodes}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            """,
+        <div style="
+            flex:1 1 18%;
+            min-width:160px;
+            background:#ffffff;
+            border-radius:8px;
+            padding:8px 10px;
+            border:1px solid #e0e0e0;
+        ">
+          <div style="font-size:0.75rem;color:#607d8b;">Active Nodes (with corridor)</div>
+          <div style="font-size:1rem;font-weight:800;color:#37474f;">
+            {n_active_nodes}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+""",
             unsafe_allow_html=True,
         )
 
@@ -1381,7 +1380,6 @@ if s_file and d_file and lt_file:
         with col_main:
             render_selection_line("Selected:", product=sku, location=loc)
             st.subheader("📈 Inventory Corridor")
-            render_tab1_explainer()
 
             plot_df = results[(results["Product"] == sku) & (results["Location"] == loc)].sort_values("Period")
             df_all_periods = pd.DataFrame({"Period": all_periods})
@@ -1421,7 +1419,7 @@ if s_file and d_file and lt_file:
                 go.Scatter(
                     x=plot_full["Period"],
                     y=plot_full["Max_Corridor"],
-                    name="Max Corridor (SS + Forecast)",
+                    name="Max Corridor (SS + FC)",
                     mode="lines",
                     line=dict(width=1.5, color="#9e9e9e", dash="dot"),
                     hovertemplate=(
@@ -1435,14 +1433,14 @@ if s_file and d_file and lt_file:
                 go.Scatter(
                     x=plot_full["Period"],
                     y=plot_full["Safety_Stock"],
-                    name="Safety Stock",
+                    name="SS = Safety Stock (final policy value)",
                     mode="lines",
                     line=dict(width=0.5, color="#42a5f5"),
                     fill="tozeroy",
                     fillcolor="rgba(66,165,245,0.25)",
                     hovertemplate=(
                         "Period: %{x|%b %Y}<br>"
-                        "Safety Stock: %{customdata} units<extra></extra>"
+                        "SS: %{customdata} units<extra></extra>"
                     ),
                     customdata=plot_full["Safety_Stock"].apply(int_dot),
                 )
@@ -1451,13 +1449,13 @@ if s_file and d_file and lt_file:
                 go.Scatter(
                     x=plot_full["Period"],
                     y=plot_full["Forecast"],
-                    name="Local Direct Demand (Internal)",
+                    name="FC = Local Forecast",
                     mode="lines+markers",
                     line=dict(color="#212121", width=2),
                     marker=dict(size=5),
                     hovertemplate=(
                         "Period: %{x|%b %Y}<br>"
-                        "Local Forecast: %{customdata} units<extra></extra>"
+                        "FC (Local Forecast): %{customdata} units<extra></extra>"
                     ),
                     customdata=plot_full["Forecast"].apply(int_dot),
                 )
@@ -1466,13 +1464,13 @@ if s_file and d_file and lt_file:
                 go.Scatter(
                     x=plot_full["Period"],
                     y=plot_full["Agg_Future_External"],
-                    name="External Network Demand (Downstream)",
+                    name="DFC = Downstream FC (rolled-up)",
                     mode="lines+markers",
                     line=dict(color="#00897b", width=2, dash="dash"),
                     marker=dict(size=5),
                     hovertemplate=(
                         "Period: %{x|%b %Y}<br>"
-                        "External Demand: %{customdata} units<extra></extra>"
+                        "DFC (Downstream FC): %{customdata} units<extra></extra>"
                     ),
                     customdata=plot_full["Agg_Future_External"].apply(int_dot),
                 )
@@ -1522,6 +1520,12 @@ if s_file and d_file and lt_file:
             )
 
             st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown(
+                "<hr style='margin:6px 0 4px 0; border:none; border-top:1px solid #e0e0e0;'/>",
+                unsafe_allow_html=True,
+            )
+            render_tab1_explainer()
 
     # TAB 2 -----------------------------------------------------------------
     with tab2:
@@ -2972,7 +2976,7 @@ if s_file and d_file and lt_file:
                 )
                 st.dataframe(ss_attrib_df_formatted, use_container_width=True)
 
-                # Executive takeaway with bold percentages and larger font
+                # Executive takeaway with blank line before main sentence
                 try:
                     top3 = ss_drv_df_display.sort_values("pct_of_total_ss", ascending=False).head(3)
                     pieces = []
@@ -2981,7 +2985,7 @@ if s_file and d_file and lt_file:
                             f"{r['driver']} (<strong>{r['pct_of_total_ss']:.1f}%</strong>)"
                         )
                     if pieces:
-                        takeaway = (
+                        main_sentence = (
                             f"For <strong>{selected_product}</strong> in <strong>{period_label(selected_period)}</strong>, "
                             f"safety stock is mainly explained by: " + "; ".join(pieces) + "."
                         )
@@ -2989,8 +2993,8 @@ if s_file and d_file and lt_file:
                             f"""
                             <div style="margin-top:8px;padding:8px 10px;border-radius:8px;
                                 background:#f5f9ff;border:1px solid #c5cae9;font-size:1.1rem;">
-                              <strong>Executive takeaway:</strong><br/>
-                              {takeaway}
+                              <strong>Executive takeaway:</strong><br/><br/>
+                              {main_sentence}
                             </div>
                             """,
                             unsafe_allow_html=True,
