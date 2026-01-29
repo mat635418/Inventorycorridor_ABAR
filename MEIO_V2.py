@@ -1554,8 +1554,8 @@ if s_file and d_file and lt_file:
 
                 lbl = (
                     f"{n}\n"
-                    f"LDD: {euro_format(m.get('Forecast', 0), show_zero=True)}\n"
-                    f"EXT: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\n"
+                    f"FC: {euro_format(m.get('Forecast', 0), show_zero=True)}\n"
+                    f"DFC: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\n"
                     f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\n"
                     f"SL: {sl_label}"
                 )
@@ -1680,8 +1680,8 @@ if s_file and d_file and lt_file:
                 <div style="text-align:center; font-size:12px; padding:8px 0;">
                   <div style="display:inline-block; background:#f7f9fc; padding:8px 12px; border-radius:8px;">
                     <strong>Legend:</strong><br/>
-                    LDD = Local Direct Demand (local forecast) &nbsp;&nbsp;|&nbsp;&nbsp;
-                    EXT = External Demand (downstream forecasts rolled-up) &nbsp;&nbsp;|&nbsp;&nbsp;
+                    FC = Local Forecast &nbsp;&nbsp;|&nbsp;&nbsp;
+                    DFC = Downstream FC (rolled-up) &nbsp;&nbsp;|&nbsp;&nbsp;
                     SS  = Safety Stock (final policy value)<br/>
                     Node border intensity loosely reflects hop distance from end-nodes.
                   </div>
