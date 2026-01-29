@@ -55,7 +55,7 @@ st.markdown(
         ">
           V
         </span>
-        v2.0
+        v1.15
       </span>
       <span style="
           display:inline-flex;
@@ -218,24 +218,67 @@ st.markdown(
         margin-bottom: 4px;
         color: #333333;
       }
-      /* Compact run configuration header (max ~30% width) */
-      .run-config-header {
-        max-width: 30%;
-        min-width: 260px;
-        padding: 6px 10px;
-        margin: 6px 0 4px 0;
-        border-radius: 8px;
-        background: linear-gradient(90deg,#e3f2fd,#e8f5e9);
-        font-size: 0.78rem;
+      /* Compact run configuration + snapshot header */
+      .run-snapshot-container {
+        display: grid;
+        grid-template-columns: minmax(220px, 1.2fr) repeat(3, minmax(180px, 1fr));
+        gap: 10px;
+        margin: 10px 0 6px 0;
       }
-      .run-config-header-title {
-        font-weight: 700;
+      .run-card,
+      .snap-card {
+        border-radius: 8px;
+        padding: 8px 10px;
+        background: #ffffff;
+        border: 1px solid #e0e0e0;
+      }
+      .run-card {
+        background: linear-gradient(135deg,#e3f2fd,#e8f5e9);
+      }
+      .run-card-title,
+      .snap-card-label {
+        font-size: 0.78rem;
         color: #0b3d91;
+        font-weight: 700;
         margin-bottom: 2px;
       }
-      .run-config-header p {
-        margin: 0;
+      .run-card-body {
+        font-size: 0.78rem;
+        color: #154360;
         line-height: 1.25;
+      }
+      .snap-card-value {
+        font-size: 1.0rem;
+        font-weight: 800;
+        color: #111111;
+      }
+      .snap-card-value-green {
+        color: #00695c;
+      }
+      .snap-card-value-orange {
+        color: #ef6c00;
+      }
+      .snap-card-sub {
+        font-size: 0.75rem;
+        color: #666666;
+        margin-top: 2px;
+      }
+      .run-snapshot-header {
+        padding: 6px 10px 4px 10px;
+        margin: 4px 0 2px 0;
+        border-radius: 8px;
+        background: linear-gradient(90deg,#e3f2fd,#e8f5e9);
+        font-size: 0.80rem;
+        font-weight: 700;
+        color: #0b3d91;
+      }
+      .exec-takeaway-selection {
+        color: #b71c1c;
+        font-weight: 700;
+      }
+      .exec-takeaway-percentage {
+        color: #b71c1c;
+        font-weight: 700;
       }
     </style>
     """,
@@ -284,19 +327,63 @@ def render_data_dictionary():
         )
 
 
-def render_run_header(service_level, zero_if_no_net_fcst, apply_cap, cap_range):
-    """Compact run configuration header for traceability (max ~30% width)."""
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    run_id = datetime.now().strftime("RUN-%Y%m%d-%H%M%S")
+def render_run_and_snapshot_header(
+    run_id: str,
+    now_str: str,
+    service_level: float,
+    zero_if_no_net_fcst: bool,
+    apply_cap: bool,
+    cap_range,
+    snapshot_label: str,
+    tot_local_demand: float,
+    tot_ss: float,
+    ss_ratio_pct: float,
+    coverage_months: float,
+    n_active_materials: int,
+    n_active_nodes: int,
+):
+    """Single banner that matches the pic2 layout: snapshot row on top, run config at bottom-left."""
     st.markdown(
         f"""
-        <div class="run-config-header">
-          <div class="run-config-header-title">Run configuration</div>
-          <p><strong>ID:</strong> <code>{run_id}</code></p>
-          <p><strong>Time:</strong> {now_str}</p>
-          <p><strong>End-node SL:</strong> {service_level*100:.2f}%</p>
-          <p><strong>Zero SS if no demand:</strong> {str(zero_if_no_net_fcst)}</p>
-          <p><strong>SS capping:</strong> {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)</p>
+        <div class="run-snapshot-header">
+          Network snapshot – {snapshot_label}
+        </div>
+        <div class="run-snapshot-container">
+          <div class="snap-card">
+            <div class="snap-card-label">Total Local Demand (month)</div>
+            <div class="snap-card-value">{euro_format(tot_local_demand, True)}</div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-card-label">Safety Stock (sum)</div>
+            <div class="snap-card-value snap-card-value-green">{euro_format(tot_ss, True)}</div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-card-label">SS / Demand Coverage</div>
+            <div class="snap-card-value snap-card-value-orange">
+              {ss_ratio_pct:.1f}%&nbsp;({coverage_months:.2f} months)
+            </div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-card-label">Active Materials (with corridor)</div>
+            <div class="snap-card-value">{n_active_materials}</div>
+          </div>
+        </div>
+        <div class="run-snapshot-container" style="grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(180px, 1fr)); margin-top:4px;">
+          <div class="run-card">
+            <div class="run-card-title">Run configuration</div>
+            <div class="run-card-body">
+              <div><strong>ID:</strong> {run_id}</div>
+              <div><strong>Time:</strong> {now_str}</div>
+              <div><strong>End-node SL:</strong> {service_level*100:.2f}%</div>
+              <div><strong>Zero SS if no demand:</strong> {str(zero_if_no_net_fcst)}</div>
+              <div><strong>SS capping:</strong> {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)</div>
+            </div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-card-label">Active Nodes (with corridor)</div>
+            <div class="snap-card-value">{n_active_nodes}</div>
+          </div>
+          <div></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -989,9 +1076,6 @@ with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
         help="Lower and upper bounds (as % of total network demand) applied to Safety Stock.",
     )
 
-# New: compact run configuration header for traceability
-render_run_header(service_level, zero_if_no_net_fcst, apply_cap, cap_range)
-
 use_transitive = True
 var_rho = 1.0
 lt_mode = "Apply LT variance"
@@ -1158,7 +1242,10 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
-    # --- Global executive header with key KPIs (ACTIVE only) ---
+    # --- New combined banner matching pic2 layout (ACTIVE only) ---
+    run_id = datetime.now().strftime("RUN-%Y%m%d-%H%M%S")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     if default_period is not None:
         global_period = default_period
         active_snapshot = get_active_snapshot(results, global_period)
@@ -1170,59 +1257,20 @@ if s_file and d_file and lt_file:
         n_active_materials = active_snapshot["Product"].nunique() if "Product" in active_snapshot.columns else 0
         n_active_nodes = active_snapshot["Location"].nunique() if "Location" in active_snapshot.columns else 0
 
-        st.markdown(
-            f"""
-            <div style="
-                margin-top:8px;
-                margin-bottom:8px;
-                padding:10px 14px;
-                border-radius:10px;
-                background:linear-gradient(90deg,#e3f2fd,#e8f5e9);
-                display:flex;
-                flex-wrap:wrap;
-                gap:10px;
-                align-items:center;">
-              <div style="flex:0 0 100%; font-weight:700; color:#0b3d91; font-size:0.9rem;">
-                Network snapshot – {period_label(global_period)}
-              </div>
-
-              <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
-                <div style="font-size:0.75rem; color:#607d8b;">Total Local Demand (month)</div>
-                <div style="font-size:1rem; font-weight:800; color:#0b3d91;">
-                  {euro_format(tot_local_demand, True)}
-                </div>
-              </div>
-
-              <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
-                <div style="font-size:0.75rem; color:#607d8b;">Safety Stock (sum)</div>
-                <div style="font-size:1rem; font-weight:800; color:#00695c;">
-                  {euro_format(tot_ss, True)}
-                </div>
-              </div>
-
-              <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
-                <div style="font-size:0.75rem; color:#607d8b;">SS / Demand Coverage</div>
-                <div style="font-size:1rem; font-weight:800; color:#ef6c00;">
-                  {ss_ratio_pct:.1f}% &nbsp;({coverage_months:.2f} months)
-                </div>
-              </div>
-
-              <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
-                <div style="font-size:0.75rem; color:#607d8b;">Active Materials (with corridor)</div>
-                <div style="font-size:1rem; font-weight:800; color:#37474f;">
-                  {n_active_materials}
-                </div>
-              </div>
-
-              <div style="flex:0 0 19%; background:#ffffff; border-radius:8px; padding:8px 10px; border:1px solid #e0e0e0;">
-                <div style="font-size:0.75rem; color:#607d8b;">Active Nodes (with corridor)</div>
-                <div style="font-size:1rem; font-weight:800; color:#37474f;">
-                  {n_active_nodes}
-                </div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        render_run_and_snapshot_header(
+            run_id=run_id,
+            now_str=now_str,
+            service_level=service_level,
+            zero_if_no_net_fcst=zero_if_no_net_fcst,
+            apply_cap=apply_cap,
+            cap_range=cap_range,
+            snapshot_label=period_label(global_period),
+            tot_local_demand=tot_local_demand,
+            tot_ss=tot_ss,
+            ss_ratio_pct=ss_ratio_pct,
+            coverage_months=coverage_months,
+            n_active_materials=n_active_materials,
+            n_active_nodes=n_active_nodes,
         )
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
@@ -1300,7 +1348,6 @@ if s_file and d_file and lt_file:
         with col_main:
             render_selection_line("Selected:", product=sku, location=loc)
             st.subheader("📈 Inventory Corridor")
-            render_tab1_explainer()
 
             plot_df = results[(results["Product"] == sku) & (results["Location"] == loc)].sort_values("Period")
             df_all_periods = pd.DataFrame({"Period": all_periods})
@@ -1441,6 +1488,14 @@ if s_file and d_file and lt_file:
             )
 
             st.plotly_chart(fig, use_container_width=True)
+
+            # separator + explainer directly after the graph
+            st.markdown(
+                "<hr style='margin:6px 0 10px 0; border: none; border-top: 1px solid #cccccc;'/>",
+                unsafe_allow_html=True,
+            )
+            render_tab1_explainer()
+
 
     # TAB 2 -----------------------------------------------------------------
     with tab2:
