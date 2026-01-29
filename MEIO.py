@@ -1981,8 +1981,16 @@ if s_file and d_file and lt_file:
                 st.markdown(
                     "**Applied Hop → Service Level mapping (highlight shows which row was used for this node):**"
                 )
-                # Replace HTML table with static image stored in the app root
-                st.image("network_hop_service_levels.png", use_column_width=True)
+                # Safely load the network hop illustration from the app root
+                hop_image_path = "network_hop_service_levels.png"
+                if os.path.exists(hop_image_path):
+                    st.image(hop_image_path, use_column_width=True)
+                else:
+                    st.info(
+                        "Network hop illustration not found on the server "
+                        f"(expected at '{hop_image_path}'). "
+                        "Please add this image file next to MEIO.py."
+                    )
 
                 avg_daily = row.get("D_day", np.nan)
                 days_cov = row.get("Days_Covered_by_SS", np.nan)
@@ -2047,7 +2055,6 @@ if s_file and d_file and lt_file:
                     """,
                     unsafe_allow_html=True,
                 )
-
                 with st.expander("Show detailed scenario controls", expanded=False):
                     st.markdown(
                         """
