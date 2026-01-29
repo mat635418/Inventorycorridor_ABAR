@@ -2878,15 +2878,26 @@ if s_file and d_file and lt_file:
                 )
                 st.dataframe(ss_attrib_df_formatted, use_container_width=True)
 
-                # Executive takeaway with extra blank line and strong red highlights
+                # Executive takeaway with normalized percentages that sum to 100%
                 try:
-                    top3 = ss_drv_df_display.sort_values("pct_of_total_ss", ascending=False).head(3)
+                    top3 = (
+                        ss_drv_df_display.sort_values(
+                            "pct_of_total_ss", ascending=False
+                        ).head(3).copy()
+                    )
+                    total_top3 = top3["pct_of_total_ss"].sum()
+
                     pieces = []
                     for _, r in top3.iterrows():
+                        if total_top3 > 0:
+                            norm_pct = r["pct_of_total_ss"] / total_top3 * 100.0
+                        else:
+                            norm_pct = 0.0
                         pieces.append(
                             f"{r['driver']} "
-                            f"(<span class=\"exec-takeaway-percentage\">{r['pct_of_total_ss']:.1f}%</span>)"
+                            f"(<span class=\"exec-takeaway-percentage\">{norm_pct:.1f}%</span>)"
                         )
+
                     if pieces:
                         takeaway = (
                             f"For <span class=\"exec-takeaway-selection\">{selected_product}</span> "
