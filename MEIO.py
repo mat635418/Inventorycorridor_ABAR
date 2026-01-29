@@ -1978,45 +1978,11 @@ if s_file and d_file and lt_file:
                 node_z = float(row.get("Z_node", norm.ppf(node_sl)))
                 hops = int(row.get("Tier_Hops", 0))
 
-                mapping_rows = [
-                    (0, "99%", "End-node"),
-                    (1, "95%", "Internal + external demand"),
-                    (2, "90%", "Level-1 hub"),
-                    (3, "85%", "Level-2 hub"),
-                ]
-                table_html = """
-                <div class="calc-mapping-container" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif; font-size:13px;">
-                  <table style="width:40%; border-collapse:collapse;">
-                    <thead>
-                      <tr style="background:#f3f6fb;">
-                        <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;white-space:nowrap;">Hop</th>
-                        <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;white-space:nowrap;">Service Level</th>
-                        <th style="text-align:left;padding:8px 10px;border:1px solid #e6eef8;">Example / Role</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                """
-                for h, sl, example in mapping_rows:
-                    row_style = "background:#FFF59D; font-weight:700;" if h == hops else ""
-                    table_html += f"""
-                      <tr style="{row_style}">
-                        <td style="padding:8px 10px;border:1px solid #eef6ff;white-space:nowrap;">{h}</td>
-                        <td style="padding:8px 10px;border:1px solid #eef6ff;white-space:nowrap;">{sl}</td>
-                        <td style="padding:8px 10px;border:1px solid #eef6ff;">{example}</td>
-                      </tr>
-                    """
-                table_html += """
-                    </tbody>
-                  </table>
-                </div>
-                """
                 st.markdown(
                     "**Applied Hop → Service Level mapping (highlight shows which row was used for this node):**"
                 )
-                try:
-                    components.html(table_html, height=200)
-                except Exception:
-                    st.markdown(table_html, unsafe_allow_html=True)
+                # Replace HTML table with static image stored in the app root
+                st.image("network_hop_service_levels.png", use_column_width=True)
 
                 avg_daily = row.get("D_day", np.nan)
                 days_cov = row.get("Days_Covered_by_SS", np.nan)
