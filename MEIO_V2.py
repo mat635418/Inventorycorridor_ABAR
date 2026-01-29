@@ -2162,9 +2162,10 @@ if s_file and d_file and lt_file:
             )
             st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
             st.write(
-                "See how changing service level or lead-time assumptions affects safety stock."
+                "See how changing the **end-node** service level (SL) or lead-time assumptions affects safety stock. "
+                "Hop 1–3 service levels are automatically recomputed to keep the same relative gaps as in the base policy."
             )
-            render_ss_formula_explainer()  # <--- New detailed formula explainer
+            render_ss_formula_explainer()  # detailed formula explainer
 
             z_current = norm.ppf(service_level)
 
@@ -2178,6 +2179,9 @@ if s_file and d_file and lt_file:
             else:
                 row = row_df.iloc[0]
 
+                # Base hop SLs used in the policy (as percentages) – will be used as reference ratios
+                base_hop_sl = {0: 99.0, 1: 95.0, 2: 90.0, 3: 85.0}
+
                 node_sl = float(row.get("Service_Level_Node", service_level))
                 node_z = float(row.get("Z_node", norm.ppf(node_sl)))
                 hops = int(row.get("Tier_Hops", 0))
@@ -2185,7 +2189,6 @@ if s_file and d_file and lt_file:
                 st.markdown(
                     "**Applied Hop → Service Level mapping (highlight shows which row was used for this node):**"
                 )
-                # Safely load the network hop illustration from the app root
                 hop_image_path = "HOP_SLjpg.jpg"
                 if os.path.exists(hop_image_path):
                     st.image(hop_image_path, width=500)
@@ -2254,20 +2257,27 @@ if s_file and d_file and lt_file:
                         font-size:0.97rem;
                         color:#0b3d91;
                         font-weight:700;">
-                      SCENARIO PLANNING TOOL — simulate alternative SL / LT assumptions (analysis‑only)
+                      SCENARIO PLANNING TOOL — simulate alternative end-node SL / LT assumptions (analysis‑only).
+                      Hop 1–3 SLs are automatically recalculated to keep the same relative gaps as in the policy.
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
+
+                # For Scenario planning we use ratios to keep hop SL gaps constant vs the base grid
+                base_end_sl_pct = base_hop_sl[0]
+                hop_ratios = {h: base_hop_sl[h] / base_end_sl_pct for h in base_hop_sl}
+
                 with st.expander("Show detailed scenario controls", expanded=False):
+                    # Explanation only, no inner text that creates a second marker
                     st.markdown(
                         """
-                        <div style="border:1px solid #0b3d91;border-radius:10px;background:#fff9e0;padding:12px;color:#0b3d91;font-size:0.95rem;">
-                          Use scenarios to test sensitivity to Service Level or Lead Time. Scenarios do not change implemented policy — they are analysis-only.
-                        </div>
+                        Use the sliders below to set an **end-node** Service Level (SL) for each scenario.
+                        Hop 1–3 SLs are recomputed automatically based on the base-grid ratios.
                         """,
                         unsafe_allow_html=True,
                     )
+
                     if "n_scen" not in st.session_state:
                         st.session_state["n_scen"] = 1
                     options = [1, 2, 3]
@@ -2291,12 +2301,30 @@ if s_file and d_file and lt_file:
                                 else min(99.9, float(service_level * 100) + 0.5 * s)
                             )
                             sc_sl = st.slider(
-                                f"Scenario {s+1} Service Level (%)",
+                                f"Scenario {s+1} end-node SL (%)",
                                 50.0,
                                 99.9,
                                 sc_sl_default,
+                                help="End-node Service Level used for this scenario. Hop 1–3 SLs are recomputed automatically.",
                                 key=f"sc_sl_{s}",
                             )
+                            # Compute derived hop SLs using the same relative ratios as the base grid
+                            hop0 = sc_sl
+                            hop1 = max(0.0, min(99.9, hop0 * hop_ratios[1]))
+                            hop2 = max(0.0, min(99.9, hop0 * hop_ratios[2]))
+                            hop3 = max(0.0, min(99.9, hop0 * hop_ratios[3]))
+
+                            st.markdown(
+                                f"""
+                                <div style="font-size:0.85rem; margin-top:4px;">
+                                  <strong>Derived hop SLs used in this scenario:</strong><br/>
+                                  Hop 0 (end-node): <strong>{hop0:.2f}%</strong><br/>
+                                  Hop 1: <strong>{hop1:.2f}%</strong> &nbsp;&nbsp; Hop 2: <strong>{hop2:.2f}%</strong> &nbsp;&nbsp; Hop 3: <strong>{hop3:.2f}%</strong>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
                             sc_lt_default = float(row["LT_Mean"])
                             sc_lt = st.slider(
                                 f"Scenario {s+1} Avg Lead Time (Days)",
@@ -2314,11 +2342,20 @@ if s_file and d_file and lt_file:
                                 key=f"sc_lt_std_{s}",
                             )
                             scenarios.append(
-                                {"SL_pct": sc_sl, "LT_mean": sc_lt, "LT_std": sc_lt_std}
+                                {
+                                    "SL_pct": sc_sl,
+                                    "LT_mean": sc_lt,
+                                    "LT_std": sc_lt_std,
+                                    "Hop0": hop0,
+                                    "Hop1": hop1,
+                                    "Hop2": hop2,
+                                    "Hop3": hop3,
+                                }
                             )
 
                     scen_rows = []
                     for idx, sc in enumerate(scenarios):
+                        # Scenario SS calculation uses the scenario end-node SL
                         sc_z = norm.ppf(sc["SL_pct"] / 100.0)
                         d_day = float(row["Agg_Future_Demand"]) / float(days_per_month)
                         sigma_d_day = float(row["Agg_Std_Hist"]) / math.sqrt(float(days_per_month))
@@ -2333,7 +2370,10 @@ if s_file and d_file and lt_file:
                         scen_rows.append(
                             {
                                 "Scenario": f"S{idx+1}",
-                                "Service_Level_%": sc["SL_pct"],
+                                "EndNode_SL_%": sc["SL_pct"],
+                                "Hop1_SL_%": sc["Hop1"],
+                                "Hop2_SL_%": sc["Hop2"],
+                                "Hop3_SL_%": sc["Hop3"],
                                 "LT_mean_days": sc["LT_mean"],
                                 "LT_std_days": sc["LT_std"],
                                 "Simulated_SS": sc_ss,
@@ -2343,14 +2383,20 @@ if s_file and d_file and lt_file:
 
                     base_row = {
                         "Scenario": "Base (Stat)",
-                        "Service_Level_%": service_level * 100,
+                        "EndNode_SL_%": service_level * 100,
+                        "Hop1_SL_%": base_hop_sl[1],
+                        "Hop2_SL_%": base_hop_sl[2],
+                        "Hop3_SL_%": base_hop_sl[3],
                         "LT_mean_days": row["LT_Mean"],
                         "LT_std_days": row["LT_Std"],
                         "Simulated_SS": row["Pre_Rule_SS"],
                     }
                     impl_row = {
                         "Scenario": "Implemented",
-                        "Service_Level_%": np.nan,
+                        "EndNode_SL_%": np.nan,
+                        "Hop1_SL_%": np.nan,
+                        "Hop2_SL_%": np.nan,
+                        "Hop3_SL_%": np.nan,
                         "LT_mean_days": np.nan,
                         "LT_std_days": np.nan,
                         "Simulated_SS": row["Safety_Stock"],
@@ -2363,8 +2409,8 @@ if s_file and d_file and lt_file:
                     display_comp = compare_df.copy()
                     display_comp["Simulated_SS"] = display_comp["Simulated_SS"].astype(float)
 
-                    # New: % vs Implemented
                     implemented_ss = float(row["Safety_Stock"])
+
                     def pct_vs_impl(v):
                         try:
                             if implemented_ss <= 0 or pd.isna(v):
@@ -2376,7 +2422,8 @@ if s_file and d_file and lt_file:
                     display_comp["Pct_vs_Implemented_%"] = display_comp["Simulated_SS"].apply(pct_vs_impl)
 
                     st.markdown(
-                        "Scenario comparison (Simulated SS). 'Implemented' shows the final Safety_Stock after rules."
+                        "Scenario comparison (Simulated SS). 'Implemented' shows the final Safety_Stock after rules. "
+                        "Service Levels shown are for **end-nodes** and the derived hop tiers."
                     )
                     st.markdown('<div class="scenario-table-container">', unsafe_allow_html=True)
                     st.dataframe(
@@ -2384,7 +2431,10 @@ if s_file and d_file and lt_file:
                             display_comp[
                                 [
                                     "Scenario",
-                                    "Service_Level_%",
+                                    "EndNode_SL_%",
+                                    "Hop1_SL_%",
+                                    "Hop2_SL_%",
+                                    "Hop3_SL_%",
                                     "LT_mean_days",
                                     "LT_std_days",
                                     "Simulated_SS",
@@ -2392,14 +2442,20 @@ if s_file and d_file and lt_file:
                                 ]
                             ].copy(),
                             cols=[
-                                "Service_Level_%",
+                                "EndNode_SL_%",
+                                "Hop1_SL_%",
+                                "Hop2_SL_%",
+                                "Hop3_SL_%",
                                 "LT_mean_days",
                                 "LT_std_days",
                                 "Simulated_SS",
                                 "Pct_vs_Implemented_%",
                             ],
                             two_decimals_cols=[
-                                "Service_Level_%",
+                                "EndNode_SL_%",
+                                "Hop1_SL_%",
+                                "Hop2_SL_%",
+                                "Hop3_SL_%",
                                 "Simulated_SS",
                                 "Pct_vs_Implemented_%",
                             ],
@@ -2493,7 +2549,7 @@ if s_file and d_file and lt_file:
                 period_text=period_label(selected_period),
             )
             st.subheader("📦 View by Material (+ 8 Reasons for Inventory)")
-            render_tab7_explainer()  # <--- New explainer for 8 reasons
+            render_tab7_explainer()
 
             mat_period_df = get_active_snapshot(results, selected_period if selected_period is not None else default_period)
             mat_period_df = mat_period_df[
@@ -2794,21 +2850,23 @@ if s_file and d_file and lt_file:
                 )
                 st.dataframe(ss_attrib_df_formatted, use_container_width=True)
 
-                # New: automatic textual takeaway for management
+                # Executive takeaway with bold percentages and larger font
                 try:
                     top3 = ss_drv_df_display.sort_values("pct_of_total_ss", ascending=False).head(3)
                     pieces = []
                     for _, r in top3.iterrows():
-                        pieces.append(f"{r['driver']} (~{r['pct_of_total_ss']:.1f}%)")
+                        pieces.append(
+                            f"{r['driver']} (<strong>{r['pct_of_total_ss']:.1f}%</strong>)"
+                        )
                     if pieces:
                         takeaway = (
-                            f"For **{selected_product}** in **{period_label(selected_period)}**, "
+                            f"For <strong>{selected_product}</strong> in <strong>{period_label(selected_period)}</strong>, "
                             f"safety stock is mainly explained by: " + "; ".join(pieces) + "."
                         )
                         st.markdown(
                             f"""
                             <div style="margin-top:8px;padding:8px 10px;border-radius:8px;
-                                background:#f5f9ff;border:1px solid #c5cae9;font-size:0.9rem;">
+                                background:#f5f9ff;border:1px solid #c5cae9;font-size:1.1rem;">
                               <strong>Executive takeaway:</strong> {takeaway}
                             </div>
                             """,
