@@ -3288,6 +3288,7 @@ if s_file and d_file and lt_file:
                     cards_html.append(card_html)
 
                 cards_html.append("</div></div>")
+                # IMPORTANT: allow HTML rendering
                 st.markdown("\n".join(cards_html), unsafe_allow_html=True)
 
 else:
