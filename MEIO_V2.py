@@ -2415,10 +2415,10 @@ if s_file and d_file and lt_file:
                         border-radius:10px;
                         padding:10px 14px;
                         margin-bottom:8px;
-                        font-size:1.05rem;
+                        font-size:1.00rem;
                         color:#0b3d91;
-                        font-weight:200;">
-                      SCENARIO PLANNING TOOL<br>Simulate alternative end-node SL / LT assumptions (analysis‑only), but using the same policy rules as the implemented plan (zero-if-no-demand, caps, overrides).<br>Hop 1–3 SLs are automatically recalculated to keep the same relative gaps as in the policy.
+                        font-weight:500;">
+                      <b>SCENARIO PLANNING TOOL</b><br>Simulate alternative end-node SL / LT assumptions (<b>analysis‑only</b>), but using the same policy rules as the implemented plan (<b>zero-if-no-demand, caps, overrides</b>).<br>Hop 1–3 SLs are <u>automatically recalculated</u> to keep the same relative gaps as in the policy.
                     </div>
                     """,
                     unsafe_allow_html=True,
