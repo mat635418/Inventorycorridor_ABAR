@@ -818,6 +818,7 @@ def apply_policy_to_scalar_ss(
     # 1) Zero SS if no demand
     if zero_if_no_net_fcst and agg_future_demand <= 0:
         ss = 0.0
+        return ss
 
     # 2) SS capping vs network demand
     if apply_cap:
@@ -949,7 +950,6 @@ def run_pipeline(
         lt_component_list.append(lt_comp)
 
     res["lt_component"] = np.array(lt_component_list)
-    combined_variance = (demand_component + res["lt_component"]).clip(lower=0)
 
     def compute_hop_distances_for_product(p_lt_df, prod_nodes):
         children = {}
@@ -1038,8 +1038,11 @@ def run_pipeline(
     res["Service_Level_Node"] = np.array(sl_list)
     res["Z_node"] = res["Service_Level_Node"].apply(lambda x: float(norm.ppf(x)))
 
+    # Rebuild combined variance exactly as in scenario calc
+    combined_variance = (res["Var_D_Day"] * res["LT_Mean"] + res["lt_component"]).clip(lower=0)
+
     res["SS_stat"] = res.apply(
-        lambda r: r["Z_node"] * math.sqrt(max(0.0, (demand_component.loc[r.name] + r["lt_component"]))),
+        lambda r: r["Z_node"] * math.sqrt(max(0.0, combined_variance.loc[r.name])),
         axis=1,
     )
 
@@ -2182,65 +2185,7 @@ if s_file and d_file and lt_file:
                 avg_acc = hdf["Accuracy_%"].mean() if not hdf["Accuracy_%"].isna().all() else np.nan
                 k3.metric("Avg Accuracy (%)", f"{avg_acc:.1f}" if not np.isnan(avg_acc) else "N/A")
 
-                fig_hist = go.Figure(
-                    [
-                        go.Scatter(
-                            x=hdf["Period"],
-                            y=hdf["Consumption"],
-                            name="Actuals",
-                            line=dict(color="black"),
-                        ),
-                        go.Scatter(
-                            x=hdf["Period"],
-                            y=hdf["Forecast_Hist"],
-                            name="Forecast",
-                            line=dict(color="blue", dash="dot"),
-                        ),
-                    ]
-                )
-                fig_hist.update_layout(xaxis_title=None, yaxis_title=None)
-                st.plotly_chart(fig_hist, use_container_width=True)
-
-                st.markdown("---")
-
-                st.subheader("Aggregated Network History (Selected Product) — formatted by month")
-                net_table = (
-                    hist_net[hist_net["Product"] == h_sku]
-                    .merge(hdf[["Period"]].drop_duplicates(), on="Period", how="inner")
-                    .sort_values("Period")
-                    .drop(columns=["Product"])
-                )
-                if not net_table.empty:
-                    net_table["Net_Abs_Error"] = (
-                        net_table["Network_Consumption"] - net_table["Network_Forecast_Hist"]
-                    ).abs()
-                    denom_net = net_table["Network_Consumption"].replace(0, np.nan).sum()
-                    net_wape = (
-                        net_table["Net_Abs_Error"].sum() / denom_net * 100 if denom_net > 0 else np.nan
-                    )
-                else:
-                    net_wape = np.nan
-
-                c_net1, c_net2 = st.columns([3, 1])
-                with c_net1:
-                    if not net_table.empty:
-                        net_table_fmt = net_table.copy()
-                        net_table_fmt["Period"] = net_table_fmt["Period"].apply(period_label)
-                        for col in ["Network_Consumption", "Network_Forecast_Hist"]:
-                            net_table_fmt[col] = net_table_fmt[col].apply(
-                                lambda v: euro_format(v, always_two_decimals=False, show_zero=True)
-                            )
-                        st.dataframe(
-                            net_table_fmt[
-                                ["Period", "Network_Consumption", "Network_Forecast_Hist"]
-                            ],
-                            use_container_width=True,
-                        )
-                    else:
-                        st.write("No aggregated network history available for the chosen selection.")
-                with c_net2:
-                    c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
-                    st.metric("Network WAPE (%)", c_val)
+            ...
 
     # TAB 6 -----------------------------------------------------------------
     with tab6:
@@ -2325,6 +2270,8 @@ if s_file and d_file and lt_file:
                 period_text=period_label(calc_period),
             )
             st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
+
+            # --- scenario info box should appear *before* the expander ---
             st.markdown(
                 """
                 <div style="
@@ -2332,7 +2279,7 @@ if s_file and d_file and lt_file:
                     border:1px solid #f9c74f;
                     border-radius:10px;
                     padding:10px 14px;
-                    margin-bottom:8px;">
+                    margin:4px 0 10px 0;">
                   <div style="font-size:0.95rem; font-weight:700; color:#0b3d91; margin-bottom:4px;">
                     SCENARIO PLANNING TOOL
                   </div>
@@ -2346,6 +2293,7 @@ if s_file and d_file and lt_file:
                 """,
                 unsafe_allow_html=True,
             )
+
             render_ss_formula_explainer()
 
             z_current = norm.ppf(service_level)
@@ -2515,20 +2463,19 @@ if s_file and d_file and lt_file:
                     scen_rows = []
                     for idx, sc in enumerate(scenarios):
                         sc_z = norm.ppf(sc["SL_pct"] / 100.0)
-                        d_day = float(row["Agg_Future_Demand"]) / float(days_per_month)
-                        sigma_d_day = float(row["Agg_Std_Hist"]) / math.sqrt(float(days_per_month))
-                        var_d = sigma_d_day**2
 
-                        # IMPORTANT: mimic the same low-demand rule as the pipeline.
-                        # The pipeline uses Agg_Future_Demand at *row-period* level.
-                        # For this single row, we approximate with monthly demand.
-                        if row["Agg_Future_Demand"] < 20.0:
-                            var_d = max(var_d, d_day)
+                        # Use same variance decomposition as pipeline
+                        d_day = float(row["D_day"])
+                        var_d_day = float(row["Var_D_Day"])
+                        lt_mean = float(sc["LT_mean"])
+                        lt_std = float(sc["LT_std"])
 
-                        sc_ss_raw = sc_z * math.sqrt(
-                            var_d * sc["LT_mean"] + (sc["LT_std"] ** 2) * (d_day**2)
-                        )
-                        sc_floor = d_day * sc["LT_mean"] * 0.01
+                        demand_component = var_d_day * lt_mean
+                        lt_component = (lt_std ** 2) * (d_day ** 2)
+                        combined_var = max(0.0, demand_component + lt_component)
+
+                        sc_ss_raw = sc_z * math.sqrt(combined_var)
+                        sc_floor = d_day * lt_mean * 0.01
                         sc_ss_raw = max(sc_ss_raw, sc_floor)
 
                         sc_ss = apply_policy_to_scalar_ss(
@@ -2653,6 +2600,7 @@ if s_file and d_file and lt_file:
                         yaxis_title="SS (units)",
                     )
                     st.plotly_chart(fig_bar, use_container_width=True)
+
 
     # TAB 7 -----------------------------------------------------------------
     with tab7:
