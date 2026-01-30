@@ -2326,9 +2326,7 @@ if s_file and d_file and lt_file:
             )
             st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
             st.write(
-                "See how changing the **end-node** service level (SL) or lead-time assumptions affects safety stock. "
-                "Hop 1–3 service levels are automatically recomputed to keep the same relative gaps as in the base policy. "
-                "Scenario SS values are computed with the **same policy rules** (zero-if-no-demand, capping, B616 override) as the implemented plan."
+                "Expand to see **Safety Stock Formula** details."
             )
             render_ss_formula_explainer()
 
