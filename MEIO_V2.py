@@ -3132,9 +3132,9 @@ if s_file and d_file and lt_file:
             if agg_all.empty:
                 st.warning("No data available for the selected period.")
             else:
-                # Sort by SS / Demand (%) descending to highlight most intensive materials
+                # Sort by Avg Daily Demand descending (as requested)
                 agg_view = agg_all.sort_values(
-                    "SS_to_Demand_Ratio_%", ascending=False
+                    "Avg_Day_Demand", ascending=False
                 ).reset_index(drop=True)
 
                 # --- CSS for card‑like layout ---
@@ -3174,6 +3174,7 @@ if s_file and d_file and lt_file:
                         font-weight: 700;
                         color: #111827;
                       }
+                      /* PRODUCT badge: now neutral light grey box (no color by product) */
                       .mat-product-badge {
                         display: flex;
                         align-items: center;
@@ -3182,12 +3183,15 @@ if s_file and d_file and lt_file:
                         border-radius: 999px;
                         font-weight: 800;
                         font-size: 0.92rem;
-                        color: #ffffff;
+                        color: #424242;
                         white-space: nowrap;
+                        background: #f5f5f5;
+                        border: 1px solid #e0e0e0;
                       }
                       .mat-product-chevron {
                         margin-right: 6px;
                         font-size: 0.80rem;
+                        color: #757575;
                       }
                       .mat-pill {
                         display: inline-flex;
@@ -3222,15 +3226,6 @@ if s_file and d_file and lt_file:
                     unsafe_allow_html=True,
                 )
 
-                # palette for product badges (cycled)
-                badge_colors = [
-                    "linear-gradient(90deg,#1976d2,#42a5f5)",  # blue
-                    "linear-gradient(90deg,#00796b,#26a69a)",  # teal
-                    "linear-gradient(90deg,#388e3c,#81c784)",  # green
-                    "linear-gradient(90deg,#f57c00,#ffb74d)",  # orange
-                    "linear-gradient(90deg,#6a1b9a,#ab47bc)",  # purple
-                ]
-
                 def choose_pct_pill_color(p):
                     if p >= 90:
                         return "mat-pill-red"
@@ -3264,7 +3259,7 @@ if s_file and d_file and lt_file:
                     '<div class="mat-strip-container"><div class="mat-cards-row">'
                 ]
 
-                for i, r in agg_view.iterrows():
+                for _, r in agg_view.iterrows():
                     prod = str(r["Product"])
                     avg_daily = r["Avg_Day_Demand"]
                     ss_units = r["Safety_Stock"]
@@ -3278,13 +3273,12 @@ if s_file and d_file and lt_file:
                     fc_txt = format_3dec(local_fc)
                     ratio_txt = format_pct_int(ratio_pct)
 
-                    badge_bg = badge_colors[i % len(badge_colors)]
                     pill_class = choose_pct_pill_color(ratio_pct)
 
                     card_html = (
                         '<div class="mat-card">'
                         '<div style="display:flex;align-items:center;">'
-                        f'<div class="mat-product-badge" style="background:{badge_bg};">'
+                        '<div class="mat-product-badge">'
                         '<span class="mat-product-chevron">▶</span>'
                         f"{prod}"
                         "</div>"
