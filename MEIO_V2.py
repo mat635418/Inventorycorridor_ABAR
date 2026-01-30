@@ -55,7 +55,7 @@ st.markdown(
         ">
           V
         </span>
-        v1.15
+        v1.20
       </span>
       <span style="
           display:inline-flex;
@@ -1106,7 +1106,7 @@ def run_pipeline(
     return res, reachable_map
 
 
-with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
+with st.sidebar.expander("⚙��� Service Level Configuration", expanded=True):
     service_level = st.slider(
         "Service Level (%) for the end-nodes",
         50.0,
@@ -2418,7 +2418,7 @@ if s_file and d_file and lt_file:
                         font-size:1.00rem;
                         color:#0b3d91;
                         font-weight:500;">
-                      <b>SCENARIO PLANNING TOOL</b><br>Simulate alternative end-node SL / LT assumptions (<b>analysis‑only</b>), but using the same policy rules as the implemented plan (<b>zero-if-no-demand, caps, overrides</b>).<br>Hop 1–3 SLs are <u>automatically recalculated</u> to keep the same relative gaps as in the policy.
+                      <b>SCENARIO PLANNING TOOL</b><br>Simulate alternative end-node SL / LT assumptions (<b>analysis‑only</b>), but using the same policy rules as the implemented plan (<b>zero-if-no-demand, capping, B616</b>).
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -2433,6 +2433,47 @@ if s_file and d_file and lt_file:
                         unsafe_allow_html=True,
                     )
 
+                    # ------------------------------------------------------------
+                    # NEW: Base-calibration scenario row (matches pipeline exactly)
+                    # ------------------------------------------------------------
+                    # We reconstruct the original z used in the pipeline for this node
+                    base_sl_node = float(row["Service_Level_Node"])  # already hop-based SL used in pipeline
+                    base_z_node = float(row["Z_node"])
+                    base_LT_mean = float(row["LT_Mean"])
+                    base_LT_std = float(row["LT_Std"])
+                    base_agg_demand = float(row["Agg_Future_Demand"])
+                    base_agg_std = float(row["Agg_Std_Hist"])
+
+                    # recompute Var_D_Day exactly like in run_pipeline
+                    base_sigma_d_day = base_agg_std / math.sqrt(float(days_per_month))
+                    base_d_day = base_agg_demand / float(days_per_month)
+                    base_var_d_day = base_sigma_d_day**2
+
+                    if base_agg_demand < 20.0:
+                        base_var_d_day = max(base_var_d_day, base_d_day)
+
+                    base_demand_component = base_var_d_day * base_LT_mean
+                    base_lt_component = base_LT_std**2 * (base_d_day**2)
+                    base_combined_var = max(base_demand_component + base_lt_component, 0.0)
+                    base_ss_stat = base_z_node * math.sqrt(base_combined_var)
+
+                    # same 1% LT demand floor as pipeline
+                    base_floor = base_d_day * base_LT_mean * 0.01
+                    base_pre_rule_ss = max(base_ss_stat, base_floor)
+
+                    # apply identical policy on scalar (zero-if-no-demand, caps, B616)
+                    base_ss_policy = apply_policy_to_scalar_ss(
+                        ss_value=base_pre_rule_ss,
+                        agg_future_demand=base_agg_demand,
+                        location=str(row["Location"]),
+                        zero_if_no_net_fcst=zero_if_no_net_fcst,
+                        apply_cap=apply_cap,
+                        cap_range=cap_range,
+                    )
+
+                    # Now base_ss_policy should match row["Safety_Stock"] almost 1:1
+                    # Expose it explicitly in the table as "Calibrated Scenario (Base)"
+
                     if "n_scen" not in st.session_state:
                         st.session_state["n_scen"] = 1
                     options = [1, 2, 3]
@@ -2442,7 +2483,7 @@ if s_file and d_file and lt_file:
                         else 0
                     )
                     n_scen = st.selectbox(
-                        "Number of Scenarios to compare",
+                        "Number of additional Scenarios to compare (besides 'Base-calibrated')",
                         options,
                         index=default_index,
                         key="n_scen",
@@ -2450,11 +2491,15 @@ if s_file and d_file and lt_file:
                     scenarios = []
                     for s in range(n_scen):
                         with st.expander(f"Scenario {s+1} inputs", expanded=False):
-                            sc_sl_default = (
-                                float(service_level * 100)
-                                if s == 0
-                                else min(99.9, float(service_level * 100) + 0.5 * s)
-                            )
+                            # IMPORTANT: decouple S1 from sidebar SL.
+                            # Default for S1 is the *current node SL*, so that
+                            # when you "just open it" you get the same inputs
+                            # as the pipeline for that node.
+                            if s == 0:
+                                sc_sl_default = float(base_sl_node * 100.0)
+                            else:
+                                sc_sl_default = min(99.9, float(base_sl_node * 100.0) + 0.5 * s)
+
                             sc_sl = st.slider(
                                 f"Scenario {s+1} end-node SL (%)",
                                 50.0,
@@ -2547,16 +2592,16 @@ if s_file and d_file and lt_file:
                         )
                     scen_df = pd.DataFrame(scen_rows)
 
-                    # Base (Stat) = pre-rule (no caps/overrides), Implemented = policy-adjusted
-                    base_row = {
-                        "Scenario": "Base (Stat)",
-                        "EndNode_SL_%": service_level * 100,
+                    # Base-calibrated (reconstructed from node SL and LT) and Implemented
+                    base_calibrated_row = {
+                        "Scenario": "Base-calibrated",
+                        "EndNode_SL_%": base_sl_node * 100.0,
                         "Hop1_SL_%": base_hop_sl[1],
                         "Hop2_SL_%": base_hop_sl[2],
                         "Hop3_SL_%": base_hop_sl[3],
-                        "LT_mean_days": row["LT_Mean"],
-                        "LT_std_days": row["LT_Std"],
-                        "Simulated_SS": row["Pre_Rule_SS"],
+                        "LT_mean_days": base_LT_mean,
+                        "LT_std_days": base_LT_std,
+                        "Simulated_SS": base_ss_policy,
                     }
                     impl_row = {
                         "Scenario": "Implemented",
@@ -2566,10 +2611,10 @@ if s_file and d_file and lt_file:
                         "Hop3_SL_%": np.nan,
                         "LT_mean_days": np.nan,
                         "LT_std_days": np.nan,
-                        "Simulated_SS": row["Safety_Stock"],
+                        "Simulated_SS": float(row["Safety_Stock"]),
                     }
                     compare_df = pd.concat(
-                        [pd.DataFrame([base_row, impl_row]), scen_df],
+                        [pd.DataFrame([base_calibrated_row, impl_row]), scen_df],
                         ignore_index=True,
                         sort=False,
                     )
@@ -2589,9 +2634,13 @@ if s_file and d_file and lt_file:
                     display_comp["Pct_vs_Implemented_%"] = display_comp["Simulated_SS"].apply(pct_vs_impl)
 
                     st.markdown(
-                        "Scenario comparison. 'Implemented' shows the final Safety_Stock after all rules. "
-                        "Scenario rows apply the **same policy rules**, so if inputs match the base, "
-                        "S1 should be very close to 'Implemented'."
+                        """
+                        - **Implemented** = pipeline SS after all rules.  
+                        - **Base-calibrated** = scenario rebuilt from this node’s own SL / LT / demand, then run through the *same* policy engine.  
+                          → This should now numerically match **Implemented** (up to rounding).
+                        - **S1, S2, S3** = user scenarios; you will only see +/- vs Implemented once you change SL or LT inputs.
+                        """,
+                        unsafe_allow_html=True,
                     )
                     st.markdown('<div class="scenario-table-container">', unsafe_allow_html=True)
                     st.dataframe(
