@@ -55,7 +55,7 @@ st.markdown(
         ">
           V
         </span>
-        v1.20
+        v1.21
       </span>
       <span style="
           display:inline-flex;
@@ -132,9 +132,9 @@ st.markdown(
         font-weight: 600 !important;
       }
       .scenario-table-container {
-        max-width: 620px;
+        max-width: 100%;
         margin-left: 0;
-        margin-right: auto;
+        margin-right: 0;
       }
       button[data-baseweb="tab"] span {
         font-size: 0.95rem !important;
@@ -402,6 +402,7 @@ def render_run_and_snapshot_header(
             """,
             unsafe_allow_html=True,
         )
+
 
 def render_tab1_explainer():
     """Short guide for reading the Inventory Corridor tab."""
@@ -1106,7 +1107,7 @@ def run_pipeline(
     return res, reachable_map
 
 
-with st.sidebar.expander("⚙��� Service Level Configuration", expanded=True):
+with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
     service_level = st.slider(
         "Service Level (%) for the end-nodes",
         50.0,
@@ -2434,17 +2435,15 @@ if s_file and d_file and lt_file:
                     )
 
                     # ------------------------------------------------------------
-                    # NEW: Base-calibration scenario row (matches pipeline exactly)
+                    # Base-calibration scenario row (matches pipeline exactly)
                     # ------------------------------------------------------------
-                    # We reconstruct the original z used in the pipeline for this node
-                    base_sl_node = float(row["Service_Level_Node"])  # already hop-based SL used in pipeline
+                    base_sl_node = float(row["Service_Level_Node"])
                     base_z_node = float(row["Z_node"])
                     base_LT_mean = float(row["LT_Mean"])
                     base_LT_std = float(row["LT_Std"])
                     base_agg_demand = float(row["Agg_Future_Demand"])
                     base_agg_std = float(row["Agg_Std_Hist"])
 
-                    # recompute Var_D_Day exactly like in run_pipeline
                     base_sigma_d_day = base_agg_std / math.sqrt(float(days_per_month))
                     base_d_day = base_agg_demand / float(days_per_month)
                     base_var_d_day = base_sigma_d_day**2
@@ -2457,11 +2456,9 @@ if s_file and d_file and lt_file:
                     base_combined_var = max(base_demand_component + base_lt_component, 0.0)
                     base_ss_stat = base_z_node * math.sqrt(base_combined_var)
 
-                    # same 1% LT demand floor as pipeline
                     base_floor = base_d_day * base_LT_mean * 0.01
                     base_pre_rule_ss = max(base_ss_stat, base_floor)
 
-                    # apply identical policy on scalar (zero-if-no-demand, caps, B616)
                     base_ss_policy = apply_policy_to_scalar_ss(
                         ss_value=base_pre_rule_ss,
                         agg_future_demand=base_agg_demand,
@@ -2470,9 +2467,6 @@ if s_file and d_file and lt_file:
                         apply_cap=apply_cap,
                         cap_range=cap_range,
                     )
-
-                    # Now base_ss_policy should match row["Safety_Stock"] almost 1:1
-                    # Expose it explicitly in the table as "Calibrated Scenario (Base)"
 
                     if "n_scen" not in st.session_state:
                         st.session_state["n_scen"] = 1
@@ -2491,10 +2485,6 @@ if s_file and d_file and lt_file:
                     scenarios = []
                     for s in range(n_scen):
                         with st.expander(f"Scenario {s+1} inputs", expanded=False):
-                            # IMPORTANT: decouple S1 from sidebar SL.
-                            # Default for S1 is the *current node SL*, so that
-                            # when you "just open it" you get the same inputs
-                            # as the pipeline for that node.
                             if s == 0:
                                 sc_sl_default = float(base_sl_node * 100.0)
                             else:
@@ -2561,14 +2551,12 @@ if s_file and d_file and lt_file:
                         if row["Agg_Future_Demand"] < 20.0:
                             var_d = max(var_d, d_day)
 
-                        # Raw statistical SS for this scenario
                         sc_ss_raw = sc_z * math.sqrt(
                             var_d * sc["LT_mean"] + (sc["LT_std"] ** 2) * (d_day**2)
                         )
                         sc_floor = d_day * sc["LT_mean"] * 0.01
                         sc_ss_raw = max(sc_ss_raw, sc_floor)
 
-                        # Apply same policy rules as pipeline (zero-if-no-demand, caps, B616)
                         sc_ss = apply_policy_to_scalar_ss(
                             ss_value=sc_ss_raw,
                             agg_future_demand=float(row["Agg_Future_Demand"]),
@@ -2592,7 +2580,6 @@ if s_file and d_file and lt_file:
                         )
                     scen_df = pd.DataFrame(scen_rows)
 
-                    # Base-calibrated (reconstructed from node SL and LT) and Implemented
                     base_calibrated_row = {
                         "Scenario": "Base-calibrated",
                         "EndNode_SL_%": base_sl_node * 100.0,
@@ -2677,7 +2664,8 @@ if s_file and d_file and lt_file:
                                 "Pct_vs_Implemented_%",
                             ],
                         ),
-                        use_container_width=False,
+                        use_container_width=True,
+                        height=180,  # enough for Base-calibrated + Implemented + up to 3 scenarios without scrolling
                     )
                     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -2825,7 +2813,6 @@ if s_file and d_file and lt_file:
                 ]:
                     mat[c] = mat[c].fillna(0)
 
-                # Rebuild the intermediate terms needed for attribution
                 mat["term1"] = (mat["Agg_Std_Hist"] ** 2 / float(days_per_month)) * mat["LT_Mean"]
                 mat["term2"] = (mat["LT_Std"] ** 2) * (
                     mat["Agg_Future_Demand"] / float(days_per_month)
@@ -2977,7 +2964,6 @@ if s_file and d_file and lt_file:
                 )
                 st.dataframe(ss_attrib_df_formatted, use_container_width=True)
 
-                # Executive takeaway with normalized percentages that sum to 100%
                 try:
                     top3 = (
                         ss_drv_df_display.sort_values(
