@@ -2325,10 +2325,26 @@ if s_file and d_file and lt_file:
                 period_text=period_label(calc_period),
             )
             st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
-            st.write(
-                "See how changing the **end-node** service level (SL) or lead-time assumptions affects safety stock. "
-                "Hop 1–3 service levels are automatically recomputed to keep the same relative gaps as in the base policy. "
-                "Scenario SS values are computed with the **same policy rules** (zero-if-no-demand, capping, B616 override) as the implemented plan."
+            st.markdown(
+                """
+                <div style="
+                    background:#ffecb3;
+                    border:1px solid #f9c74f;
+                    border-radius:10px;
+                    padding:10px 14px;
+                    margin-bottom:8px;">
+                  <div style="font-size:0.95rem; font-weight:700; color:#0b3d91; margin-bottom:4px;">
+                    SCENARIO PLANNING TOOL
+                  </div>
+                  <div style="font-size:0.80rem; color:#154360; line-height:1.35;">
+                    Simulate alternative <strong>end-node SL / LT assumptions</strong> (analysis-only),
+                    but using the same policy rules as the implemented plan
+                    (<strong>zero-if-no-demand, caps, overrides</strong>). Hop 1–3 SLs are
+                    automatically recalculated to keep the same relative gaps as in the policy.
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
             render_ss_formula_explainer()
 
@@ -2412,24 +2428,6 @@ if s_file and d_file and lt_file:
                 st.markdown(summary_html, unsafe_allow_html=True)
 
                 st.markdown("---")
-                st.markdown(
-                    """
-                    <div style="
-                        background:#ffecb3;
-                        border:1px solid #f9c74f;
-                        border-radius:10px;
-                        padding:10px 14px;
-                        margin-bottom:8px;
-                        font-size:0.97rem;
-                        color:#0b3d91;
-                        font-weight:700;">
-                      SCENARIO PLANNING TOOL — simulate alternative end-node SL / LT assumptions (analysis‑only),
-                      but using the same policy rules as the implemented plan (zero-if-no-demand, caps, overrides).
-                      Hop 1–3 SLs are automatically recalculated to keep the same relative gaps as in the policy.
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
 
                 with st.expander("Show detailed scenario controls", expanded=False):
                     st.markdown(
@@ -2520,17 +2518,19 @@ if s_file and d_file and lt_file:
                         d_day = float(row["Agg_Future_Demand"]) / float(days_per_month)
                         sigma_d_day = float(row["Agg_Std_Hist"]) / math.sqrt(float(days_per_month))
                         var_d = sigma_d_day**2
+
+                        # IMPORTANT: mimic the same low-demand rule as the pipeline.
+                        # The pipeline uses Agg_Future_Demand at *row-period* level.
+                        # For this single row, we approximate with monthly demand.
                         if row["Agg_Future_Demand"] < 20.0:
                             var_d = max(var_d, d_day)
 
-                        # Raw statistical SS for this scenario
                         sc_ss_raw = sc_z * math.sqrt(
                             var_d * sc["LT_mean"] + (sc["LT_std"] ** 2) * (d_day**2)
                         )
                         sc_floor = d_day * sc["LT_mean"] * 0.01
                         sc_ss_raw = max(sc_ss_raw, sc_floor)
 
-                        # Apply same policy rules as pipeline (zero-if-no-demand, caps, B616)
                         sc_ss = apply_policy_to_scalar_ss(
                             ss_value=sc_ss_raw,
                             agg_future_demand=float(row["Agg_Future_Demand"]),
@@ -2554,7 +2554,6 @@ if s_file and d_file and lt_file:
                         )
                     scen_df = pd.DataFrame(scen_rows)
 
-                    # Base (Stat) = pre-rule (no caps/overrides), Implemented = policy-adjusted
                     base_row = {
                         "Scenario": "Base (Stat)",
                         "EndNode_SL_%": service_level * 100,
@@ -2567,14 +2566,15 @@ if s_file and d_file and lt_file:
                     }
                     impl_row = {
                         "Scenario": "Implemented",
-                        "EndNode_SL_%": np.nan,
+                        "EndNode_SL_%": row["Service_Level_Node"] * 100 if not pd.isna(row["Service_Level_Node"]) else np.nan,
                         "Hop1_SL_%": np.nan,
                         "Hop2_SL_%": np.nan,
                         "Hop3_SL_%": np.nan,
-                        "LT_mean_days": np.nan,
-                        "LT_std_days": np.nan,
+                        "LT_mean_days": row["LT_Mean"],
+                        "LT_std_days": row["LT_Std"],
                         "Simulated_SS": row["Safety_Stock"],
                     }
+
                     compare_df = pd.concat(
                         [pd.DataFrame([base_row, impl_row]), scen_df],
                         ignore_index=True,
