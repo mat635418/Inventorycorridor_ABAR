@@ -2325,9 +2325,6 @@ if s_file and d_file and lt_file:
                 period_text=period_label(calc_period),
             )
             st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
-            st.write(
-                "Expand to see **Safety Stock Formula** details."
-            )
             render_ss_formula_explainer()
 
             z_current = norm.ppf(service_level)
@@ -2351,7 +2348,7 @@ if s_file and d_file and lt_file:
                 hops = int(row.get("Tier_Hops", 0))
 
                 st.markdown(
-                    "**Applied Hop → Service Level mapping (highlight shows which row was used for this node):**"
+                    "**Applied Hop Logic → Service Level mapping:**"
                 )
                 hop_image_path = "HOP_SLjpg.jpg"
                 if os.path.exists(hop_image_path):
@@ -2418,12 +2415,10 @@ if s_file and d_file and lt_file:
                         border-radius:10px;
                         padding:10px 14px;
                         margin-bottom:8px;
-                        font-size:0.97rem;
+                        font-size:1.05rem;
                         color:#0b3d91;
-                        font-weight:700;">
-                      SCENARIO PLANNING TOOL — simulate alternative end-node SL / LT assumptions (analysis‑only),
-                      but using the same policy rules as the implemented plan (zero-if-no-demand, caps, overrides).
-                      Hop 1–3 SLs are automatically recalculated to keep the same relative gaps as in the policy.
+                        font-weight:200;">
+                      SCENARIO PLANNING TOOL<br>Simulate alternative end-node SL / LT assumptions (analysis‑only), but using the same policy rules as the implemented plan (zero-if-no-demand, caps, overrides).<br>Hop 1–3 SLs are automatically recalculated to keep the same relative gaps as in the policy.
                     </div>
                     """,
                     unsafe_allow_html=True,
