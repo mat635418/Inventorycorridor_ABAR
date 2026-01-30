@@ -3290,65 +3290,6 @@ if s_file and d_file and lt_file:
                 cards_html.append("</div></div>")
                 st.markdown("\n".join(cards_html), unsafe_allow_html=True)
 
-        with col_main:
-            render_selection_line("Selected:", period_text=period_label(selected_period_all))
-            st.subheader("📊 All Materials View")
-
-            st.markdown(
-                "High-level snapshot by material (one row per material for the selected period). "
-                "Values are aggregated across all ACTIVE locations; all numeric values are rounded to integers."
-            )
-
-            if agg_all.empty:
-                st.warning("No data available for the selected period.")
-            else:
-                display_cols_all = [
-                    "Product",
-                    "Avg_Day_Demand",
-                    "Safety_Stock",
-                    "Avg_SS_Days_Coverage",
-                    "Local_Forecast_Month",
-                    "SS_to_Demand_Ratio_%",
-                ]
-                display_cols_all = [c for c in display_cols_all if c in agg_all.columns]
-
-                agg_view = agg_all.sort_values("Avg_Day_Demand", ascending=False)[display_cols_all].reset_index(
-                    drop=True
-                )
-
-                rename_map = {
-                    "Avg_Day_Demand": "Avg Daily Demand",
-                    "Safety_Stock": "Calculated Safety Stock",
-                    "Avg_SS_Days_Coverage": "SS Coverage (days)",
-                    "Local_Forecast_Month": "Local Forecast (month)",
-                    "SS_to_Demand_Ratio_%" : "SS / Demand (%)",
-                }
-                agg_view = agg_view.rename(columns=rename_map)
-
-                formatted = agg_view.copy()
-                if "Avg Daily Demand" in formatted.columns:
-                    formatted["Avg Daily Demand"] = formatted["Avg Daily Demand"].apply(
-                        lambda v: "{:.3f}".format(v) if pd.notna(v) else ""
-                    )
-                if "Calculated Safety Stock" in formatted.columns:
-                    formatted["Calculated Safety Stock"] = formatted["Calculated Safety Stock"].apply(
-                        lambda v: euro_format(v, always_two_decimals=False, show_zero=True)
-                    )
-                if "Local Forecast (month)" in formatted.columns:
-                    formatted["Local Forecast (month)"] = formatted["Local Forecast (month)"].apply(
-                        lambda v: euro_format(v, always_two_decimals=False, show_zero=True)
-                    )
-                if "SS Coverage (days)" in formatted.columns:
-                    formatted["SS Coverage (days)"] = formatted["SS Coverage (days)"].apply(
-                        lambda v: "{:.0f}".format(v) if pd.notna(v) else ""
-                    )
-                if "SS / Demand (%)" in formatted.columns:
-                    formatted["SS / Demand (%)"] = formatted["SS / Demand (%)"].apply(
-                        lambda v: "{:.0f}".format(v) if pd.notna(v) else ""
-                    )
-
-                st.dataframe(formatted, use_container_width=True, height=430)
-
 else:
     st.info(
         "Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer."
