@@ -290,6 +290,126 @@ st.markdown(
         color: #b71c1c;
         font-weight: 700;
       }
+
+      /* --- Generic card-based "table row" layout used across tabs --- */
+      .strip-container {
+        width: 100%;
+        overflow-x: auto;
+        padding-bottom: 6px;
+      }
+      .cards-row {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 650px;
+      }
+      .card-row {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(90px, 1fr));
+        align-items: stretch;
+        border-radius: 10px;
+        padding: 6px 10px;
+        background: linear-gradient(90deg,#f8fbff,#f5fff9);
+        box-shadow: 0 1px 2px rgba(15,23,42,0.12);
+      }
+      .card-row-col-header {
+        font-size: 0.70rem;
+        font-weight: 600;
+        color: #616161;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        margin-bottom: 1px;
+      }
+      .card-row-col-value {
+        font-size: 0.92rem;
+        font-weight: 650;
+        color: #111827;
+        white-space: nowrap;
+      }
+      .card-row-col-sub {
+        font-size: 0.72rem;
+        color: #9e9e9e;
+        margin-left: 4px;
+      }
+      .card-row-badge-main {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-weight: 800;
+        font-size: 0.88rem;
+        color: #424242;
+        white-space: nowrap;
+        background: #f5f5f5;
+        border: 1px solid #e0e0e0;
+      }
+      .card-row-badge-chevron {
+        margin-right: 6px;
+        font-size: 0.80rem;
+        color: #757575;
+      }
+      .card-row-pill-grey {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 42px;
+        padding: 2px 6px;
+        border-radius: 999px;
+        font-size: 0.80rem;
+        font-weight: 700;
+        color: #424242;
+        background: #eeeeee;
+        border: 1px solid #e0e0e0;
+      }
+      .card-row-pill-blue {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 42px;
+        padding: 2px 6px;
+        border-radius: 999px;
+        font-size: 0.80rem;
+        font-weight: 700;
+        color: #ffffff;
+        background: linear-gradient(90deg,#2196f3,#64b5f6);
+      }
+      .card-row-pill-green {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 42px;
+        padding: 2px 6px;
+        border-radius: 999px;
+        font-size: 0.80rem;
+        font-weight: 700;
+        color: #ffffff;
+        background: linear-gradient(90deg,#43a047,#66bb6a);
+      }
+      .card-row-pill-orange {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 42px;
+        padding: 2px 6px;
+        border-radius: 999px;
+        font-size: 0.80rem;
+        font-weight: 700;
+        color: #ffffff;
+        background: linear-gradient(90deg,#fb8c00,#ffb74d);
+      }
+      .card-row-pill-red {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 42px;
+        padding: 2px 6px;
+        border-radius: 999px;
+        font-size: 0.80rem;
+        font-weight: 700;
+        color: #ffffff;
+        background: linear-gradient(90deg,#e53935,#ef5350);
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -487,7 +607,7 @@ def render_ss_formula_explainer():
 
 
 def clean_numeric(series: pd.Series) -> pd.Series:
-    s = series.astype(str).str.strip()
+    s = series.astype(str).str.trim()
     s = s.replace(
         {
             "": np.nan,
@@ -562,6 +682,126 @@ def df_format_for_display(
             else:
                 d[c] = d[c].apply(lambda v: euro_format(v, always_two_decimals=False))
     return d
+
+
+# ---- Generic helper to render DataFrame rows as "card-table" layout ----
+def render_card_table(
+    df: pd.DataFrame,
+    *,
+    id_col: str,
+    col_defs: list,
+    container_height: int = 500,
+) -> None:
+    """
+    Render a DataFrame as a list of horizontally-aligned 'card rows'.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Data to render (already filtered & ordered).
+    id_col : str
+        Column used as the left 'identifier badge'.
+    col_defs : list of dict
+        Each dict:
+          {
+            "header": "text shown above value",
+            "col": "column name in df",
+            "fmt": callable or None   -> fmt(value) -> string,
+            "pill": "grey"|"blue"|"green"|"orange"|"red"|None  -> optional pill style
+            "sub_col": optional second column for small subtext,
+            "sub_fmt": callable for sub_col formatting or None
+          }
+    container_height : int
+        Height hint; the HTML container scrolls horizontally, not vertically.
+    """
+    if df is None or df.empty:
+        st.info("No rows to display for this selection.")
+        return
+
+    # Choose first 6 visible "logical columns": id + up to 5 value columns
+    # but we just visually fit them into 6 grid columns; the col_defs decide what shows.
+    # Build HTML
+    parts = ['<div class="strip-container" style="max-height:{}px;">'.format(container_height)]
+    parts.append('<div class="cards-row">')
+
+    for _, r in df.iterrows():
+        parts.append('<div class="card-row">')
+
+        # 1) Identifier / badge column
+        id_val = str(r.get(id_col, ""))
+        parts.append(
+            '<div style="display:flex;align-items:center;">'
+            '<div class="card-row-badge-main">'
+            '<span class="card-row-badge-chevron">▶</span>'
+            f"{id_val}"
+            "</div>"
+            "</div>"
+        )
+
+        # 2..n) metric columns
+        for d in col_defs:
+            header = d.get("header", "")
+            col_name = d.get("col", "")
+            fmt = d.get("fmt", None)
+            pill = d.get("pill", None)
+            sub_col = d.get("sub_col", None)
+            sub_fmt = d.get("sub_fmt", None)
+
+            raw_val = r.get(col_name, "")
+            if fmt is not None:
+                try:
+                    val_txt = fmt(raw_val)
+                except Exception:
+                    val_txt = str(raw_val)
+            else:
+                val_txt = str(raw_val)
+
+            # sub-value
+            sub_val_txt = ""
+            if sub_col is not None:
+                raw_sub = r.get(sub_col, "")
+                if sub_fmt is not None:
+                    try:
+                        sub_val_txt = sub_fmt(raw_sub)
+                    except Exception:
+                        sub_val_txt = str(raw_sub)
+                else:
+                    sub_val_txt = str(raw_sub)
+
+            # Pill class
+            if pill == "grey":
+                pill_cls = "card-row-pill-grey"
+            elif pill == "blue":
+                pill_cls = "card-row-pill-blue"
+            elif pill == "green":
+                pill_cls = "card-row-pill-green"
+            elif pill == "orange":
+                pill_cls = "card-row-pill-orange"
+            elif pill == "red":
+                pill_cls = "card-row-pill-red"
+            else:
+                pill_cls = None
+
+            parts.append("<div>")
+            parts.append(f'<div class="card-row-col-header">{header}</div>')
+            if pill_cls:
+                parts.append(
+                    f'<div class="card-row-col-value"><span class="{pill_cls}">{val_txt}</span>'
+                )
+            else:
+                parts.append(f'<div class="card-row-col-value">{val_txt}')
+
+            if sub_val_txt not in ("", " ", None):
+                parts.append(
+                    f'<span class="card-row-col-sub">{sub_val_txt}</span>'
+                )
+            parts.append("</div></div>")  # close value+sub, and column
+
+        parts.append("</div>")  # close .card-row
+
+    parts.append("</div></div>")  # close .cards-row and .strip-container
+    html = "".join(parts)
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------
@@ -1951,44 +2191,70 @@ if s_file and d_file and lt_file:
                 ],
             )
 
-            display_cols = [
-                c
-                for c in [
-                    "Product",
-                    "Location",
-                    "Period",
-                    "Forecast",
-                    "D_day",
-                    "Days_Covered_by_SS",
-                    "Safety_Stock",
-                    "Adjustment_Status",
-                ]
-                if c in filtered_display.columns
-            ]
-            fmt_cols = [
-                c
-                for c in [
-                    "Forecast",
-                    "D_day",
-                    "Days_Covered_by_SS",
-                    "Safety_Stock",
-                ]
-                if c in filtered_display.columns
-            ]
-
-            disp_df = filtered_display.copy()
-            if "Period" in disp_df.columns:
+            # Card-style layout instead of dataframe
+            if "Period" in filtered_display.columns:
                 try:
-                    disp_df["Period"] = disp_df["Period"].apply(period_label)
+                    filtered_display = filtered_display.copy()
+                    filtered_display["Period_Label"] = filtered_display["Period"].apply(period_label)
                 except Exception:
-                    pass
+                    filtered_display["Period_Label"] = filtered_display["Period"].astype(str)
+            else:
+                filtered_display["Period_Label"] = ""
 
-            disp = df_format_for_display(
-                disp_df[display_cols].copy(),
-                cols=fmt_cols,
-                two_decimals_cols=["D_day", "Days_Covered_by_SS"],
+            def fmt_float_2(v):
+                try:
+                    return f"{float(v):,.2f}".replace(",", ".")
+                except Exception:
+                    return str(v)
+
+            def fmt_int(v):
+                return euro_format(v, always_two_decimals=False, show_zero=True)
+
+            render_card_table(
+                filtered_display,
+                id_col="Product",
+                col_defs=[
+                    {
+                        "header": "Location / Period",
+                        "col": "Location",
+                        "fmt": str,
+                        "pill": "grey",
+                        "sub_col": "Period_Label",
+                        "sub_fmt": str,
+                    },
+                    {
+                        "header": "Local Forecast (month)",
+                        "col": "Forecast",
+                        "fmt": fmt_int,
+                        "pill": None,
+                    },
+                    {
+                        "header": "Avg Daily Demand",
+                        "col": "D_day",
+                        "fmt": fmt_float_2,
+                        "pill": None,
+                    },
+                    {
+                        "header": "Safety Stock",
+                        "col": "Safety_Stock",
+                        "fmt": fmt_int,
+                        "pill": "blue",
+                    },
+                    {
+                        "header": "SS Coverage (days)",
+                        "col": "Days_Covered_by_SS",
+                        "fmt": fmt_float_2,
+                        "pill": "green",
+                    },
+                    {
+                        "header": "Status",
+                        "col": "Adjustment_Status",
+                        "fmt": str,
+                        "pill": None,
+                    },
+                ],
+                container_height=650,
             )
-            st.dataframe(disp, use_container_width=True, height=700)
 
     # TAB 4 -----------------------------------------------------------------
     with tab4:
@@ -2077,48 +2343,62 @@ if s_file and d_file and lt_file:
             with c1:
                 st.markdown("**Top Nodes by Safety Stock (snapshot)**")
                 if not eff_display.empty:
-                    eff_top = eff_display.sort_values("Safety_Stock", ascending=False)
-                    eff_top_display = (
-                        eff_top[
-                            [
-                                "Location",
-                                "Adjustment_Status",
-                                "Safety_Stock",
-                                "SS_to_Demand_Ratio",
-                            ]
-                        ]
-                        .head(10)
-                        .reset_index(drop=True)
-                    )
-                    eff_top_display["Safety_Stock"] = eff_top_display["Safety_Stock"].round(0)
-                    eff_top_fmt = df_format_for_display(
-                        eff_top_display,
-                        cols=["Safety_Stock", "SS_to_Demand_Ratio"],
-                        two_decimals_cols=["SS_to_Demand_Ratio"],
-                    )
-                    eff_top_styled = eff_top_fmt.style.set_table_styles(
-                        [
+                    eff_top = eff_display.sort_values("Safety_Stock", ascending=False).head(10)
+                    if "Period" in eff_top.columns:
+                        eff_top = eff_top.copy()
+                        eff_top["Period_Label"] = eff_top["Period"].apply(period_label)
+                    else:
+                        eff_top["Period_Label"] = ""
+
+                    def fmt_ratio(v):
+                        try:
+                            return f"{float(v):.2f}"
+                        except Exception:
+                            return str(v)
+
+                    render_card_table(
+                        eff_top,
+                        id_col="Location",
+                        col_defs=[
                             {
-                                "selector": "th",
-                                "props": [
-                                    ("white-space", "normal"),
-                                    ("word-break", "break-word"),
-                                    ("max-width", "120px"),
-                                ],
+                                "header": "Period",
+                                "col": "Period_Label",
+                                "fmt": str,
+                                "pill": "grey",
                             },
                             {
-                                "selector": "td",
-                                "props": [("font-size", "11px")],
+                                "header": "Safety Stock",
+                                "col": "Safety_Stock",
+                                "fmt": lambda v: euro_format(v, False, True),
+                                "pill": "blue",
                             },
-                        ]
+                            {
+                                "header": "SS / FC ratio (months)",
+                                "col": "SS_to_Demand_Ratio",
+                                "fmt": fmt_ratio,
+                                "pill": "green",
+                            },
+                            {
+                                "header": "Adjustment Status",
+                                "col": "Adjustment_Status",
+                                "fmt": str,
+                                "pill": None,
+                            },
+                            {
+                                "header": "Local Forecast",
+                                "col": "Forecast",
+                                "fmt": lambda v: euro_format(v, False, True),
+                                "pill": None,
+                            },
+                            {
+                                "header": "Agg Network Demand",
+                                "col": "Agg_Future_Demand",
+                                "fmt": lambda v: euro_format(v, False, True),
+                                "pill": None,
+                            },
+                        ],
+                        container_height=430,
                     )
-                    st.markdown('<div class="ss-top-table">', unsafe_allow_html=True)
-                    st.dataframe(
-                        eff_top_styled,
-                        use_container_width=True,
-                        height=420,
-                    )
-                    st.markdown("</div>", unsafe_allow_html=True)
                 else:
                     st.write("No non-zero nodes for this selection.")
 
@@ -2226,16 +2506,47 @@ if s_file and d_file and lt_file:
                 with c_net1:
                     if not net_table.empty:
                         net_table_fmt = net_table.copy()
-                        net_table_fmt["Period"] = net_table_fmt["Period"].apply(period_label)
-                        for col in ["Network_Consumption", "Network_Forecast_Hist"]:
-                            net_table_fmt[col] = net_table_fmt[col].apply(
-                                lambda v: euro_format(v, always_two_decimals=False, show_zero=True)
-                            )
-                        st.dataframe(
-                            net_table_fmt[
-                                ["Period", "Network_Consumption", "Network_Forecast_Hist"]
+                        net_table_fmt["Period_Label"] = net_table_fmt["Period"].apply(period_label)
+
+                        def fmt_int(v):
+                            return euro_format(v, False, True)
+
+                        render_card_table(
+                            net_table_fmt,
+                            id_col="Period_Label",
+                            col_defs=[
+                                {
+                                    "header": "Network Consumption",
+                                    "col": "Network_Consumption",
+                                    "fmt": fmt_int,
+                                    "pill": "blue",
+                                },
+                                {
+                                    "header": "Network Forecast",
+                                    "col": "Network_Forecast_Hist",
+                                    "fmt": fmt_int,
+                                    "pill": "green",
+                                },
+                                {
+                                    "header": "Net Abs Error",
+                                    "col": "Net_Abs_Error",
+                                    "fmt": fmt_int,
+                                    "pill": None,
+                                },
+                                {
+                                    "header": "—",
+                                    "col": "Network_Consumption",
+                                    "fmt": lambda v: "",
+                                    "pill": None,
+                                },
+                                {
+                                    "header": "—",
+                                    "col": "Network_Consumption",
+                                    "fmt": lambda v: "",
+                                    "pill": None,
+                                },
                             ],
-                            use_container_width=True,
+                            container_height=320,
                         )
                     else:
                         st.write("No aggregated network history available for the chosen selection.")
@@ -2419,7 +2730,7 @@ if s_file and d_file and lt_file:
                         font-size:1.00rem;
                         color:#0b3d91;
                         font-weight:500;">
-                      <b>SCENARIO PLANNING TOOL</b><br>Simulate alternative end-node SL / LT assumptions (<b>analysis‑only</b>), but using the same policy rules as the implemented plan (<b>zero-if-no-demand, capping, B616</b>).
+                      <b>SCENARIO PLANNING TOOL</b><br>Simulate alternative end-node SL / LT assumptions (<b>analysis‑only</b>), but using the same policy rules as the implemented plan (<b>zero-if-n[...]
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -2629,45 +2940,59 @@ if s_file and d_file and lt_file:
                         """,
                         unsafe_allow_html=True,
                     )
-                    st.markdown('<div class="scenario-table-container">', unsafe_allow_html=True)
-                    st.dataframe(
-                        df_format_for_display(
-                            display_comp[
-                                [
-                                    "Scenario",
-                                    "EndNode_SL_%",
-                                    "Hop1_SL_%",
-                                    "Hop2_SL_%",
-                                    "Hop3_SL_%",
-                                    "LT_mean_days",
-                                    "LT_std_days",
-                                    "Simulated_SS",
-                                    "Pct_vs_Implemented_%",
-                                ]
-                            ].copy(),
-                            cols=[
-                                "EndNode_SL_%",
-                                "Hop1_SL_%",
-                                "Hop2_SL_%",
-                                "Hop3_SL_%",
-                                "LT_mean_days",
-                                "LT_std_days",
-                                "Simulated_SS",
-                                "Pct_vs_Implemented_%",
-                            ],
-                            two_decimals_cols=[
-                                "EndNode_SL_%",
-                                "Hop1_SL_%",
-                                "Hop2_SL_%",
-                                "Hop3_SL_%",
-                                "Simulated_SS",
-                                "Pct_vs_Implemented_%",
-                            ],
-                        ),
-                        use_container_width=True,
-                        height=180,  # enough for Base-calibrated + Implemented + up to 3 scenarios without scrolling
+
+                    def fmt_pct(v):
+                        try:
+                            return f"{float(v):.2f}"
+                        except Exception:
+                            return ""
+
+                    def fmt_ss(v):
+                        return euro_format(v, False, True)
+
+                    render_card_table(
+                        display_comp,
+                        id_col="Scenario",
+                        col_defs=[
+                            {
+                                "header": "End-node SL (%)",
+                                "col": "EndNode_SL_%",
+                                "fmt": fmt_pct,
+                                "pill": None,
+                            },
+                            {
+                                "header": "Avg LT (days)",
+                                "col": "LT_mean_days",
+                                "fmt": fmt_pct,
+                                "pill": None,
+                            },
+                            {
+                                "header": "LT Std (days)",
+                                "col": "LT_std_days",
+                                "fmt": fmt_pct,
+                                "pill": None,
+                            },
+                            {
+                                "header": "Simulated SS",
+                                "col": "Simulated_SS",
+                                "fmt": fmt_ss,
+                                "pill": "blue",
+                            },
+                            {
+                                "header": "% vs Implemented",
+                                "col": "Pct_vs_Implemented_%",
+                                "fmt": fmt_pct,
+                                "pill": None,
+                            },
+                            {
+                                "header": "—",
+                                "col": "Simulated_SS",
+                                "fmt": lambda v: "",
+                                "pill": None,
+                            },
+                        ],
+                        container_height=220,
                     )
-                    st.markdown("</div>", unsafe_allow_html=True)
 
                     fig_bar = go.Figure()
                     colors = px.colors.qualitative.Pastel
@@ -2951,18 +3276,61 @@ if s_file and d_file and lt_file:
                 )
                 st.plotly_chart(fig_drv, use_container_width=True)
 
-                ss_attrib_df_formatted = df_format_for_display(
-                    ss_drv_df_display.rename(
-                        columns={
-                            "driver": "Driver",
-                            "amount": "Units",
-                            "pct_of_total_ss": "Pct_of_total_SS",
-                        }
-                    ).round(2),
-                    cols=["Units", "Pct_of_total_SS"],
-                    two_decimals_cols=["Pct_of_total_SS"],
+                # Card-style table for attribution breakdown
+                attrib_display = ss_drv_df_display.rename(
+                    columns={
+                        "driver": "Driver",
+                        "amount": "Units",
+                        "pct_of_total_ss": "Pct_of_total_SS",
+                    }
                 )
-                st.dataframe(ss_attrib_df_formatted, use_container_width=True)
+
+                def fmt_units(v):
+                    return euro_format(v, False, True)
+
+                def fmt_pct(v):
+                    try:
+                        return f"{float(v):.1f}%"
+                    except Exception:
+                        return ""
+
+                render_card_table(
+                    attrib_display,
+                    id_col="Driver",
+                    col_defs=[
+                        {
+                            "header": "Units",
+                            "col": "Units",
+                            "fmt": fmt_units,
+                            "pill": "blue",
+                        },
+                        {
+                            "header": "% of total SS",
+                            "col": "Pct_of_total_SS",
+                            "fmt": fmt_pct,
+                            "pill": None,
+                        },
+                        {
+                            "header": "—",
+                            "col": "Units",
+                            "fmt": lambda v: "",
+                            "pill": None,
+                        },
+                        {
+                            "header": "—",
+                            "col": "Units",
+                            "fmt": lambda v: "",
+                            "pill": None,
+                        },
+                        {
+                            "header": "—",
+                            "col": "Units",
+                            "fmt": lambda v: "",
+                            "pill": None,
+                        },
+                    ],
+                    container_height=260,
+                )
 
                 try:
                     top3 = (
@@ -3137,7 +3505,7 @@ if s_file and d_file and lt_file:
                     "Avg_Day_Demand", ascending=False
                 ).reset_index(drop=True)
 
-                # --- CSS for card‑like layout ---
+                # --- CSS for card‑like layout (kept, but simplified color logic for last column) ---
                 st.markdown(
                     """
                     <style>
@@ -3174,7 +3542,6 @@ if s_file and d_file and lt_file:
                         font-weight: 700;
                         color: #111827;
                       }
-                      /* PRODUCT badge: now neutral light grey box (no color by product) */
                       .mat-product-badge {
                         display: flex;
                         align-items: center;
@@ -3193,7 +3560,7 @@ if s_file and d_file and lt_file:
                         font-size: 0.80rem;
                         color: #757575;
                       }
-                      .mat-pill {
+                      .mat-pill-blue {
                         display: inline-flex;
                         align-items: center;
                         justify-content: center;
@@ -3203,37 +3570,25 @@ if s_file and d_file and lt_file:
                         font-size: 0.85rem;
                         font-weight: 700;
                         color: #ffffff;
-                      }
-                      .mat-pill-blue {
                         background: linear-gradient(90deg,#2196f3,#64b5f6);
                       }
-                      .mat-pill-green {
-                        background: linear-gradient(90deg,#43a047,#66bb6a);
-                      }
-                      .mat-pill-orange {
-                        background: linear-gradient(90deg,#fb8c00,#ffb74d);
-                      }
-                      .mat-pill-red {
-                        background: linear-gradient(90deg,#e53935,#ef5350);
-                      }
-                      .mat-num-muted {
-                        font-size: 0.78rem;
-                        color: #9e9e9e;
-                        margin-left: 4px;
+                      .mat-pill-grey {
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-width: 54px;
+                        padding: 2px 8px;
+                        border-radius: 999px;
+                        font-size: 0.85rem;
+                        font-weight: 700;
+                        color: #424242;
+                        background: #eeeeee;
+                        border: 1px solid #e0e0e0;
                       }
                     </style>
                     """,
                     unsafe_allow_html=True,
                 )
-
-                def choose_pct_pill_color(p):
-                    if p >= 90:
-                        return "mat-pill-red"
-                    if p >= 70:
-                        return "mat-pill-orange"
-                    if p >= 50:
-                        return "mat-pill-blue"
-                    return "mat-pill-green"
 
                 # Formatting helpers
                 def format_3dec(v):
@@ -3248,12 +3603,6 @@ if s_file and d_file and lt_file:
                     except Exception:
                         return "–"
 
-                def format_pct_int(v):
-                    try:
-                        return f"{float(v):.0f}%"
-                    except Exception:
-                        return "–"
-
                 # Build HTML for all cards
                 cards_html_parts = [
                     '<div class="mat-strip-container"><div class="mat-cards-row">'
@@ -3265,15 +3614,11 @@ if s_file and d_file and lt_file:
                     ss_units = r["Safety_Stock"]
                     days_cov = r["Avg_SS_Days_Coverage"]
                     local_fc = r["Local_Forecast_Month"]
-                    ratio_pct = r["SS_to_Demand_Ratio_%"]
 
                     avg_daily_txt = format_3dec(avg_daily)
                     ss_txt = format_3dec(ss_units)
                     cov_txt = format_int_or_dash(days_cov)
                     fc_txt = format_3dec(local_fc)
-                    ratio_txt = format_pct_int(ratio_pct)
-
-                    pill_class = choose_pct_pill_color(ratio_pct)
 
                     card_html = (
                         '<div class="mat-card">'
@@ -3294,14 +3639,13 @@ if s_file and d_file and lt_file:
                         '<div>'
                         '<div class="mat-card-col-header">SS Coverage (days)</div>'
                         '<div class="mat-card-col-value">'
-                        f'<span class="mat-pill mat-pill-blue">{cov_txt}</span>'
+                        f'<span class="mat-pill-blue">{cov_txt}</span>'
                         "</div>"
                         "</div>"
                         '<div>'
                         '<div class="mat-card-col-header">Local Forecast (month)</div>'
                         '<div class="mat-card-col-value">'
-                        f"{fc_txt}"
-                        f'<span class="mat-pill {pill_class}" style="margin-left:10px;">{ratio_txt}</span>'
+                        f'<span class="mat-pill-grey">{fc_txt}</span>'
                         "</div>"
                         "</div>"
                         "</div>"
