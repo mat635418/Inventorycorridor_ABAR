@@ -607,28 +607,48 @@ def render_ss_formula_explainer():
 
 
 def clean_numeric(series: pd.Series) -> pd.Series:
-    s = series.astype(str).str.trim()
+    """
+    Robustly convert a pandas-like column to numeric:
+
+    - Accepts Series, Index, list, numpy array.
+    - Handles empty / dash / NA-like strings.
+    - Handles parentheses for negatives, commas and spaces.
+    """
+    # 1) Ensure we have a real Series (Index, list, ndarray → Series)
+    if not isinstance(series, pd.Series):
+        series = pd.Series(series)
+
+    # 2) Coerce to string and trim
+    s = series.astype("string")  # pandas StringDtype is safer
+    s = s.str.strip()
+
+    # 3) Replace common "empty"/NA tokens
     s = s.replace(
         {
-            "": np.nan,
-            "-": np.nan,
-            "—": np.nan,
-            "na": np.nan,
-            "n/a": np.nan,
-            "None": np.nan,
+            "": pd.NA,
+            "-": pd.NA,
+            "—": pd.NA,
+            "na": pd.NA,
+            "NA": pd.NA,
+            "n/a": pd.NA,
+            "N/A": pd.NA,
+            "None": pd.NA,
         }
     )
+
+    # 4) Handle parentheses for negatives: "(123)" → "-123"
     paren_mask = s.str.startswith("(") & s.str.endswith(")")
-    try:
+    if paren_mask.any():
         s.loc[paren_mask] = "-" + s.loc[paren_mask].str[1:-1]
-    except Exception:
-        s = s.apply(
-            lambda v: ("-" + v[1:-1])
-            if isinstance(v, str) and v.startswith("(") and v.endswith(")")
-            else v
-        )
-    s = s.str.replace(",", "", regex=False).str.replace(" ", "", regex=False)
+
+    # 5) Remove thousand separators and spaces
+    s = s.str.replace(",", "", regex=False)
+    s = s.str.replace(" ", "", regex=False)
+
+    # 6) Remove any remaining non-numeric characters except . and -
     s = s.str.replace(r"[^\d\.\-]+", "", regex=True)
+
+    # 7) Convert to numeric
     return pd.to_numeric(s, errors="coerce")
 
 
