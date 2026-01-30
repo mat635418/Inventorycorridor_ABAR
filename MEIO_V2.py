@@ -3009,6 +3009,7 @@ if s_file and d_file and lt_file:
         with col_badge:
             render_logo_above_parameters(scale=1.5)
 
+            # --- Period selector as before ---
             if period_labels:
                 try:
                     sel_label = period_label(default_period) if default_period is not None else period_labels[-1]
@@ -3029,7 +3030,11 @@ if s_file and d_file and lt_file:
             else:
                 selected_period_all = CURRENT_MONTH_TS
 
-            snapshot_all = get_active_snapshot(results, selected_period_all if selected_period_all is not None else default_period)
+            # --- Aggregate data exactly as before ---
+            snapshot_all = get_active_snapshot(
+                results,
+                selected_period_all if selected_period_all is not None else default_period,
+            )
 
             agg_all = snapshot_all.groupby("Product", as_index=False).agg(
                 Network_Demand_Month=("Agg_Future_Demand", "sum"),
@@ -3052,8 +3057,10 @@ if s_file and d_file and lt_file:
             else:
                 agg_all["End_Nodes"] = np.nan
 
+            # keep only rows with non‑zero SS
             agg_all = agg_all[agg_all["Safety_Stock"] > 0].copy()
 
+            # extra derived field (not strictly needed for visual but kept for export)
             agg_all["Reorder_Point"] = agg_all["Safety_Stock"] + agg_all["Local_Forecast_Month"]
 
             agg_all["SS_to_Demand_Ratio_%"] = np.where(
@@ -3071,14 +3078,11 @@ if s_file and d_file and lt_file:
             ]:
                 if c in agg_all.columns:
                     agg_all[c] = agg_all[c].fillna(0.0)
+            for c in ["Avg_Day_Demand", "Avg_SS_Days_Coverage", "SS_to_Demand_Ratio_%"]:
+                if c in agg_all.columns:
+                    agg_all[c] = agg_all[c].fillna(0.0)
 
-            if "Avg_Day_Demand" in agg_all.columns:
-                agg_all["Avg_Day_Demand"] = agg_all["Avg_Day_Demand"].fillna(0.0)
-            if "Avg_SS_Days_Coverage" in agg_all.columns:
-                agg_all["Avg_SS_Days_Coverage"] = agg_all["Avg_SS_Days_Coverage"].fillna(0.0)
-            if "SS_to_Demand_Ratio_%" in agg_all.columns:
-                agg_all["SS_to_Demand_Ratio_%" ] = agg_all["SS_to_Demand_Ratio_%"].fillna(0.0)
-
+            # --- CSV export (unchanged behaviour) ---
             with st.container():
                 st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
                 st.download_button(
@@ -3090,6 +3094,201 @@ if s_file and d_file and lt_file:
                 )
             st.markdown("</div>", unsafe_allow_html=True)
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        with col_main:
+            render_selection_line("Selected:", period_text=period_label(selected_period_all))
+            st.subheader("📊 All Materials View")
+
+            st.markdown(
+                """
+                <div style="font-size:0.86rem; color:#555; margin-bottom:6px;">
+                  One card per material for the selected month. Values are aggregated across all
+                  <strong>active</strong> locations.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            if agg_all.empty:
+                st.warning("No data available for the selected period.")
+            else:
+                # Sort by SS / Demand (%) descending to highlight most intensive materials
+                agg_view = agg_all.sort_values(
+                    "SS_to_Demand_Ratio_%", ascending=False
+                ).reset_index(drop=True)
+
+                # --- CSS for card‑like layout matching the sample image ---
+                st.markdown(
+                    """
+                    <style>
+                      .mat-strip-container {
+                        width: 100%;
+                        overflow-x: auto;
+                        padding-bottom: 6px;
+                      }
+                      .mat-cards-row {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 8px;
+                        min-width: 650px;
+                      }
+                      .mat-card {
+                        display: grid;
+                        grid-template-columns: 150px repeat(4, minmax(110px, 1fr));
+                        align-items: stretch;
+                        border-radius: 14px;
+                        padding: 6px 10px;
+                        background: linear-gradient(90deg,#f8fbff,#f5fff9);
+                        box-shadow: 0 2px 4px rgba(15,23,42,0.10);
+                      }
+                      .mat-card-col-header {
+                        font-size: 0.70rem;
+                        font-weight: 600;
+                        color: #616161;
+                        text-transform: uppercase;
+                        letter-spacing: 0.03em;
+                        margin-bottom: 2px;
+                      }
+                      .mat-card-col-value {
+                        font-size: 0.95rem;
+                        font-weight: 700;
+                        color: #111827;
+                      }
+
+                      /* product badge on the left */
+                      .mat-product-badge {
+                        display: flex;
+                        align-items: center;
+                        justify-content: flex-start;
+                        padding: 6px 10px;
+                        border-radius: 999px;
+                        font-weight: 800;
+                        font-size: 0.92rem;
+                        color: #ffffff;
+                        white-space: nowrap;
+                      }
+                      .mat-product-chevron {
+                        margin-right: 6px;
+                        font-size: 0.80rem;
+                      }
+
+                      /* value "pills" for SS coverage & % */
+                      .mat-pill {
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-width: 54px;
+                        padding: 2px 8px;
+                        border-radius: 999px;
+                        font-size: 0.85rem;
+                        font-weight: 700;
+                        color: #ffffff;
+                      }
+                      .mat-pill-blue {
+                        background: linear-gradient(90deg,#2196f3,#64b5f6);
+                      }
+                      .mat-pill-green {
+                        background: linear-gradient(90deg,#43a047,#66bb6a);
+                      }
+                      .mat-pill-orange {
+                        background: linear-gradient(90deg,#fb8c00,#ffb74d);
+                      }
+                      .mat-pill-red {
+                        background: linear-gradient(90deg,#e53935,#ef5350);
+                      }
+
+                      .mat-num-muted {
+                        font-size: 0.78rem;
+                        color: #9e9e9e;
+                        margin-left: 4px;
+                      }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                # palette for product badges (cycled)
+                badge_colors = [
+                    "linear-gradient(90deg,#1976d2,#42a5f5)",  # blue
+                    "linear-gradient(90deg,#00796b,#26a69a)",  # teal
+                    "linear-gradient(90deg,#388e3c,#81c784)",  # green
+                    "linear-gradient(90deg,#f57c00,#ffb74d)",  # orange
+                    "linear-gradient(90deg,#6a1b9a,#ab47bc)",  # purple
+                ]
+
+                def choose_pct_pill_color(p):
+                    if p >= 90:
+                        return "mat-pill-red"
+                    if p >= 70:
+                        return "mat-pill-orange"
+                    if p >= 50:
+                        return "mat-pill-blue"
+                    return "mat-pill-green"
+
+                # Build HTML for all cards
+                cards_html = ['<div class="mat-strip-container"><div class="mat-cards-row">']
+
+                for i, r in agg_view.iterrows():
+                    prod = str(r["Product"])
+                    avg_daily = r["Avg_Day_Demand"]
+                    ss_units = r["Safety_Stock"]
+                    days_cov = r["Avg_SS_Days_Coverage"]
+                    local_fc = r["Local_Forecast_Month"]
+                    ratio_pct = r["SS_to_Demand_Ratio_%"]
+
+                    # formatting similar to mock
+                    avg_daily_txt = euro_format(round(avg_daily), always_two_decimals=False, show_zero=True)
+                    ss_txt = euro_format(round(ss_units), always_two_decimals=False, show_zero=True)
+                    cov_txt = f"{days_cov:.0f}" if not pd.isna(days_cov) else "–"
+                    fc_txt = euro_format(round(local_fc), always_two_decimals=False, show_zero=True)
+                    ratio_txt = f"{ratio_pct:.0f}%" if not pd.isna(ratio_pct) else "–"
+
+                    badge_bg = badge_colors[i % len(badge_colors)]
+                    pill_class = choose_pct_pill_color(ratio_pct)
+
+                    card_html = f"""
+                    <div class="mat-card">
+                      <!-- Product badge -->
+                      <div style="display:flex;align-items:center;">
+                        <div class="mat-product-badge" style="background:{badge_bg};">
+                          <span class="mat-product-chevron">▶</span>{prod}
+                        </div>
+                      </div>
+
+                      <!-- Avg Daily Demand -->
+                      <div>
+                        <div class="mat-card-col-header">Avg Daily Demand</div>
+                        <div class="mat-card-col-value">{avg_daily_txt}</div>
+                      </div>
+
+                      <!-- Calculated Safety Stock -->
+                      <div>
+                        <div class="mat-card-col-header">Calculated Safety Stock</div>
+                        <div class="mat-card-col-value">{ss_txt}</div>
+                      </div>
+
+                      <!-- SS Coverage (days) -->
+                      <div>
+                        <div class="mat-card-col-header">SS Coverage (days)</div>
+                        <div class="mat-card-col-value">
+                          <span class="mat-pill mat-pill-blue">{cov_txt}</span>
+                        </div>
+                      </div>
+
+                      <!-- Local Forecast (month) + SS / Demand (%) pill -->
+                      <div>
+                        <div class="mat-card-col-header">Local Forecast (month)</div>
+                        <div class="mat-card-col-value">
+                          {fc_txt}
+                          <span class="mat-pill {pill_class}" style="margin-left:10px;">{ratio_txt}</span>
+                        </div>
+                      </div>
+                    </div>
+                    """
+                    cards_html.append(card_html)
+
+                cards_html.append("</div></div>")
+                st.markdown("\n".join(cards_html), unsafe_allow_html=True)
 
         with col_main:
             render_selection_line("Selected:", period_text=period_label(selected_period_all))
