@@ -478,7 +478,8 @@ def render_ss_formula_explainer():
             - For very low monthly demand, we enforce $\mathrm{Var}(D) \ge D$ (Poisson-like floor).
             - A small floor of $1\%$ of the mean demand over lead time is also enforced,  
               so tiny variances do not result in zero $SS$.
-            - Scenario $SS$ is for **analysis only** and does not overwrite the implemented policy.
+            - Scenario $SS$ is **policy-consistent** with the main engine:
+              we apply zero-if-no-demand, capping and B616 overrides.
             """,
             unsafe_allow_html=True,
         )
@@ -796,6 +797,42 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive: bool = Tru
     return pd.DataFrame(results), reachable_map
 
 
+def apply_policy_to_scalar_ss(
+    ss_value: float,
+    agg_future_demand: float,
+    location: str,
+    zero_if_no_net_fcst: bool,
+    apply_cap: bool,
+    cap_range,
+) -> float:
+    """
+    Apply the same policy rules used in the pipeline to a single scalar SS value.
+
+    Rules:
+      1) Zero SS if no aggregated network demand (if enabled).
+      2) Cap SS within [l_cap, u_cap] * Agg_Future_Demand (if enabled).
+      3) B616 override → SS = 0.
+    """
+    ss = float(ss_value)
+
+    # 1) Zero SS if no demand
+    if zero_if_no_net_fcst and agg_future_demand <= 0:
+        ss = 0.0
+
+    # 2) SS capping vs network demand
+    if apply_cap:
+        l_cap, u_cap = cap_range[0] / 100.0, cap_range[1] / 100.0
+        l_lim = agg_future_demand * l_cap
+        u_lim = agg_future_demand * u_cap
+        ss = max(l_lim, min(ss, u_lim))
+
+    # 3) B616 override
+    if location == "B616":
+        ss = 0.0
+
+    return ss
+
+
 def run_pipeline(
     df_d,
     stats,
@@ -1013,11 +1050,13 @@ def run_pipeline(
     res["Adjustment_Status"] = "Optimal (Statistical)"
     res["Safety_Stock"] = res["Pre_Rule_SS"]
 
+    # Zero if no demand
     if zero_if_no_net_fcst:
         zero_mask = res["Agg_Future_Demand"] <= 0
         res.loc[zero_mask, "Adjustment_Status"] = "Forced to Zero"
         res.loc[zero_mask, "Safety_Stock"] = 0.0
 
+    # Capping
     res["Pre_Cap_SS"] = res["Safety_Stock"]
     if apply_cap:
         l_cap, u_cap = cap_range[0] / 100.0, cap_range[1] / 100.0
@@ -1034,6 +1073,7 @@ def run_pipeline(
         res["Safety_Stock"] = res["Safety_Stock"].clip(lower=l_lim, upper=u_lim)
 
     res["Safety_Stock"] = res["Safety_Stock"].round(0)
+    # B616 override
     res.loc[res["Location"] == "B616", "Safety_Stock"] = 0
     res["Max_Corridor"] = res["Safety_Stock"] + res["Forecast"]
 
@@ -2287,7 +2327,8 @@ if s_file and d_file and lt_file:
             st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
             st.write(
                 "See how changing the **end-node** service level (SL) or lead-time assumptions affects safety stock. "
-                "Hop 1–3 service levels are automatically recomputed to keep the same relative gaps as in the base policy."
+                "Hop 1–3 service levels are automatically recomputed to keep the same relative gaps as in the base policy. "
+                "Scenario SS values are computed with the **same policy rules** (zero-if-no-demand, capping, B616 override) as the implemented plan."
             )
             render_ss_formula_explainer()
 
@@ -2382,7 +2423,8 @@ if s_file and d_file and lt_file:
                         font-size:0.97rem;
                         color:#0b3d91;
                         font-weight:700;">
-                      SCENARIO PLANNING TOOL — simulate alternative end-node SL / LT assumptions (analysis‑only).
+                      SCENARIO PLANNING TOOL — simulate alternative end-node SL / LT assumptions (analysis‑only),
+                      but using the same policy rules as the implemented plan (zero-if-no-demand, caps, overrides).
                       Hop 1–3 SLs are automatically recalculated to keep the same relative gaps as in the policy.
                     </div>
                     """,
@@ -2480,11 +2522,24 @@ if s_file and d_file and lt_file:
                         var_d = sigma_d_day**2
                         if row["Agg_Future_Demand"] < 20.0:
                             var_d = max(var_d, d_day)
-                        sc_ss = sc_z * math.sqrt(
+
+                        # Raw statistical SS for this scenario
+                        sc_ss_raw = sc_z * math.sqrt(
                             var_d * sc["LT_mean"] + (sc["LT_std"] ** 2) * (d_day**2)
                         )
                         sc_floor = d_day * sc["LT_mean"] * 0.01
-                        sc_ss = max(sc_ss, sc_floor)
+                        sc_ss_raw = max(sc_ss_raw, sc_floor)
+
+                        # Apply same policy rules as pipeline (zero-if-no-demand, caps, B616)
+                        sc_ss = apply_policy_to_scalar_ss(
+                            ss_value=sc_ss_raw,
+                            agg_future_demand=float(row["Agg_Future_Demand"]),
+                            location=str(row["Location"]),
+                            zero_if_no_net_fcst=zero_if_no_net_fcst,
+                            apply_cap=apply_cap,
+                            cap_range=cap_range,
+                        )
+
                         scen_rows.append(
                             {
                                 "Scenario": f"S{idx+1}",
@@ -2499,6 +2554,7 @@ if s_file and d_file and lt_file:
                         )
                     scen_df = pd.DataFrame(scen_rows)
 
+                    # Base (Stat) = pre-rule (no caps/overrides), Implemented = policy-adjusted
                     base_row = {
                         "Scenario": "Base (Stat)",
                         "EndNode_SL_%": service_level * 100,
@@ -2540,8 +2596,9 @@ if s_file and d_file and lt_file:
                     display_comp["Pct_vs_Implemented_%"] = display_comp["Simulated_SS"].apply(pct_vs_impl)
 
                     st.markdown(
-                        "Scenario comparison (Simulated SS). 'Implemented' shows the final Safety_Stock after rules. "
-                        "Service Levels shown are for **end-nodes** and the derived hop tiers."
+                        "Scenario comparison. 'Implemented' shows the final Safety_Stock after all rules. "
+                        "Scenario rows apply the **same policy rules**, so if inputs match the base, "
+                        "S1 should be very close to 'Implemented'."
                     )
                     st.markdown('<div class="scenario-table-container">', unsafe_allow_html=True)
                     st.dataframe(
@@ -2592,7 +2649,7 @@ if s_file and d_file and lt_file:
                         )
                     )
                     fig_bar.update_layout(
-                        title="Scenario SS Comparison",
+                        title="Scenario SS Comparison (policy-consistent)",
                         yaxis_title="SS (units)",
                     )
                     st.plotly_chart(fig_bar, use_container_width=True)
