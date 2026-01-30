@@ -3003,7 +3003,7 @@ if s_file and d_file and lt_file:
                 except Exception:
                     pass
 
- # TAB 8 -----------------------------------------------------------------
+    # TAB 8 -----------------------------------------------------------------
     with tab8:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -3012,7 +3012,11 @@ if s_file and d_file and lt_file:
             # --- Period selector as before ---
             if period_labels:
                 try:
-                    sel_label = period_label(default_period) if default_period is not None else period_labels[-1]
+                    sel_label = (
+                        period_label(default_period)
+                        if default_period is not None
+                        else period_labels[-1]
+                    )
                     sel_period_index = (
                         period_labels.index(sel_label)
                         if sel_label in period_labels
@@ -3026,14 +3030,18 @@ if s_file and d_file and lt_file:
                     index=sel_period_index,
                     key="allmat_period",
                 )
-                selected_period_all = period_label_map.get(chosen_label_all, default_period)
+                selected_period_all = period_label_map.get(
+                    chosen_label_all, default_period
+                )
             else:
                 selected_period_all = CURRENT_MONTH_TS
 
             # --- Aggregate data exactly as before ---
             snapshot_all = get_active_snapshot(
                 results,
-                selected_period_all if selected_period_all is not None else default_period,
+                selected_period_all
+                if selected_period_all is not None
+                else default_period,
             )
 
             agg_all = snapshot_all.groupby("Product", as_index=False).agg(
@@ -3061,7 +3069,9 @@ if s_file and d_file and lt_file:
             agg_all = agg_all[agg_all["Safety_Stock"] > 0].copy()
 
             # extra derived field (not strictly needed for visual but kept for export)
-            agg_all["Reorder_Point"] = agg_all["Safety_Stock"] + agg_all["Local_Forecast_Month"]
+            agg_all["Reorder_Point"] = (
+                agg_all["Safety_Stock"] + agg_all["Local_Forecast_Month"]
+            )
 
             agg_all["SS_to_Demand_Ratio_%"] = np.where(
                 agg_all["Network_Demand_Month"] > 0,
@@ -3078,13 +3088,19 @@ if s_file and d_file and lt_file:
             ]:
                 if c in agg_all.columns:
                     agg_all[c] = agg_all[c].fillna(0.0)
-            for c in ["Avg_Day_Demand", "Avg_SS_Days_Coverage", "SS_to_Demand_Ratio_%"]:
+            for c in [
+                "Avg_Day_Demand",
+                "Avg_SS_Days_Coverage",
+                "SS_to_Demand_Ratio_%"
+            ]:
                 if c in agg_all.columns:
                     agg_all[c] = agg_all[c].fillna(0.0)
 
-            # --- CSV export (unchanged behaviour) ---
+            # --- CSV export ---
             with st.container():
-                st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="export-csv-btn">', unsafe_allow_html=True
+                )
                 st.download_button(
                     "💾 Export CSV",
                     data=agg_all.to_csv(index=False),
@@ -3093,10 +3109,14 @@ if s_file and d_file and lt_file:
                     key="allmat_export_btn",
                 )
             st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='height:6px'></div>", unsafe_allow_html=True
+            )
 
         with col_main:
-            render_selection_line("Selected:", period_text=period_label(selected_period_all))
+            render_selection_line(
+                "Selected:", period_text=period_label(selected_period_all)
+            )
             st.subheader("📊 All Materials View")
 
             st.markdown(
@@ -3117,7 +3137,7 @@ if s_file and d_file and lt_file:
                     "SS_to_Demand_Ratio_%", ascending=False
                 ).reset_index(drop=True)
 
-                # --- CSS for card‑like layout matching the sample image ---
+                # --- CSS for card‑like layout ---
                 st.markdown(
                     """
                     <style>
@@ -3154,8 +3174,6 @@ if s_file and d_file and lt_file:
                         font-weight: 700;
                         color: #111827;
                       }
-
-                      /* product badge on the left */
                       .mat-product-badge {
                         display: flex;
                         align-items: center;
@@ -3171,8 +3189,6 @@ if s_file and d_file and lt_file:
                         margin-right: 6px;
                         font-size: 0.80rem;
                       }
-
-                      /* value "pills" for SS coverage & % */
                       .mat-pill {
                         display: inline-flex;
                         align-items: center;
@@ -3196,7 +3212,6 @@ if s_file and d_file and lt_file:
                       .mat-pill-red {
                         background: linear-gradient(90deg,#e53935,#ef5350);
                       }
-
                       .mat-num-muted {
                         font-size: 0.78rem;
                         color: #9e9e9e;
@@ -3225,7 +3240,7 @@ if s_file and d_file and lt_file:
                         return "mat-pill-blue"
                     return "mat-pill-green"
 
-                # --- NEW: formatting helpers to match your HTML dump ---
+                # Formatting helpers
                 def format_3dec(v):
                     try:
                         return f"{float(v):,.3f}".replace(",", ".")
@@ -3245,7 +3260,9 @@ if s_file and d_file and lt_file:
                         return "–"
 
                 # Build HTML for all cards
-                cards_html = ['<div class="mat-strip-container"><div class="mat-cards-row">']
+                cards_html_parts = [
+                    '<div class="mat-strip-container"><div class="mat-cards-row">'
+                ]
 
                 for i, r in agg_view.iterrows():
                     prod = str(r["Product"])
@@ -3255,59 +3272,52 @@ if s_file and d_file and lt_file:
                     local_fc = r["Local_Forecast_Month"]
                     ratio_pct = r["SS_to_Demand_Ratio_%"]
 
-                    # --- Use 3-decimal formatting with dot as thousand separator ---
-                    avg_daily_txt = format_3dec(avg_daily)       # e.g. 7.499
-                    ss_txt        = format_3dec(ss_units)        # e.g. 674.940
-                    cov_txt       = format_int_or_dash(days_cov) # e.g. 40
-                    fc_txt        = format_3dec(local_fc)        # e.g. 337.470
-                    ratio_txt     = format_pct_int(ratio_pct)    # e.g. 100%
+                    avg_daily_txt = format_3dec(avg_daily)
+                    ss_txt = format_3dec(ss_units)
+                    cov_txt = format_int_or_dash(days_cov)
+                    fc_txt = format_3dec(local_fc)
+                    ratio_txt = format_pct_int(ratio_pct)
 
                     badge_bg = badge_colors[i % len(badge_colors)]
                     pill_class = choose_pct_pill_color(ratio_pct)
 
-                    card_html = f"""
-                    <div class="mat-card">
-                      <!-- Product badge -->
-                      <div style="display:flex;align-items:center;">
-                        <div class="mat-product-badge" style="background:{badge_bg};">
-                          <span class="mat-product-chevron">▶</span>{prod}
-                        </div>
-                      </div>
+                    card_html = (
+                        '<div class="mat-card">'
+                        '<div style="display:flex;align-items:center;">'
+                        f'<div class="mat-product-badge" style="background:{badge_bg};">'
+                        '<span class="mat-product-chevron">▶</span>'
+                        f"{prod}"
+                        "</div>"
+                        "</div>"
+                        '<div>'
+                        '<div class="mat-card-col-header">Avg Daily Demand</div>'
+                        f'<div class="mat-card-col-value">{avg_daily_txt}</div>'
+                        "</div>"
+                        '<div>'
+                        '<div class="mat-card-col-header">Calculated Safety Stock</div>'
+                        f'<div class="mat-card-col-value">{ss_txt}</div>'
+                        "</div>"
+                        '<div>'
+                        '<div class="mat-card-col-header">SS Coverage (days)</div>'
+                        '<div class="mat-card-col-value">'
+                        f'<span class="mat-pill mat-pill-blue">{cov_txt}</span>'
+                        "</div>"
+                        "</div>"
+                        '<div>'
+                        '<div class="mat-card-col-header">Local Forecast (month)</div>'
+                        '<div class="mat-card-col-value">'
+                        f"{fc_txt}"
+                        f'<span class="mat-pill {pill_class}" style="margin-left:10px;">{ratio_txt}</span>'
+                        "</div>"
+                        "</div>"
+                        "</div>"
+                    )
+                    cards_html_parts.append(card_html)
 
-                      <!-- Avg Daily Demand -->
-                      <div>
-                        <div class="mat-card-col-header">Avg Daily Demand</div>
-                        <div class="mat-card-col-value">{avg_daily_txt}</div>
-                      </div>
+                cards_html_parts.append("</div></div>")
+                final_html = "".join(cards_html_parts)
 
-                      <!-- Calculated Safety Stock -->
-                      <div>
-                        <div class="mat-card-col-header">Calculated Safety Stock</div>
-                        <div class="mat-card-col-value">{ss_txt}</div>
-                      </div>
-
-                      <!-- SS Coverage (days) -->
-                      <div>
-                        <div class="mat-card-col-header">SS Coverage (days)</div>
-                        <div class="mat-card-col-value">
-                          <span class="mat-pill mat-pill-blue">{cov_txt}</span>
-                        </div>
-                      </div>
-
-                      <!-- Local Forecast (month) + SS / Demand (%) pill -->
-                      <div>
-                        <div class="mat-card-col-header">Local Forecast (month)</div>
-                        <div class="mat-card-col-value">
-                          {fc_txt}
-                          <span class="mat-pill {pill_class}" style="margin-left:10px;">{ratio_txt}</span>
-                        </div>
-                      </div>
-                    </div>
-                    """
-                    cards_html.append(card_html)
-
-                cards_html.append("</div></div>")
-                st.markdown("\n".join(cards_html), unsafe_allow_html=True)
+                st.markdown(final_html, unsafe_allow_html=True)
 
 else:
     st.info(
