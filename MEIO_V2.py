@@ -3003,7 +3003,7 @@ if s_file and d_file and lt_file:
                 except Exception:
                     pass
 
-    # TAB 8 -----------------------------------------------------------------
+ # TAB 8 -----------------------------------------------------------------
     with tab8:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -3225,6 +3225,25 @@ if s_file and d_file and lt_file:
                         return "mat-pill-blue"
                     return "mat-pill-green"
 
+                # --- NEW: formatting helpers to match your HTML dump ---
+                def format_3dec(v):
+                    try:
+                        return f"{float(v):,.3f}".replace(",", ".")
+                    except Exception:
+                        return str(v)
+
+                def format_int_or_dash(v):
+                    try:
+                        return f"{int(round(float(v))):,}".replace(",", ".")
+                    except Exception:
+                        return "–"
+
+                def format_pct_int(v):
+                    try:
+                        return f"{float(v):.0f}%"
+                    except Exception:
+                        return "–"
+
                 # Build HTML for all cards
                 cards_html = ['<div class="mat-strip-container"><div class="mat-cards-row">']
 
@@ -3236,12 +3255,12 @@ if s_file and d_file and lt_file:
                     local_fc = r["Local_Forecast_Month"]
                     ratio_pct = r["SS_to_Demand_Ratio_%"]
 
-                    # formatting similar to mock
-                    avg_daily_txt = euro_format(round(avg_daily), always_two_decimals=False, show_zero=True)
-                    ss_txt = euro_format(round(ss_units), always_two_decimals=False, show_zero=True)
-                    cov_txt = f"{days_cov:.0f}" if not pd.isna(days_cov) else "–"
-                    fc_txt = euro_format(round(local_fc), always_two_decimals=False, show_zero=True)
-                    ratio_txt = f"{ratio_pct:.0f}%" if not pd.isna(ratio_pct) else "–"
+                    # --- Use 3-decimal formatting with dot as thousand separator ---
+                    avg_daily_txt = format_3dec(avg_daily)       # e.g. 7.499
+                    ss_txt        = format_3dec(ss_units)        # e.g. 674.940
+                    cov_txt       = format_int_or_dash(days_cov) # e.g. 40
+                    fc_txt        = format_3dec(local_fc)        # e.g. 337.470
+                    ratio_txt     = format_pct_int(ratio_pct)    # e.g. 100%
 
                     badge_bg = badge_colors[i % len(badge_colors)]
                     pill_class = choose_pct_pill_color(ratio_pct)
@@ -3288,7 +3307,6 @@ if s_file and d_file and lt_file:
                     cards_html.append(card_html)
 
                 cards_html.append("</div></div>")
-                # IMPORTANT: allow HTML rendering
                 st.markdown("\n".join(cards_html), unsafe_allow_html=True)
 
 else:
