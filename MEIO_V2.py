@@ -3064,7 +3064,10 @@ if s_file and d_file and lt_file:
             else:
                 selected_period = CURRENT_MONTH_TS
 
-            mat_period_export = get_active_snapshot(results, selected_period if selected_period is not None else default_period)
+            mat_period_export = get_active_snapshot(
+                results,
+                selected_period if selected_period is not None else default_period,
+            )
             mat_period_export = mat_period_export[
                 (mat_period_export["Product"] == selected_product)
             ].copy()
@@ -3082,25 +3085,6 @@ if s_file and d_file and lt_file:
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
         with col_main:
-            st.markdown(
-                """
-                <style>
-                  div[data-testid="stVerticalBlock"] div:nth-child(7) .stMarkdown p {
-                    font-size: 0.82rem !important;
-                  }
-                  .exec-takeaway-selection {
-                    color: #b71c1c;
-                    font-weight: 700;
-                  }
-                  .exec-takeaway-percentage {
-                    color: #b71c1c;
-                    font-weight: 700;
-                  }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
-
             render_selection_line(
                 "Selected:",
                 product=selected_product,
@@ -3109,39 +3093,84 @@ if s_file and d_file and lt_file:
             st.subheader("📦 View by Material (+ SS attribution)")
             render_tab7_explainer()
 
-            mat_period_df = get_active_snapshot(results, selected_period if selected_period is not None else default_period)
+            # ---- MAIN TABLE (REVERTED TO NORMAL TABLE VIEW) ----
+            mat_period_df = get_active_snapshot(
+                results,
+                selected_period if selected_period is not None else default_period,
+            )
             mat_period_df = mat_period_df[
                 (mat_period_df["Product"] == selected_product)
             ].copy()
-            mat_period_df_display = hide_zero_rows(mat_period_df)
-            total_forecast = mat_period_df["Forecast"].sum()
-            total_ss = mat_period_df["Safety_Stock"].sum()
-            nodes_count = mat_period_df["Location"].nunique()
 
-            try:
-                avg_days_covered = (
-                    mat_period_df["Days_Covered_by_SS"]
-                    .replace([np.inf, -np.inf], np.nan)
-                    .mean()
-                )
-            except Exception:
-                avg_days_covered = np.nan
-
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Total Local Forecast", euro_format(total_forecast, True))
-            k2.metric("Total Safety Stock (sum nodes)", euro_format(total_ss, True))
-            k3.metric("Nodes", f"{nodes_count}")
-            k4.metric(
-                "Avg Days Covered (nodes)",
-                f"{avg_days_covered:.1f}" if not pd.isna(avg_days_covered) else "N/A",
-            )
-
-            st.markdown("---")
-            st.markdown("### Why do we carry this SS? — SS attribution")
-
-            if mat_period_df_display.empty:
-                st.warning("No data for this material/period (non-zero rows filtered).")
+            if mat_period_df.empty:
+                st.warning("No data for this material/period.")
             else:
+                mat_period_df_display = hide_zero_rows(mat_period_df)
+
+                # Basic KPIs on top
+                total_forecast = mat_period_df["Forecast"].sum()
+                total_ss = mat_period_df["Safety_Stock"].sum()
+                nodes_count = mat_period_df["Location"].nunique()
+                try:
+                    avg_days_covered = (
+                        mat_period_df["Days_Covered_by_SS"]
+                        .replace([np.inf, -np.inf], np.nan)
+                        .mean()
+                    )
+                except Exception:
+                    avg_days_covered = np.nan
+
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric("Total Local Forecast", euro_format(total_forecast, True))
+                k2.metric("Total Safety Stock (sum nodes)", euro_format(total_ss, True))
+                k3.metric("Nodes", f"{nodes_count}")
+                k4.metric(
+                    "Avg Days Covered (nodes)",
+                    f"{avg_days_covered:.1f}" if not pd.isna(avg_days_covered) else "N/A",
+                )
+
+                st.markdown("---")
+                st.markdown("### Node-level view (normal table)")
+
+                # Prepare a clean, readable table
+                table_cols = [
+                    "Product",
+                    "Location",
+                    "Period",
+                    "Forecast",
+                    "Agg_Future_Demand",
+                    "Agg_Future_Internal",
+                    "Agg_Future_External",
+                    "Safety_Stock",
+                    "Days_Covered_by_SS",
+                    "LT_Mean",
+                    "LT_Std",
+                    "Service_Level_Node",
+                    "Tier_Hops",
+                    "Adjustment_Status",
+                ]
+                existing_cols = [c for c in table_cols if c in mat_period_df_display.columns]
+                node_table = mat_period_df_display[existing_cols].copy()
+
+                # Format numerics for display
+                two_dec_cols = ["Days_Covered_by_SS", "Service_Level_Node"]
+                node_table_fmt = df_format_for_display(
+                    node_table,
+                    cols=None,
+                    two_decimals_cols=two_dec_cols,
+                )
+                if "Period" in node_table_fmt.columns:
+                    try:
+                        node_table_fmt["Period"] = node_table_fmt["Period"].apply(period_label)
+                    except Exception:
+                        pass
+
+                st.dataframe(node_table_fmt, use_container_width=True)
+
+                # ---- SS ATTRIBUTION (kept as in current version: waterfall + summary) ----
+                st.markdown("---")
+                st.markdown("### Why do we carry this SS? — SS attribution")
+
                 mat = mat_period_df.copy()
                 for c in [
                     "LT_Mean",
@@ -3296,7 +3325,7 @@ if s_file and d_file and lt_file:
                 )
                 st.plotly_chart(fig_drv, use_container_width=True)
 
-                # Card-style table for attribution breakdown
+                # Simple table for attribution breakdown (normal table)
                 attrib_display = ss_drv_df_display.rename(
                     columns={
                         "driver": "Driver",
@@ -3305,53 +3334,18 @@ if s_file and d_file and lt_file:
                     }
                 )
 
-                def fmt_units(v):
-                    return euro_format(v, False, True)
-
-                def fmt_pct(v):
-                    try:
-                        return f"{float(v):.1f}%"
-                    except Exception:
-                        return ""
-
-                render_card_table(
-                    attrib_display,
-                    id_col="Driver",
-                    col_defs=[
-                        {
-                            "header": "Units",
-                            "col": "Units",
-                            "fmt": fmt_units,
-                            "pill": "blue",
-                        },
-                        {
-                            "header": "% of total SS",
-                            "col": "Pct_of_total_SS",
-                            "fmt": fmt_pct,
-                            "pill": None,
-                        },
-                        {
-                            "header": "—",
-                            "col": "Units",
-                            "fmt": lambda v: "",
-                            "pill": None,
-                        },
-                        {
-                            "header": "—",
-                            "col": "Units",
-                            "fmt": lambda v: "",
-                            "pill": None,
-                        },
-                        {
-                            "header": "—",
-                            "col": "Units",
-                            "fmt": lambda v: "",
-                            "pill": None,
-                        },
-                    ],
-                    container_height=260,
+                attrib_display_fmt = attrib_display.copy()
+                attrib_display_fmt["Units"] = attrib_display_fmt["Units"].apply(
+                    lambda v: euro_format(v, False, True)
                 )
+                attrib_display_fmt["Pct_of_total_SS"] = attrib_display_fmt[
+                    "Pct_of_total_SS"
+                ].apply(lambda v: f"{v:.1f}%")
 
+                st.markdown("#### SS attribution breakdown (table)")
+                st.dataframe(attrib_display_fmt, use_container_width=True)
+
+                # Exec takeaway (kept)
                 try:
                     top3 = (
                         ss_drv_df_display.sort_values(
@@ -3367,22 +3361,20 @@ if s_file and d_file and lt_file:
                         else:
                             norm_pct = 0.0
                         pieces.append(
-                            f"{r['driver']} "
-                            f"(<span class=\"exec-takeaway-percentage\">{norm_pct:.1f}%</span>)"
+                            f"{r['driver']} (<strong>{norm_pct:.1f}%</strong>)"
                         )
 
                     if pieces:
                         takeaway = (
-                            f"For <span class=\"exec-takeaway-selection\">{selected_product}</span> "
-                            f"in <span class=\"exec-takeaway-selection\">{period_label(selected_period)}</span>, "
+                            f"For <strong>{selected_product}</strong> in "
+                            f"<strong>{period_label(selected_period)}</strong>, "
                             f"safety stock is mainly explained by: " + "; ".join(pieces) + "."
                         )
                         st.markdown(
                             f"""
                             <div style="margin-top:8px;padding:8px 10px;border-radius:8px;
-                                background:#f5f9ff;border:1px solid #c5cae9;font-size:1.1rem;">
-                              <strong>Executive takeaway:</strong>
-
+                                background:#f5f9ff;border:1px solid #c5cae9;font-size:0.95rem;">
+                              <strong>Executive takeaway:</strong><br/>
                               {takeaway}
                             </div>
                             """,
