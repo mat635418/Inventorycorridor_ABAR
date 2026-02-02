@@ -3692,7 +3692,7 @@ with tab8:
                 )
             else:
                 st.info("No nonzero Safety Stock values for wordcloud in this period.")
-
+)
 else:
     st.info(
         "Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer."
