@@ -3383,291 +3383,315 @@ if s_file and d_file and lt_file:
                 except Exception:
                     pass
 
-    # TAB 8 -----------------------------------------------------------------
-    with tab8:
-        col_main, col_badge = st.columns([17, 3])
-        with col_badge:
-            render_logo_above_parameters(scale=1.5)
+# TAB 8 -----------------------------------------------------------------
+with tab8:
+    import matplotlib.pyplot as plt
+    from wordcloud import WordCloud
+    col_main, col_badge = st.columns([17, 3])
+    with col_badge:
+        render_logo_above_parameters(scale=1.5)
 
-            # --- Period selector as before ---
-            if period_labels:
-                try:
-                    sel_label = (
-                        period_label(default_period)
-                        if default_period is not None
-                        else period_labels[-1]
-                    )
-                    sel_period_index = (
-                        period_labels.index(sel_label)
-                        if sel_label in period_labels
-                        else len(period_labels) - 1
-                    )
-                except Exception:
-                    sel_period_index = len(period_labels) - 1
-                chosen_label_all = st.selectbox(
-                    "PERIOD",
-                    period_labels,
-                    index=sel_period_index,
-                    key="allmat_period",
+        # --- Period selector as before ---
+        if period_labels:
+            try:
+                sel_label = (
+                    period_label(default_period)
+                    if default_period is not None
+                    else period_labels[-1]
                 )
-                selected_period_all = period_label_map.get(
-                    chosen_label_all, default_period
+                sel_period_index = (
+                    period_labels.index(sel_label)
+                    if sel_label in period_labels
+                    else len(period_labels) - 1
                 )
-            else:
-                selected_period_all = CURRENT_MONTH_TS
-
-            # --- Aggregate data exactly as before ---
-            snapshot_all = get_active_snapshot(
-                results,
-                selected_period_all
-                if selected_period_all is not None
-                else default_period,
+            except Exception:
+                sel_period_index = len(period_labels) - 1
+            chosen_label_all = st.selectbox(
+                "PERIOD",
+                period_labels,
+                index=sel_period_index,
+                key="allmat_period",
             )
-
-            agg_all = snapshot_all.groupby("Product", as_index=False).agg(
-                Network_Demand_Month=("Agg_Future_Demand", "sum"),
-                Local_Forecast_Month=("Forecast", "sum"),
-                Safety_Stock=("Safety_Stock", "sum"),
-                Max_Corridor=("Max_Corridor", "sum"),
-                Avg_Day_Demand=("D_day", "mean"),
-                Avg_SS_Days_Coverage=("Days_Covered_by_SS", "mean"),
-                Nodes=("Location", "nunique"),
+            selected_period_all = period_label_map.get(
+                chosen_label_all, default_period
             )
+        else:
+            selected_period_all = CURRENT_MONTH_TS
 
-            if "Tier_Hops" in snapshot_all.columns:
-                end_nodes = (
-                    snapshot_all[snapshot_all["Tier_Hops"] == 0]
-                    .groupby("Product")["Location"]
-                    .nunique()
-                    .reset_index(name="End_Nodes")
-                )
-                agg_all = agg_all.merge(end_nodes, on="Product", how="left")
-            else:
-                agg_all["End_Nodes"] = np.nan
+        # --- Aggregate data exactly as before ---
+        snapshot_all = get_active_snapshot(
+            results,
+            selected_period_all
+            if selected_period_all is not None
+            else default_period,
+        )
 
-            # keep only rows with non‑zero SS
-            agg_all = agg_all[agg_all["Safety_Stock"] > 0].copy()
+        agg_all = snapshot_all.groupby("Product", as_index=False).agg(
+            Network_Demand_Month=("Agg_Future_Demand", "sum"),
+            Local_Forecast_Month=("Forecast", "sum"),
+            Safety_Stock=("Safety_Stock", "sum"),
+            Max_Corridor=("Max_Corridor", "sum"),
+            Avg_Day_Demand=("D_day", "mean"),
+            Avg_SS_Days_Coverage=("Days_Covered_by_SS", "mean"),
+            Nodes=("Location", "nunique"),
+        )
 
-            # extra derived field (not strictly needed for visual but kept for export)
-            agg_all["Reorder_Point"] = (
-                agg_all["Safety_Stock"] + agg_all["Local_Forecast_Month"]
+        if "Tier_Hops" in snapshot_all.columns:
+            end_nodes = (
+                snapshot_all[snapshot_all["Tier_Hops"] == 0]
+                .groupby("Product")["Location"]
+                .nunique()
+                .reset_index(name="End_Nodes")
             )
+            agg_all = agg_all.merge(end_nodes, on="Product", how="left")
+        else:
+            agg_all["End_Nodes"] = np.nan
 
-            agg_all["SS_to_Demand_Ratio_%"] = np.where(
-                agg_all["Network_Demand_Month"] > 0,
-                (agg_all["Safety_Stock"] / agg_all["Network_Demand_Month"]) * 100.0,
-                0.0,
-            )
+        # keep only rows with non‑zero SS
+        agg_all = agg_all[agg_all["Safety_Stock"] > 0].copy()
 
-            for c in [
-                "Network_Demand_Month",
-                "Local_Forecast_Month",
-                "Safety_Stock",
-                "Max_Corridor",
-                "Reorder_Point",
-            ]:
-                if c in agg_all.columns:
-                    agg_all[c] = agg_all[c].fillna(0.0)
-            for c in [
-                "Avg_Day_Demand",
-                "Avg_SS_Days_Coverage",
-                "SS_to_Demand_Ratio_%"
-            ]:
-                if c in agg_all.columns:
-                    agg_all[c] = agg_all[c].fillna(0.0)
+        # extra derived field (not strictly needed for visual but kept for export)
+        agg_all["Reorder_Point"] = (
+            agg_all["Safety_Stock"] + agg_all["Local_Forecast_Month"]
+        )
 
-            # --- CSV export ---
-            with st.container():
-                st.markdown(
-                    '<div class="export-csv-btn">', unsafe_allow_html=True
-                )
-                st.download_button(
-                    "💾 Export CSV",
-                    data=agg_all.to_csv(index=False),
-                    file_name=f"all_materials_{period_label(selected_period_all)}.csv",
-                    mime="text/csv",
-                    key="allmat_export_btn",
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
+        agg_all["SS_to_Demand_Ratio_%"] = np.where(
+            agg_all["Network_Demand_Month"] > 0,
+            (agg_all["Safety_Stock"] / agg_all["Network_Demand_Month"]) * 100.0,
+            0.0,
+        )
+
+        for c in [
+            "Network_Demand_Month",
+            "Local_Forecast_Month",
+            "Safety_Stock",
+            "Max_Corridor",
+            "Reorder_Point",
+        ]:
+            if c in agg_all.columns:
+                agg_all[c] = agg_all[c].fillna(0.0)
+        for c in [
+            "Avg_Day_Demand",
+            "Avg_SS_Days_Coverage",
+            "SS_to_Demand_Ratio_%"
+        ]:
+            if c in agg_all.columns:
+                agg_all[c] = agg_all[c].fillna(0.0)
+
+        # --- CSV export ---
+        with st.container():
             st.markdown(
-                "<div style='height:6px'></div>", unsafe_allow_html=True
+                '<div class="export-csv-btn">', unsafe_allow_html=True
             )
-
-        with col_main:
-            render_selection_line(
-                "Selected:", period_text=period_label(selected_period_all)
+            st.download_button(
+                "💾 Export CSV",
+                data=agg_all.to_csv(index=False),
+                file_name=f"all_materials_{period_label(selected_period_all)}.csv",
+                mime="text/csv",
+                key="allmat_export_btn",
             )
-            st.subheader("📊 All Materials View")
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div style='height:6px'></div>", unsafe_allow_html=True
+        )
 
+    with col_main:
+        render_selection_line(
+            "Selected:", period_text=period_label(selected_period_all)
+        )
+        st.subheader("📊 All Materials View")
+
+        st.markdown(
+            """
+            <div style="font-size:0.86rem; color:#555; margin-bottom:6px;">
+              One card per material for the selected month. Values are aggregated across all
+              <strong>active</strong> locations.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if agg_all.empty:
+            st.warning("No data available for the selected period.")
+        else:
+            # Sort by Avg Daily Demand descending (as requested)
+            agg_view = agg_all.sort_values(
+                "Avg_Day_Demand", ascending=False
+            ).reset_index(drop=True)
+
+            # --- CSS for card‑like layout (kept, but simplified color logic for last column) ---
             st.markdown(
                 """
-                <div style="font-size:0.86rem; color:#555; margin-bottom:6px;">
-                  One card per material for the selected month. Values are aggregated across all
-                  <strong>active</strong> locations.
-                </div>
+                <style>
+                  .mat-strip-container {
+                    width: 100%;
+                    overflow-x: auto;
+                    padding-bottom: 6px;
+                  }
+                  .mat-cards-row {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                    min-width: 650px;
+                  }
+                  .mat-card {
+                    display: grid;
+                    grid-template-columns: 150px repeat(4, minmax(110px, 1fr));
+                    align-items: stretch;
+                    border-radius: 14px;
+                    padding: 6px 10px;
+                    background: linear-gradient(90deg,#f8fbff,#f5fff9);
+                    box-shadow: 0 2px 4px rgba(15,23,42,0.10);
+                  }
+                  .mat-card-col-header {
+                    font-size: 0.70rem;
+                    font-weight: 600;
+                    color: #616161;
+                    text-transform: uppercase;
+                    letter-spacing: 0.03em;
+                    margin-bottom: 2px;
+                  }
+                  .mat-card-col-value {
+                    font-size: 0.95rem;
+                    font-weight: 700;
+                    color: #111827;
+                  }
+                  .mat-product-badge {
+                    display: flex;
+                    align-items: center;
+                    justify-content: flex-start;
+                    padding: 6px 10px;
+                    border-radius: 999px;
+                    font-weight: 800;
+                    font-size: 0.92rem;
+                    color: #424242;
+                    white-space: nowrap;
+                    background: #f5f5f5;
+                    border: 1px solid #e0e0e0;
+                  }
+                  .mat-product-chevron {
+                    margin-right: 6px;
+                    font-size: 0.80rem;
+                    color: #757575;
+                  }
+                  .mat-pill-blue {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    min-width: 54px;
+                    padding: 2px 8px;
+                    border-radius: 999px;
+                    font-size: 0.85rem;
+                    font-weight: 700;
+                    color: #ffffff;
+                    background: linear-gradient(90deg,#2196f3,#64b5f6);
+                  }
+                  .mat-pill-grey {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    min-width: 54px;
+                    padding: 2px 8px;
+                    border-radius: 999px;
+                    font-size: 0.85rem;
+                    font-weight: 700;
+                    color: #424242;
+                    background: #eeeeee;
+                    border: 1px solid #e0e0e0;
+                  }
+                </style>
                 """,
                 unsafe_allow_html=True,
             )
 
-            if agg_all.empty:
-                st.warning("No data available for the selected period.")
-            else:
-                # Sort by Avg Daily Demand descending (as requested)
-                agg_view = agg_all.sort_values(
-                    "Avg_Day_Demand", ascending=False
-                ).reset_index(drop=True)
+            # Formatting helpers
+            def format_3dec(v):
+                try:
+                    return f"{float(v):,.3f}".replace(",", ".")
+                except Exception:
+                    return str(v)
 
-                # --- CSS for card‑like layout (kept, but simplified color logic for last column) ---
+            def format_int_or_dash(v):
+                try:
+                    return f"{int(round(float(v))):,}".replace(",", ".")
+                except Exception:
+                    return "–"
+
+            # Build HTML for all cards
+            cards_html_parts = [
+                '<div class="mat-strip-container"><div class="mat-cards-row">'
+            ]
+
+            for _, r in agg_view.iterrows():
+                prod = str(r["Product"])
+                avg_daily = r["Avg_Day_Demand"]
+                ss_units = r["Safety_Stock"]
+                days_cov = r["Avg_SS_Days_Coverage"]
+                local_fc = r["Local_Forecast_Month"]
+
+                avg_daily_txt = format_3dec(avg_daily)
+                ss_txt = format_3dec(ss_units)
+                cov_txt = format_int_or_dash(days_cov)
+                fc_txt = format_3dec(local_fc)
+
+                card_html = (
+                    '<div class="mat-card">'
+                    '<div style="display:flex;align-items:center;">'
+                    '<div class="mat-product-badge">'
+                    '<span class="mat-product-chevron">▶</span>'
+                    f"{prod}"
+                    "</div>"
+                    "</div>"
+                    '<div>'
+                    '<div class="mat-card-col-header">Avg Daily Demand</div>'
+                    f'<div class="mat-card-col-value">{avg_daily_txt}</div>'
+                    "</div>"
+                    '<div>'
+                    '<div class="mat-card-col-header">Calculated Safety Stock</div>'
+                    f'<div class="mat-card-col-value">{ss_txt}</div>'
+                    "</div>"
+                    '<div>'
+                    '<div class="mat-card-col-header">SS Coverage (days)</div>'
+                    '<div class="mat-card-col-value">'
+                    f'<span class="mat-pill-blue">{cov_txt}</span>'
+                    "</div>"
+                    "</div>"
+                    '<div>'
+                    '<div class="mat-card-col-header">Local Forecast (month)</div>'
+                    '<div class="mat-card-col-value">'
+                    f'<span class="mat-pill-grey">{fc_txt}</span>'
+                    "</div>"
+                    "</div>"
+                    "</div>"
+                )
+                cards_html_parts.append(card_html)
+
+            cards_html_parts.append("</div></div>")
+            final_html = "".join(cards_html_parts)
+
+            st.markdown(final_html, unsafe_allow_html=True)
+
+            # ----------- WORDCLOUD of SS by material, key drivers -----------
+            st.markdown("---")
+            st.subheader("🔎 Wordcloud of Safety Stock drivers by material")
+            # Create the word-to-weight dict
+            wc_dict = dict(zip(agg_view["Product"], agg_view["Safety_Stock"]))
+            if wc_dict:
+                wordcloud = WordCloud(width=800, height=400, background_color="white", colormap='Blues').generate_from_frequencies(wc_dict)
+                fig_wc, ax_wc = plt.subplots(figsize=(12, 6))
+                ax_wc.imshow(wordcloud, interpolation="bilinear")
+                ax_wc.axis("off")
+                st.pyplot(fig_wc, use_container_width=True)
                 st.markdown(
                     """
-                    <style>
-                      .mat-strip-container {
-                        width: 100%;
-                        overflow-x: auto;
-                        padding-bottom: 6px;
-                      }
-                      .mat-cards-row {
-                        display: flex;
-                        flex-direction: column;
-                        gap: 8px;
-                        min-width: 650px;
-                      }
-                      .mat-card {
-                        display: grid;
-                        grid-template-columns: 150px repeat(4, minmax(110px, 1fr));
-                        align-items: stretch;
-                        border-radius: 14px;
-                        padding: 6px 10px;
-                        background: linear-gradient(90deg,#f8fbff,#f5fff9);
-                        box-shadow: 0 2px 4px rgba(15,23,42,0.10);
-                      }
-                      .mat-card-col-header {
-                        font-size: 0.70rem;
-                        font-weight: 600;
-                        color: #616161;
-                        text-transform: uppercase;
-                        letter-spacing: 0.03em;
-                        margin-bottom: 2px;
-                      }
-                      .mat-card-col-value {
-                        font-size: 0.95rem;
-                        font-weight: 700;
-                        color: #111827;
-                      }
-                      .mat-product-badge {
-                        display: flex;
-                        align-items: center;
-                        justify-content: flex-start;
-                        padding: 6px 10px;
-                        border-radius: 999px;
-                        font-weight: 800;
-                        font-size: 0.92rem;
-                        color: #424242;
-                        white-space: nowrap;
-                        background: #f5f5f5;
-                        border: 1px solid #e0e0e0;
-                      }
-                      .mat-product-chevron {
-                        margin-right: 6px;
-                        font-size: 0.80rem;
-                        color: #757575;
-                      }
-                      .mat-pill-blue {
-                        display: inline-flex;
-                        align-items: center;
-                        justify-content: center;
-                        min-width: 54px;
-                        padding: 2px 8px;
-                        border-radius: 999px;
-                        font-size: 0.85rem;
-                        font-weight: 700;
-                        color: #ffffff;
-                        background: linear-gradient(90deg,#2196f3,#64b5f6);
-                      }
-                      .mat-pill-grey {
-                        display: inline-flex;
-                        align-items: center;
-                        justify-content: center;
-                        min-width: 54px;
-                        padding: 2px 8px;
-                        border-radius: 999px;
-                        font-size: 0.85rem;
-                        font-weight: 700;
-                        color: #424242;
-                        background: #eeeeee;
-                        border: 1px solid #e0e0e0;
-                      }
-                    </style>
-                    """,
-                    unsafe_allow_html=True,
+                    <div style="font-size:0.95rem; color:#444; margin-top:6px;">
+                    The wordcloud highlights the <strong>key drivers of Safety Stock by material</strong> for the selected month.
+                    Material codes with higher SS appear larger.
+                    </div>
+                    """, unsafe_allow_html=True,
                 )
-
-                # Formatting helpers
-                def format_3dec(v):
-                    try:
-                        return f"{float(v):,.3f}".replace(",", ".")
-                    except Exception:
-                        return str(v)
-
-                def format_int_or_dash(v):
-                    try:
-                        return f"{int(round(float(v))):,}".replace(",", ".")
-                    except Exception:
-                        return "–"
-
-                # Build HTML for all cards
-                cards_html_parts = [
-                    '<div class="mat-strip-container"><div class="mat-cards-row">'
-                ]
-
-                for _, r in agg_view.iterrows():
-                    prod = str(r["Product"])
-                    avg_daily = r["Avg_Day_Demand"]
-                    ss_units = r["Safety_Stock"]
-                    days_cov = r["Avg_SS_Days_Coverage"]
-                    local_fc = r["Local_Forecast_Month"]
-
-                    avg_daily_txt = format_3dec(avg_daily)
-                    ss_txt = format_3dec(ss_units)
-                    cov_txt = format_int_or_dash(days_cov)
-                    fc_txt = format_3dec(local_fc)
-
-                    card_html = (
-                        '<div class="mat-card">'
-                        '<div style="display:flex;align-items:center;">'
-                        '<div class="mat-product-badge">'
-                        '<span class="mat-product-chevron">▶</span>'
-                        f"{prod}"
-                        "</div>"
-                        "</div>"
-                        '<div>'
-                        '<div class="mat-card-col-header">Avg Daily Demand</div>'
-                        f'<div class="mat-card-col-value">{avg_daily_txt}</div>'
-                        "</div>"
-                        '<div>'
-                        '<div class="mat-card-col-header">Calculated Safety Stock</div>'
-                        f'<div class="mat-card-col-value">{ss_txt}</div>'
-                        "</div>"
-                        '<div>'
-                        '<div class="mat-card-col-header">SS Coverage (days)</div>'
-                        '<div class="mat-card-col-value">'
-                        f'<span class="mat-pill-blue">{cov_txt}</span>'
-                        "</div>"
-                        "</div>"
-                        '<div>'
-                        '<div class="mat-card-col-header">Local Forecast (month)</div>'
-                        '<div class="mat-card-col-value">'
-                        f'<span class="mat-pill-grey">{fc_txt}</span>'
-                        "</div>"
-                        "</div>"
-                        "</div>"
-                    )
-                    cards_html_parts.append(card_html)
-
-                cards_html_parts.append("</div></div>")
-                final_html = "".join(cards_html_parts)
-
-                st.markdown(final_html, unsafe_allow_html=True)
+            else:
+                st.info("No nonzero Safety Stock values for wordcloud in this period.")
 
 else:
     st.info(
