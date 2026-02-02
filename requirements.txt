@@ -4,4 +4,5 @@ numpy
 plotly
 pyvis
 scipy
-
+wordcloud
+matplotlib
