@@ -3390,6 +3390,7 @@ with tab8:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
+
         # --- Period selector as before ---
         if period_labels:
             try:
@@ -3692,7 +3693,9 @@ with tab8:
             else:
                 st.info("No nonzero Safety Stock values for wordcloud in this period.")
 
-else:
+# END OF MAIN CODE
+# Now, handle no-data fallback if main data was not uploaded
+if not (s_file and d_file and lt_file):
     st.info(
         "Please upload sales.csv, demand.csv and leadtime.csv in the sidebar to run the optimizer."
     )
