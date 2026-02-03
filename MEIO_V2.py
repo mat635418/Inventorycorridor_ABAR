@@ -3603,6 +3603,68 @@ with tab8:
             unsafe_allow_html=True,
         )
 
+        # Add graph showing coverage vs threshold
+        if not agg_all.empty:
+            # Sort by SS_Coverage_Days for better visualization
+            agg_graph = agg_all.sort_values("SS_Coverage_Days", ascending=True).copy()
+            
+            # Create the bar chart
+            fig_coverage = go.Figure()
+            
+            # Add bars for coverage with light pastel blue color
+            fig_coverage.add_trace(go.Bar(
+                x=agg_graph["Product"],
+                y=agg_graph["SS_Coverage_Days"],
+                name="Safety Stock Coverage",
+                marker_color="rgba(173, 216, 230, 0.7)",  # Light blue pastel color
+                hovertemplate="<b>%{x}</b><br>Coverage: %{y:.1f} days<extra></extra>"
+            ))
+            
+            # Add threshold line with light pastel red color
+            fig_coverage.add_trace(go.Scatter(
+                x=agg_graph["Product"],
+                y=[alarm_threshold] * len(agg_graph),
+                mode="lines",
+                name="Coverage Threshold",
+                line=dict(color="rgba(255, 182, 193, 0.9)", width=3, dash="dash"),  # Light red pastel color
+                hovertemplate=f"<b>Threshold</b><br>{alarm_threshold} days<extra></extra>"
+            ))
+            
+            # Update layout with clean design
+            fig_coverage.update_layout(
+                title=dict(
+                    text="Coverage Position vs Threshold",
+                    font=dict(size=16, color="#424242"),
+                    x=0.5,
+                    xanchor="center"
+                ),
+                xaxis_title="Material",
+                yaxis_title="Coverage (days)",
+                height=400,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                ),
+                plot_bgcolor="rgba(248, 251, 255, 0.5)",
+                paper_bgcolor="white",
+                xaxis=dict(
+                    showgrid=False,
+                    tickangle=-45
+                ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridcolor="rgba(200, 200, 200, 0.2)"
+                ),
+                hovermode="closest"
+            )
+            
+            st.plotly_chart(fig_coverage, use_container_width=True)
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
         if agg_all.empty:
             st.warning("No data available for the selected period.")
         else:
