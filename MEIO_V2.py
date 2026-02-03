@@ -1,5 +1,7 @@
-# Multi-Echelon Inventory Optimizer — Raw Materials
-# Developed by mat635418 — JAN 2026
+"""
+Multi-Echelon Inventory Optimizer — Raw Materials
+Developed by mat635418 — JAN 2026
+"""
 import os
 import math
 import collections
@@ -20,7 +22,6 @@ LOGO_FILENAME = "GY_logo.jpg"
 LOGO_BASE_WIDTH = 160
 days_per_month = 30
 
-# --- New: show logo.svg above the main title ---
 st.image("logo.jpg", width=300)
 
 st.markdown(
@@ -415,9 +416,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ------------------------------------------------------------------
-# Small reusable helpers for UX / explanations / logging
-# ------------------------------------------------------------------
+# =============================================================================
+# Helper Functions: UI Renderers & Data Dictionary
+# =============================================================================
 
 
 def render_data_dictionary():
@@ -608,47 +609,28 @@ def render_ss_formula_explainer():
 
 def clean_numeric(series: pd.Series) -> pd.Series:
     """
-    Robustly convert a pandas-like column to numeric:
-
-    - Accepts Series, Index, list, numpy array.
-    - Handles empty / dash / NA-like strings.
-    - Handles parentheses for negatives, commas and spaces.
+    Robustly convert a pandas-like column to numeric.
+    Handles various formats: parentheses for negatives, commas, spaces, and NA-like strings.
     """
-    # 1) Ensure we have a real Series (Index, list, ndarray → Series)
     if not isinstance(series, pd.Series):
         series = pd.Series(series)
 
-    # 2) Coerce to string and trim
-    s = series.astype("string")  # pandas StringDtype is safer
+    s = series.astype("string")
     s = s.str.strip()
 
-    # 3) Replace common "empty"/NA tokens
-    s = s.replace(
-        {
-            "": pd.NA,
-            "-": pd.NA,
-            "—": pd.NA,
-            "na": pd.NA,
-            "NA": pd.NA,
-            "n/a": pd.NA,
-            "N/A": pd.NA,
-            "None": pd.NA,
-        }
-    )
+    s = s.replace({
+        "": pd.NA, "-": pd.NA, "—": pd.NA, "na": pd.NA, "NA": pd.NA,
+        "n/a": pd.NA, "N/A": pd.NA, "None": pd.NA,
+    })
 
-    # 4) Handle parentheses for negatives: "(123)" → "-123"
     paren_mask = s.str.startswith("(") & s.str.endswith(")")
     if paren_mask.any():
         s.loc[paren_mask] = "-" + s.loc[paren_mask].str[1:-1]
 
-    # 5) Remove thousand separators and spaces
     s = s.str.replace(",", "", regex=False)
     s = s.str.replace(" ", "", regex=False)
-
-    # 6) Remove any remaining non-numeric characters except . and -
     s = s.str.replace(r"[^\d\.\-]+", "", regex=True)
 
-    # 7) Convert to numeric
     return pd.to_numeric(s, errors="coerce")
 
 
@@ -704,7 +686,6 @@ def df_format_for_display(
     return d
 
 
-# ---- Generic helper to render DataFrame rows as "card-table" layout ----
 def render_card_table(
     df: pd.DataFrame,
     *,
@@ -722,32 +703,20 @@ def render_card_table(
     id_col : str
         Column used as the left 'identifier badge'.
     col_defs : list of dict
-        Each dict:
-          {
-            "header": "text shown above value",
-            "col": "column name in df",
-            "fmt": callable or None   -> fmt(value) -> string,
-            "pill": "grey"|"blue"|"green"|"orange"|"red"|None  -> optional pill style
-            "sub_col": optional second column for small subtext,
-            "sub_fmt": callable for sub_col formatting or None
-          }
+        Column definition dicts with keys: "header", "col", "fmt", "pill", "sub_col", "sub_fmt"
     container_height : int
-        Height hint; the HTML container scrolls horizontally, not vertically.
+        Height hint for the HTML container.
     """
     if df is None or df.empty:
         st.info("No rows to display for this selection.")
         return
 
-    # Choose first 6 visible "logical columns": id + up to 5 value columns
-    # but we just visually fit them into 6 grid columns; the col_defs decide what shows.
-    # Build HTML
     parts = ['<div class="strip-container" style="max-height:{}px;">'.format(container_height)]
     parts.append('<div class="cards-row">')
 
     for _, r in df.iterrows():
         parts.append('<div class="card-row">')
 
-        # 1) Identifier / badge column
         id_val = str(r.get(id_col, ""))
         parts.append(
             '<div style="display:flex;align-items:center;">'
@@ -758,7 +727,6 @@ def render_card_table(
             "</div>"
         )
 
-        # 2..n) metric columns
         for d in col_defs:
             header = d.get("header", "")
             col_name = d.get("col", "")
@@ -776,7 +744,6 @@ def render_card_table(
             else:
                 val_txt = str(raw_val)
 
-            # sub-value
             sub_val_txt = ""
             if sub_col is not None:
                 raw_sub = r.get(sub_col, "")
@@ -788,19 +755,13 @@ def render_card_table(
                 else:
                     sub_val_txt = str(raw_sub)
 
-            # Pill class
-            if pill == "grey":
-                pill_cls = "card-row-pill-grey"
-            elif pill == "blue":
-                pill_cls = "card-row-pill-blue"
-            elif pill == "green":
-                pill_cls = "card-row-pill-green"
-            elif pill == "orange":
-                pill_cls = "card-row-pill-orange"
-            elif pill == "red":
-                pill_cls = "card-row-pill-red"
-            else:
-                pill_cls = None
+            pill_cls = {
+                "grey": "card-row-pill-grey",
+                "blue": "card-row-pill-blue",
+                "green": "card-row-pill-green",
+                "orange": "card-row-pill-orange",
+                "red": "card-row-pill-red"
+            }.get(pill, None)
 
             parts.append("<div>")
             parts.append(f'<div class="card-row-col-header">{header}</div>')
@@ -812,21 +773,21 @@ def render_card_table(
                 parts.append(f'<div class="card-row-col-value">{val_txt}')
 
             if sub_val_txt not in ("", " ", None):
-                parts.append(
-                    f'<span class="card-row-col-sub">{sub_val_txt}</span>'
-                )
-            parts.append("</div></div>")  # close value+sub, and column
+                parts.append(f'<span class="card-row-col-sub">{sub_val_txt}</span>')
+            parts.append("</div></div>")
 
-        parts.append("</div>")  # close .card-row
+        parts.append("</div>")
 
-    parts.append("</div></div>")  # close .cards-row and .strip-container
+    parts.append("</div></div>")
     html = "".join(parts)
     st.markdown(html, unsafe_allow_html=True)
 
 
-# ------------------------------------------------------------------
-# ACTIVE DEFINITIONS (single source of truth)
-# ------------------------------------------------------------------
+# =============================================================================
+# Active Row Detection & Filtering
+# =============================================================================
+
+
 def get_active_mask(results: pd.DataFrame) -> pd.Series:
     """
     Row is ACTIVE if there is any meaningful demand or final corridor
@@ -1067,27 +1028,22 @@ def apply_policy_to_scalar_ss(
     cap_range,
 ) -> float:
     """
-    Apply the same policy rules used in the pipeline to a single scalar SS value.
-
-    Rules:
-      1) Zero SS if no aggregated network demand (if enabled).
-      2) Cap SS within [l_cap, u_cap] * Agg_Future_Demand (if enabled).
-      3) B616 override → SS = 0.
+    Apply policy rules to a single SS value:
+      1) Zero SS if no aggregated network demand (if enabled)
+      2) Cap SS within [l_cap, u_cap] * Agg_Future_Demand (if enabled)
+      3) B616 override → SS = 0
     """
     ss = float(ss_value)
 
-    # 1) Zero SS if no demand
     if zero_if_no_net_fcst and agg_future_demand <= 0:
         ss = 0.0
 
-    # 2) SS capping vs network demand
     if apply_cap:
         l_cap, u_cap = cap_range[0] / 100.0, cap_range[1] / 100.0
         l_lim = agg_future_demand * l_cap
         u_lim = agg_future_demand * u_cap
         ss = max(l_lim, min(ss, u_lim))
 
-    # 3) B616 override
     if location == "B616":
         ss = 0.0
 
@@ -1436,8 +1392,6 @@ if s_file and d_file and lt_file:
         st.error(f"Error reading uploaded files: {e}")
         st.stop()
 
-    # (Data preview & sanity checks block removed to declutter the UI)
-
     for df in [df_s, df_d, df_lt]:
         df.columns = [c.strip() for c in df.columns]
 
@@ -1455,7 +1409,6 @@ if s_file and d_file and lt_file:
         st.error(f"leadtime.csv missing columns: {needed_lt_cols - set(df_lt.columns)}")
         st.stop()
 
-    # Period parsing with explicit diagnostics
     df_s["Period"] = pd.to_datetime(df_s["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
     df_d["Period"] = pd.to_datetime(df_d["Period"], errors="coerce").dt.to_period("M").dt.to_timestamp()
 
@@ -1562,7 +1515,6 @@ if s_file and d_file and lt_file:
     period_label_map = {period_label(p): p for p in all_periods}
     period_labels = list(period_label_map.keys())
 
-    # --- Combined banner as collapsible (ACTIVE only) ---
     run_id = datetime.now().strftime("RUN-%Y%m%d-%H%M%S")
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1606,7 +1558,9 @@ if s_file and d_file and lt_file:
         ]
     )
 
-    # TAB 1 -----------------------------------------------------------------
+    # =============================================================================
+    # TAB 1: Inventory Corridor
+    # =============================================================================
     with tab1:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -1897,14 +1851,15 @@ with tab2:
                 new_supplier = st.selectbox("New supplier (route to node):", possible_suppliers, index=(possible_suppliers.index(new_supplier_default) if new_supplier_default in possible_suppliers else 0), key="scen_newsup")
                 reroute_enabled = True
 
-            # Heating tables (hardcoded)
             heating_winter = {
-                "BEEX": 0, "DEF1": 0, "DEF2": 21, "DEH1": 0, "DEW1": 14, "FRA1": 2, "FRM1": 0, "LUEX": 14,
-                "LUL1": 14, "PLPL": 1, "RSKR": 1, "SIS1": 4, "TRTU": 1, "TRTZ": 1, "ZASA": 0
+                "BEEX": 0, "DEF1": 0, "DEF2": 21, "DEH1": 0, "DEW1": 14,
+                "FRA1": 2, "FRM1": 0, "LUEX": 14, "LUL1": 14, "PLPL": 1,
+                "RSKR": 1, "SIS1": 4, "TRTU": 1, "TRTZ": 1, "ZASA": 0
             }
             heating_summer = {
-                "BEEX": 0, "DEF1": 0, "DEF2": 14, "DEH1": 0, "DEW1": 14, "FRA1": 1.5, "FRM1": 0, "LUEX": 14,
-                "LUL1": 14, "PLPL": 1, "RSKR": 1, "SIS1": 4, "TRTU": 1, "TRTZ": 1, "ZASA": 0
+                "BEEX": 0, "DEF1": 0, "DEF2": 14, "DEH1": 0, "DEW1": 14,
+                "FRA1": 1.5, "FRM1": 0, "LUEX": 14, "LUL1": 14, "PLPL": 1,
+                "RSKR": 1, "SIS1": 4, "TRTU": 1, "TRTZ": 1, "ZASA": 0
             }
             def infer_season(ts):
                 if isinstance(ts, pd.Timestamp):
@@ -1914,11 +1869,13 @@ with tab2:
                         month = pd.to_datetime(ts).month
                     except Exception:
                         return "WINTER"
-                if month in [10,11,12,1,2,3]: return "WINTER"
-                elif month in [7,8,9]: return "SUMMER"
-                else: return "OTHER"
+                if month in [10, 11, 12, 1, 2, 3]:
+                    return "WINTER"
+                elif month in [7, 8, 9]:
+                    return "SUMMER"
+                else:
+                    return "OTHER"
 
-            # ---- BUTTON COLOR STYLE: Use custom HTML/CSS to match pic2: lightblue for base, yellow for implemented ----
             reroute_button_style = """
                 <style>
                 .reroute-btn button {
@@ -1954,7 +1911,7 @@ with tab2:
                 if not direct_route.empty:
                     new_lt_days  = float(direct_route.iloc[0]["Lead_Time_Days"]) + heating_days
                     new_lt_stddev = float(direct_route.iloc[0]["Lead_Time_Std_Dev"])
-                    lead_time_note = f"Used explicit lead time from {new_supplier} to {location_to_move} plus {heating_days}d heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
+                    lead_time_note = f"Used <strong>explicit lead time from {new_supplier} to {location_to_move}</strong> plus <strong>{heating_days}d heating</strong>: <strong>{new_lt_days:.1f}d</strong>, stddev <strong>{new_lt_stddev:.1f}d</strong>."
                 else:
                     poss_lts = scenario_lt[scenario_lt["From_Location"] == new_supplier]
                     if not poss_lts.empty:
@@ -1962,11 +1919,11 @@ with tab2:
                         new_lt_days = float(poss_lts.loc[min_idx, "Lead_Time_Days"]) + heating_days
                         new_lt_stddev = float(poss_lts.loc[min_idx, "Lead_Time_Std_Dev"])
                         extra_note = f" (minimal outbound LT from {new_supplier})"
-                        lead_time_note = f"No direct LT; used minimal outbound LT from {new_supplier}{extra_note} plus {heating_days}d heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
+                        lead_time_note = f"No direct LT; used <strong>minimal outbound LT from {new_supplier}{extra_note}</strong> plus <strong>{heating_days}d heating</strong>: <strong>{new_lt_days:.1f}d</strong>, stddev <strong>{new_lt_stddev:.1f}d</strong>."
                     else:
                         new_lt_days = (float(rerouted_lt["Lead_Time_Days"].median()) if not rerouted_lt.empty else 7.0) + heating_days
                         new_lt_stddev = float(rerouted_lt["Lead_Time_Std_Dev"].median()) if not rerouted_lt.empty else 2.0
-                        lead_time_note = f"No data: used network median LT for this SKU plus {heating_days}d heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
+                        lead_time_note = f"No data: used <strong>network median LT for this SKU</strong> plus <strong>{heating_days}d heating</strong>: <strong>{new_lt_days:.1f}d</strong>, stddev <strong>{new_lt_stddev:.1f}d</strong>."
                 new_row = {
                     "Product": scenario_product,
                     "From_Location": new_supplier,
@@ -2005,7 +1962,7 @@ with tab2:
                     right[['Location', 'Safety_Stock_new', 'LT_Mean_new', 'Tier_Hops_new', 'Service_Level_Node_new']],
                     on='Location', how='outer'
                 )
-                # --------- USD column for delta ---------
+
                 comparison['SS_old_usd'] = comparison['Safety_Stock_old'].fillna(0) * cost_per_kilo
                 comparison['SS_new_usd'] = comparison['Safety_Stock_new'].fillna(0) * cost_per_kilo
                 comparison['ΔSS'] = comparison['Safety_Stock_new'].fillna(0) - comparison['Safety_Stock_old'].fillna(0)
@@ -2018,7 +1975,6 @@ with tab2:
                 comparison['Tier_Hops_old'] = comparison['Tier_Hops_old'].fillna(0).astype(int)
                 comparison['Tier_Hops_new'] = comparison['Tier_Hops_new'].fillna(0).astype(int)
 
-                # Always include BEEX, current supplier, location rerouted
                 always_include = set([new_supplier, current_supplier, location_to_move])
                 key_nodes_mask = comparison['Location'].isin(always_include)
                 mask = (
@@ -2030,7 +1986,6 @@ with tab2:
                 )
                 changed_rows = comparison[mask].copy()
 
-                # Grand Total row, inc. USD
                 gt_before = left['Safety_Stock_old'].sum()
                 gt_after = right['Safety_Stock_new'].sum()
                 gt_before_usd = gt_before * cost_per_kilo
@@ -2085,7 +2040,11 @@ with tab2:
                                 color = ss_delta_color(row["ΔSS %"])
                                 v_display = f"{format_int_dot(v)}" if pd.notnull(v) else ""
                                 style = f" style='color:{color}'"
-                            elif col in ("SS Before (USD)", "SS After (USD)", "ΔSS USD"):
+                            elif col == "ΔSS USD":
+                                color = ss_delta_color(row["ΔSS %"])
+                                v_display = format_usd(v)
+                                style = f" style='color:{color}'"
+                            elif col in ("SS Before (USD)", "SS After (USD)"):
                                 v_display = format_usd(v)
                             elif col in ("SL Before", "SL After"):
                                 v_display = f"{v:.2%}" if pd.notnull(v) else ""
@@ -2099,9 +2058,7 @@ with tab2:
                                 v_display = str(v)
                             table_md += f"<td{style}>{v_display}</td>"
                         table_md += "</tr>"
-                    # Grand Total row: show totals for ΔSS units, ΔSS %, and USD columns
-                    # Columns: 1=Node, 2=SS Before, 3=SS After, 4=ΔSS units, 5=ΔSS %, 6-11=LT/Hops/SL (6 columns),
-                    #          12=SS Before (USD), 13=SS After (USD), 14=ΔSS USD
+
                     gt_delta_color = ss_delta_color(gt_pct)
                     table_md += ("<tr style='font-weight:bold;background:#e6f5e4;'>"
                                  "<td>Grand Total</td>"  # Column 1: Node
@@ -2111,7 +2068,7 @@ with tab2:
                                  "<td colspan='6'></td>"  # Columns 6-11: Skip LT, Hops, SL columns
                                  f"<td>{format_usd(gt_before_usd)}</td>"  # Column 12: SS Before (USD)
                                  f"<td>{format_usd(gt_after_usd)}</td>"   # Column 13: SS After (USD)
-                                 f"<td>{format_usd(gt_delta_usd)}</td>"   # Column 14: ΔSS USD
+                                 f"<td style='color:{gt_delta_color}'>{format_usd(gt_delta_usd)}</td>"   # Column 14: ΔSS USD
                                  "</tr>")
                     table_md += "</table>"
 
@@ -2136,7 +2093,6 @@ with tab2:
                     st.markdown(f"<div style='margin-top:7px;font-size:1em;'>{lead_time_note}</div>", unsafe_allow_html=True)
                 st.write("You can repeat with different routing choices. To get back to the base plan, reload data or change period.")
 
-        # ---- TOPOLOGY MAP (outside expander) ----
         st.markdown(
             """
             <div style="font-size:0.85rem; margin-bottom:4px; color:#555;">
@@ -2475,7 +2431,6 @@ with tab3:
         else:
             display_df["Period_Label"] = ""
 
-        # Define column map for compact headers and tooltips for readability.
         col_map = {
             "Product": "Material",
             "Location": "Node",
@@ -2504,7 +2459,11 @@ with tab3:
                 return ""
         def _fmt_2dec(val):
             try:
-                return f"{val:,.2f}".replace(",", ".")
+                # Use comma as decimal separator for avg/day column
+                formatted = f"{val:.2f}"
+                # Replace dot with comma for decimal separator
+                formatted = formatted.replace(".", ",")
+                return formatted
             except:
                 return ""
         # header styles for wrapping
@@ -2753,10 +2712,16 @@ with tab5:
                     ]
                     display_cols = [c for c in cols if c in net_table_fmt.columns]
                     table_std = net_table_fmt[display_cols].copy()
+                    # Format with dots as thousands separator (European style)
+                    def fmt_with_dots(val):
+                        try:
+                            return f"{int(val):,}".replace(",", ".")
+                        except:
+                            return str(val)
                     fmt_dict = {
-                        "Network_Consumption": "{:,.0f}",
-                        "Network_Forecast_Hist": "{:,.0f}",
-                        "Net_Abs_Error": "{:,.0f}"
+                        "Network_Consumption": fmt_with_dots,
+                        "Network_Forecast_Hist": fmt_with_dots,
+                        "Net_Abs_Error": fmt_with_dots
                     }
                     def highlight_err(val):
                         try:
@@ -2961,9 +2926,6 @@ with tab6:
                     unsafe_allow_html=True,
                 )
 
-                # ------------------------------------------------------------
-                # Base-calibration scenario row
-                # ------------------------------------------------------------
                 base_sl_node = float(row["Service_Level_Node"])
                 base_z_node = float(row["Z_node"])
                 base_LT_mean = float(row["LT_Mean"])
@@ -3055,7 +3017,7 @@ with tab6:
                             value=sc_lt_std_default,
                             key=f"sc_lt_std_{s}",
                         )
-                        # Note: cost per kilo comes from above, not per scenario
+
                         scenarios.append(
                             {
                                 "SL_pct": sc_sl,
@@ -3177,6 +3139,19 @@ with tab6:
             # Add column chart to visualize scenario impacts (PR #6)
             st.markdown("---")
             st.subheader("Scenario Impact Visualization")
+            
+            # Define unique light pastel colors for each scenario
+            scenario_colors = {
+                "Base-calibrated": "#B3E5FC",  # Light pastel blue
+                "Implemented": "#FFF9C4",      # Light pastel yellow
+                "S1": "#C8E6C9",               # Light pastel green
+                "S2": "#FFCCBC",               # Light pastel orange
+                "S3": "#E1BEE7"                # Light pastel purple
+            }
+            
+            # Assign colors based on scenario names
+            bar_colors = [scenario_colors.get(scenario, "#E0E0E0") for scenario in display_comp["Scenario"]]
+            
             fig_sim = go.Figure()
             fig_sim.add_trace(go.Bar(
                 x=display_comp["Scenario"],
@@ -3184,8 +3159,7 @@ with tab6:
                 text=[f"${v:,.0f}" for v in display_comp["Simulated_SS_USD"]],
                 textposition='auto',
                 marker=dict(
-                    color=display_comp["Simulated_SS_USD"],
-                    colorscale='RdYlGn_r'
+                    color=bar_colors
                 )
             ))
             fig_sim.update_layout(
@@ -3286,9 +3260,7 @@ with tab7:
             st.warning("No data for this material/period.")
         else:
             mat_period_df_display = hide_zero_rows(mat_period_df)
-            # --- REMOVE the summary KPI table here as requested ---
 
-            # ---- SS ATTRIBUTION (kept as in current version: waterfall + summary) ----
             st.markdown("---")
             st.markdown("### Why do we carry this SS? — SS attribution")
 
