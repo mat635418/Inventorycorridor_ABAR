@@ -1844,6 +1844,17 @@ with tab2:
 
         st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
+        # Cost per kilo slider (moved from inside expander)
+        cost_per_kilo = st.slider(
+            "Cost per kilo (USD)",
+            min_value=0.0,
+            max_value=20.0,
+            value=2.0,
+            step=0.10,
+            help="USD cost per kilo for SS simulation (affects the scenario USD totals).",
+            key="scen_costperkilo"
+        )
+
     with col_main:
         render_selection_line("Selected:", product=sku, period_text=period_label(chosen_period))
         st.subheader("🕸️ Network Topology")
@@ -1866,9 +1877,6 @@ with tab2:
             all_service_nodes = active_nodes(results, period=chosen_period, product=scenario_product)
             location_default = all_service_nodes[0] if all_service_nodes else ""
             location_to_move = st.selectbox("Which location do you want to reroute?", all_service_nodes, index=(all_service_nodes.index(location_default) if location_default in all_service_nodes else 0), key="scen_locmove")
-
-            # ------- NEW USD COST PARAMETER -------
-            cost_per_kilo = st.number_input("Cost per kilo (USD)", min_value=0.0, value=2.0, step=0.01, help="Enter the USD cost per kilo for SS simulation (affects the scenario USD totals).", key="scen_costperkilo")
 
             scenario_lt = df_lt[df_lt["Product"] == scenario_product] if "Product" in df_lt.columns else df_lt.copy()
             mask_to = scenario_lt["To_Location"] == location_to_move
@@ -2061,7 +2069,7 @@ with tab2:
                     def ss_delta_color(val):
                         if pd.isna(val): return "black"
                         return "green" if val < 0 else "red" if val > 0 else "black"
-                    table_md = "<table style='width:100%;text-align:center;background:#f6faf7;'><tr>"+ "".join(
+                    table_md = "<table style='width:100%;text-align:center;background:#f6faf7;font-size:0.85em;'><tr>"+ "".join(
                         f"<th>{col}</th>" for col in list(col_map.values())
                     ) + "</tr>"
                     for _, row in disp_df.iterrows():
@@ -2097,10 +2105,11 @@ with tab2:
                                  f"<td>{format_int_dot(gt_after)}</td>"
                                  f"<td style='color:{ss_delta_color(gt_delta)}'>{format_int_dot(gt_delta)}</td>"
                                  f"<td style='color:{ss_delta_color(gt_delta)}'><strong>{gt_pct:+.1f}%</strong></td>"
-                                 f"<td>{format_int_dot(gt_before_usd)}</td>"
-                                 f"<td>{format_int_dot(gt_after_usd)}</td>"
-                                 f"<td>{format_int_dot(gt_delta_usd)}</td>"
-                                 + "<td colspan='6'></td></tr>")
+                                 "<td colspan='6'></td>"
+                                 f"<td>{format_usd(gt_before_usd)}</td>"
+                                 f"<td>{format_usd(gt_after_usd)}</td>"
+                                 f"<td>{format_usd(gt_delta_usd)}</td>"
+                                 "</tr>")
                     table_md += "</table>"
 
                     # Diagnostic if BEEX's SS doesn't change but demand does
