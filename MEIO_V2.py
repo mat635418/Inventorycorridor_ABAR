@@ -2812,245 +2812,248 @@ with tab2:
                     c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                     st.metric("Network WAPE (%)", c_val)
 
-    # TAB 6 -----------------------------------------------------------------
-    with tab6:
-        col_main, col_badge = st.columns([17, 3])
-        with col_badge:
-            render_logo_above_parameters(scale=1.5)
+# TAB 6 -----------------------------------------------------------------
+with tab6:
+    col_main, col_badge = st.columns([17, 3])
+    with col_badge:
+        render_logo_above_parameters(scale=1.5)
 
-            calc_sku_default = default_product
-            calc_sku_index = all_products.index(calc_sku_default) if all_products else 0
-            calc_sku = st.selectbox("MATERIAL", all_products, index=calc_sku_index, key="c_sku")
+        calc_sku_default = default_product
+        calc_sku_index = all_products.index(calc_sku_default) if all_products else 0
+        calc_sku = st.selectbox("MATERIAL", all_products, index=calc_sku_index, key="c_sku")
 
-            avail_locs = active_nodes(results, product=calc_sku)
-            if not avail_locs:
-                avail_locs = sorted(
-                    results[results["Product"] == calc_sku]["Location"].unique().tolist()
-                )
-            if not avail_locs:
-                avail_locs = ["(no location)"]
-            calc_loc_default = (
-                DEFAULT_LOCATION_CHOICE
-                if DEFAULT_LOCATION_CHOICE in avail_locs
-                else (avail_locs[0] if avail_locs else "(no location)")
+        avail_locs = active_nodes(results, product=calc_sku)
+        if not avail_locs:
+            avail_locs = sorted(
+                results[results["Product"] == calc_sku]["Location"].unique().tolist()
             )
-            calc_loc_index = avail_locs.index(calc_loc_default) if calc_loc_default in avail_locs else 0
-            calc_loc = st.selectbox("LOCATION", avail_locs, index=calc_loc_index, key="c_loc")
+        if not avail_locs:
+            avail_locs = ["(no location)"]
+        calc_loc_default = (
+            DEFAULT_LOCATION_CHOICE
+            if DEFAULT_LOCATION_CHOICE in avail_locs
+            else (avail_locs[0] if avail_locs else "(no location)")
+        )
+        calc_loc_index = avail_locs.index(calc_loc_default) if calc_loc_default in avail_locs else 0
+        calc_loc = st.selectbox("LOCATION", avail_locs, index=calc_loc_index, key="c_loc")
 
-            if period_labels:
+        if period_labels:
+            try:
+                default_label = period_label(default_period) if default_period is not None else period_labels[-1]
+                calc_period_index = (
+                    period_labels.index(default_label)
+                    if default_label in period_labels
+                    else len(period_labels) - 1
+                )
+            except Exception:
+                calc_period_index = len(period_labels) - 1
+            chosen_label = st.selectbox(
+                "PERIOD",
+                period_labels,
+                index=calc_period_index,
+                key="c_period",
+            )
+        else:
+            chosen_label = period_label(CURRENT_MONTH_TS)
+        calc_period = period_label_map.get(chosen_label, default_period)
+
+        row_export = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
+        row_export = row_export[
+            (row_export["Product"] == calc_sku)
+            & (row_export["Location"] == calc_loc)
+        ]
+        export_data = row_export if not row_export.empty else pd.DataFrame()
+
+        with st.container():
+            st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
+            st.download_button(
+                "💾 Export CSV",
+                data=export_data.to_csv(index=False),
+                file_name=f"calc_trace_{calc_sku}_{calc_loc}_{period_label(calc_period)}.csv",
+                mime="text/csv",
+                key="calc_export_btn",
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        # --- New: Cost per kilo USD input for dollarized scenario ---
+        cost_per_kilo_usd_tab6 = st.number_input(
+            "Cost per kilo (USD) for selected material",
+            min_value=0.0,
+            value=2.00,
+            step=0.01,
+            format="%.2f",
+            help="Set material cost per kilo in USD to convert SS changes to dollar impact.",
+            key="ss_cost_per_kilo_tab6"
+        )
+
+    with col_main:
+        st.markdown(
+            """
+              <style>
+                .calc-mapping-container {
+                  max-width: 560px;
+                }
+              </style>
+              """,
+            unsafe_allow_html=True,
+        )
+
+        render_selection_line(
+            "Selected:",
+            product=calc_sku,
+            location=calc_loc,
+            period_text=period_label(calc_period),
+        )
+        st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
+        render_ss_formula_explainer()
+
+        z_current = norm.ppf(service_level)
+
+        row_df = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
+        row_df = row_df[
+            (row_df["Product"] == calc_sku)
+            & (row_df["Location"] == calc_loc)
+        ]
+        if row_df.empty:
+            st.warning("Selection not found in results.")
+        else:
+            row = row_df.iloc[0]
+
+            # ... (your other scenario/SS calculation code here) ...
+            # Assuming 'compare_df' and 'display_comp' are produced as above, then you reach display...
+
+            display_comp = compare_df.copy()
+            display_comp["Simulated_SS"] = display_comp["Simulated_SS"].astype(float)
+
+            implemented_ss = float(row["Safety_Stock"])
+
+            def pct_vs_impl(v):
                 try:
-                    default_label = period_label(default_period) if default_period is not None else period_labels[-1]
-                    calc_period_index = (
-                        period_labels.index(default_label)
-                        if default_label in period_labels
-                        else len(period_labels) - 1
-                    )
+                    if implemented_ss <= 0 or pd.isna(v):
+                        return np.nan
+                    return (float(v) / implemented_ss - 1.0) * 100.0
                 except Exception:
-                    calc_period_index = len(period_labels) - 1
-                chosen_label = st.selectbox(
-                    "PERIOD",
-                    period_labels,
-                    index=calc_period_index,
-                    key="c_period",
-                )
-            else:
-                chosen_label = period_label(CURRENT_MONTH_TS)
-            calc_period = period_label_map.get(chosen_label, default_period)
+                    return np.nan
 
-            row_export = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
-            row_export = row_export[
-                (row_export["Product"] == calc_sku)
-                & (row_export["Location"] == calc_loc)
-            ]
-            export_data = row_export if not row_export.empty else pd.DataFrame()
+            display_comp["Pct_vs_Implemented_%"] = display_comp["Simulated_SS"].apply(pct_vs_impl)
 
-            with st.container():
-                st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
-                st.download_button(
-                    "💾 Export CSV",
-                    data=export_data.to_csv(index=False),
-                    file_name=f"calc_trace_{calc_sku}_{calc_loc}_{period_label(calc_period)}.csv",
-                    mime="text/csv",
-                    key="calc_export_btn",
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+            # --- DOLLARIZED SS DELTA: scenario vs implemented ---
+            scenario_ss_usd = display_comp["Simulated_SS"].fillna(0) * cost_per_kilo_usd_tab6
+            impl_ss_usd = float(row["Safety_Stock"]) * cost_per_kilo_usd_tab6
+            display_comp["Simulated_SS (USD)"] = scenario_ss_usd.round(2)
+            display_comp["ΔSS vs Impl (USD)"] = (display_comp["Simulated_SS"].fillna(0) - implemented_ss) * cost_per_kilo_usd_tab6
+            display_comp["ΔSS vs Impl (USD)"] = display_comp["ΔSS vs Impl (USD)"].round(2)
 
-            # --- New: Cost per kilo USD input for dollarized scenario ---
-            cost_per_kilo_usd_tab6 = st.number_input(
-                "Cost per kilo (USD) for selected material",
-                min_value=0.0,
-                value=2.00,
-                step=0.01,
-                format="%.2f",
-                help="Set material cost per kilo in USD to convert SS changes to dollar impact.",
-                key="ss_cost_per_kilo_tab6"
-            )
-
-        with col_main:
             st.markdown(
                 """
-                  <style>
-                    .calc-mapping-container {
-                      max-width: 560px;
-                    }
-                  </style>
-                  """,
+                - **Implemented** = pipeline SS after all rules.  
+                - **Base-calibrated** = scenario rebuilt from this node’s own SL / LT / demand, then run through the *same* policy engine.  
+                  → This should now numerically match **Implemented** (up to rounding).
+                - **S1, S2, S3** = user scenarios; you will only see +/- vs Implemented once you change SL or LT inputs.
+                """,
                 unsafe_allow_html=True,
             )
 
-            render_selection_line(
-                "Selected:",
-                product=calc_sku,
-                location=calc_loc,
-                period_text=period_label(calc_period),
+            # =============== CORRECTED: All formatters OUTSIDE ====================
+            def fmt_pct(v):
+                try:
+                    return f"{float(v):.2f}"
+                except Exception:
+                    return ""
+
+            def fmt_ss(v):
+                return euro_format(v, False, True)
+
+            def usd_fmt(v):
+                try:
+                    return "${:,.0f}".format(v) if pd.notna(v) else ""
+                except Exception:
+                    return str(v)
+            # ================================================================
+
+            render_card_table(
+                display_comp,
+                id_col="Scenario",
+                col_defs=[
+                    {
+                        "header": "End-node SL (%)",
+                        "col": "EndNode_SL_%",
+                        "fmt": fmt_pct,
+                        "pill": None,
+                    },
+                    {
+                        "header": "Avg LT (days)",
+                        "col": "LT_mean_days",
+                        "fmt": fmt_pct,
+                        "pill": None,
+                    },
+                    {
+                        "header": "LT Std (days)",
+                        "col": "LT_std_days",
+                        "fmt": fmt_pct,
+                        "pill": None,
+                    },
+                    {
+                        "header": "Simulated SS",
+                        "col": "Simulated_SS",
+                        "fmt": fmt_ss,
+                        "pill": "blue",
+                    },
+                    {
+                        "header": "% vs Implemented",
+                        "col": "Pct_vs_Implemented_%",
+                        "fmt": fmt_pct,
+                        "pill": None,
+                    },
+                    {
+                        "header": "Simulated SS ($)",
+                        "col": "Simulated_SS (USD)",
+                        "fmt": usd_fmt,
+                        "pill": None,
+                    },
+                    {
+                        "header": "ΔSS vs Impl ($)",
+                        "col": "ΔSS vs Impl (USD)",
+                        "fmt": usd_fmt,
+                        "pill": None,
+                    },
+                ],
+                container_height=260,
             )
-            st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
-            render_ss_formula_explainer()
-
-            z_current = norm.ppf(service_level)
-
-            row_df = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
-            row_df = row_df[
-                (row_df["Product"] == calc_sku)
-                & (row_df["Location"] == calc_loc)
-            ]
-            if row_df.empty:
-                st.warning("Selection not found in results.")
-            else:
-                row = row_df.iloc[0]
-
-                # ... rest of tab unchanged until scenario display table ...
-
-                display_comp = compare_df.copy()
-                display_comp["Simulated_SS"] = display_comp["Simulated_SS"].astype(float)
-
-                implemented_ss = float(row["Safety_Stock"])
-
-                def pct_vs_impl(v):
-                    try:
-                        if implemented_ss <= 0 or pd.isna(v):
-                            return np.nan
-                        return (float(v) / implemented_ss - 1.0) * 100.0
-                    except Exception:
-                        return np.nan
-
-                display_comp["Pct_vs_Implemented_%"] = display_comp["Simulated_SS"].apply(pct_vs_impl)
-
-                # --- DOLLARIZED SS DELTA: scenario vs implemented ---
-                scenario_ss_usd = display_comp["Simulated_SS"].fillna(0) * cost_per_kilo_usd_tab6
-                impl_ss_usd = float(row["Safety_Stock"]) * cost_per_kilo_usd_tab6
-                display_comp["Simulated_SS (USD)"] = scenario_ss_usd.round(2)
-                display_comp["ΔSS vs Impl (USD)"] = (display_comp["Simulated_SS"].fillna(0) - implemented_ss) * cost_per_kilo_usd_tab6
-                display_comp["ΔSS vs Impl (USD)"] = display_comp["ΔSS vs Impl (USD)"].round(2)
-
-                st.markdown(
-                    """
-                    - **Implemented** = pipeline SS after all rules.  
-                    - **Base-calibrated** = scenario rebuilt from this node’s own SL / LT / demand, then run through the *same* policy engine.  
-                      → This should now numerically match **Implemented** (up to rounding).
-                    - **S1, S2, S3** = user scenarios; you will only see +/- vs Implemented once you change SL or LT inputs.
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-                def fmt_pct(v):
-                    try:
-                        return f"{float(v):.2f}"
-                    except Exception:
-                        return ""
-
-                def fmt_ss(v):
-                    return euro_format(v, False, True)
-
-                def usd_fmt(v):
-                    try:
-                        return "${:,.0f}".format(v) if pd.notna(v) else ""
-                    except Exception:
-                        return str(v)
-
-                    render_card_table(
-                        display_comp,
-                        id_col="Scenario",
-                        col_defs=[
-                            {
-                                "header": "End-node SL (%)",
-                                "col": "EndNode_SL_%",
-                                "fmt": fmt_pct,
-                                "pill": None,
-                            },
-                            {
-                                "header": "Avg LT (days)",
-                                "col": "LT_mean_days",
-                                "fmt": fmt_pct,
-                                "pill": None,
-                            },
-                            {
-                                "header": "LT Std (days)",
-                                "col": "LT_std_days",
-                                "fmt": fmt_pct,
-                                "pill": None,
-                            },
-                            {
-                                "header": "Simulated SS",
-                                "col": "Simulated_SS",
-                                "fmt": fmt_ss,
-                                "pill": "blue",
-                            },
-                            {
-                                "header": "% vs Implemented",
-                                "col": "Pct_vs_Implemented_%",
-                                "fmt": fmt_pct,
-                                "pill": None,
-                            },
-                            {
-                                "header": "Simulated SS ($)",
-                                "col": "Simulated_SS (USD)",
-                                "fmt": usd_fmt,
-                                "pill": None,
-                            },
-                            {
-                                "header": "ΔSS vs Impl ($)",
-                                "col": "ΔSS vs Impl (USD)",
-                                "fmt": usd_fmt,
-                                "pill": None,
-                            },
-                        ],
-                        container_height=260,
-                    )
-                    # Dollarized summary for each scenario
+            # Dollarized summary for each scenario
+            st.markdown(
+                """
+                <div style='margin-top:12px; margin-bottom:6px; font-size:1.02rem;color:#184061;'>
+                    <strong>Dollarized safety stock change vs implemented (USD):</strong>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            for i, row in display_comp.iterrows():
+                label = row["Scenario"]
+                delta_usd = row["ΔSS vs Impl (USD)"]
+                if pd.notnull(delta_usd) and abs(delta_usd) > 0:
+                    color = "green" if delta_usd < 0 else "red"
                     st.markdown(
-                        """
-                        <div style='margin-top:12px; margin-bottom:6px; font-size:1.02rem;color:#184061;'>
-                            <strong>Dollarized safety stock change vs implemented (USD):</strong>
-                        </div>
-                        """,
+                        f"<span style='color:{color};font-weight:600'>Scenario {label}: {usd_fmt(delta_usd)}</span>",
                         unsafe_allow_html=True
                     )
-                    for i, row in display_comp.iterrows():
-                        label = row["Scenario"]
-                        delta_usd = row["ΔSS vs Impl (USD)"]
-                        if pd.notnull(delta_usd) and abs(delta_usd) > 0:
-                            color = "green" if delta_usd < 0 else "red"
-                            st.markdown(
-                                f"<span style='color:{color};font-weight:600'>Scenario {label}: {usd_fmt(delta_usd)}</span>",
-                                unsafe_allow_html=True
-                            )
 
-                    fig_bar = go.Figure()
-                    colors = px.colors.qualitative.Pastel
-                    fig_bar.add_trace(
-                        go.Bar(
-                            x=display_comp["Scenario"],
-                            y=display_comp["Simulated_SS"],
-                            marker_color=colors[: len(display_comp)],
-                        )
-                    )
-                    fig_bar.update_layout(
-                        title="Scenario SS Comparison (policy-consistent)",
-                        yaxis_title="SS (units)",
-                    )
-                    st.plotly_chart(fig_bar, use_container_width=True)
+            fig_bar = go.Figure()
+            colors = px.colors.qualitative.Pastel
+            fig_bar.add_trace(
+                go.Bar(
+                    x=display_comp["Scenario"],
+                    y=display_comp["Simulated_SS"],
+                    marker_color=colors[: len(display_comp)],
+                )
+            )
+            fig_bar.update_layout(
+                title="Scenario SS Comparison (policy-consistent)",
+                yaxis_title="SS (units)",
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
 
     # TAB 7 -----------------------------------------------------------------
     with tab7:
