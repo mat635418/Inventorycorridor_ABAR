@@ -17,3 +17,8 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated files
+lib/
+net.html
+*.html
