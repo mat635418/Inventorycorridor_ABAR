@@ -3519,8 +3519,6 @@ with tab7:
 
 # TAB 8 -----------------------------------------------------------------
 with tab8:
-    import matplotlib.pyplot as plt
-    from wordcloud import WordCloud
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
@@ -3553,14 +3551,16 @@ with tab8:
             selected_period_all = CURRENT_MONTH_TS
 
         # --- Choose alarm threshold for SS coverage in days ---
-        alarm_threshold = st.slider("Coverage Days Alarm Threshold", min_value=1, max_value=120, value=30, help="Cards with coverage below this will be shown in red, otherwise in green.")
+        alarm_threshold = st.slider(
+            "Coverage Days Alarm Threshold",
+            min_value=1, max_value=120, value=30,
+            help="Cards with coverage below this will be shown in red, otherwise in green."
+        )
 
         # --- Aggregate data exactly as before ---
         snapshot_all = get_active_snapshot(
             results,
-            selected_period_all
-            if selected_period_all is not None
-            else default_period,
+            selected_period_all if selected_period_all is not None else default_period,
         )
 
         agg_all = snapshot_all.groupby("Product", as_index=False).agg(
@@ -3588,21 +3588,19 @@ with tab8:
             agg_all["Safety_Stock"] + agg_all["Local_Forecast_Month"]
         )
 
-        # --- FIXED: proper total SS coverage in days per material ---
+        # Proper total SS coverage in days per material
         agg_all["SS_Coverage_Days"] = agg_all.apply(
-            lambda r: r["Safety_Stock"] / r["Avg_Day_Demand"] if r["Avg_Day_Demand"] > 0 else 0, axis=1
+            lambda r: r["Safety_Stock"] / r["Avg_Day_Demand"] if r["Avg_Day_Demand"] > 0 else 0,
+            axis=1
         )
 
         agg_all["SS_to_Demand_Ratio_%"] = (
             agg_all["Safety_Stock"] / agg_all["Network_Demand_Month"] * 100.0
         ).replace([np.inf, -np.inf], 0.0).fillna(0.0)
 
-        # Format for display: all numbers no decimals, avg/day with two decimals
+        # Formatting functions
         def fmt_int(v):
             try: return f"{int(round(v)):,}".replace(",", ".")
-            except: return ""
-        def fmt_ratio(v):
-            try: return f"{int(round(v))}"
             except: return ""
         def fmt_2d(v):
             try: return f"{v:,.2f}".replace(",", ".")
@@ -3614,9 +3612,7 @@ with tab8:
             except: return "grey"
 
         with st.container():
-            st.markdown(
-                '<div class="export-csv-btn">', unsafe_allow_html=True
-            )
+            st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
             st.download_button(
                 "💾 Export CSV",
                 data=agg_all.to_csv(index=False),
@@ -3677,11 +3673,6 @@ with tab8:
                     color: #424242; white-space: nowrap; background: #f5f5f5; border: 1px solid #e0e0e0;
                   }
                   .mat-product-chevron { margin-right: 6px; font-size: 0.80rem; color: #757575;}
-                  .mat-pill-blue {
-                    display: inline-flex; align-items: center; justify-content: center;
-                    min-width: 54px; padding: 2px 8px; border-radius: 999px;
-                    font-size: 0.85rem; font-weight: 700; color: #ffffff;
-                    background: linear-gradient(90deg,#2196f3,#64b5f6);}
                   .mat-pill-red {
                     display: inline-flex; align-items: center; justify-content: center;
                     min-width: 54px; padding: 2px 8px; border-radius: 999px;
@@ -3751,26 +3742,7 @@ with tab8:
                 cards_html_parts.append(card_html)
             cards_html_parts.append("</div></div>")
             final_html = "".join(cards_html_parts)
-            st.markdown(final_html, unsafe_allow_html=True)
-
-            # ----------- WORDCLOUD -----------
-            st.markdown("---")
-            st.subheader("🔎 Wordcloud of Safety Stock drivers by material")
-            wc_dict = dict(zip(agg_view["Product"], agg_view["Safety_Stock"]))
-            if wc_dict:
-                wordcloud = WordCloud(width=800, height=400, background_color="white", colormap='Blues').generate_from_frequencies(wc_dict)
-                fig_wc, ax_wc = plt.subplots(figsize=(12, 6))
-                ax_wc.imshow(wordcloud, interpolation="bilinear")
-                ax_wc.axis("off")
-                st.pyplot(fig_wc, use_container_width=True)
-                st.markdown(
-                    """
-                    <div style="font-size:0.95rem; color:#444; margin-top:6px;">
-                    The wordcloud highlights the <strong>key drivers of Safety Stock by material</strong> for the selected month.
-                    Material codes with higher SS appear larger.
-                    </div>
-                    """, unsafe_allow_html=True,
-                )
+            st.markdown(final_html, unsafe_allow_html=True)                )
             else:
                 st.info("No nonzero Safety Stock values for wordcloud in this period.")
 
