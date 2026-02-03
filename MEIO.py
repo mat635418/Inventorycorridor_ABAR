@@ -2079,12 +2079,21 @@ if s_file and d_file and lt_file:
                         key="n_scen",
                     )
                     scenarios = []
+                    # Calculate the gap based on current hop tier
+                    hop_to_sl_map = {0: 0.99, 1: 0.95, 2: 0.90, 3: 0.85}
+                    # Calculate gaps between consecutive hops
+                    sl_gap = 5.0  # Default gap for hops 1-3
+                    if hops == 0:
+                        sl_gap = 4.0  # Gap from 99% to 95%
+                    elif hops >= 1:
+                        sl_gap = 5.0  # Gap from 95% to 90%, and 90% to 85%
+                    
                     for s in range(n_scen):
                         with st.expander(f"Scenario {s+1} inputs", expanded=False):
                             sc_sl_default = (
-                                float(service_level * 100)
+                                float(node_sl * 100)
                                 if s == 0
-                                else min(99.9, float(service_level * 100) + 0.5 * s)
+                                else max(50.0, min(99.9, float(node_sl * 100) - sl_gap * s))
                             )
                             sc_sl = st.slider(
                                 f"Scenario {s+1} Service Level (%)",
@@ -2674,6 +2683,26 @@ if s_file and d_file and lt_file:
             if agg_all.empty:
                 st.warning("No data available for the selected period.")
             else:
+                # Create a bar chart showing Safety Stock by Product (graph first)
+                chart_data = agg_all.sort_values("Safety_Stock", ascending=False)[["Product", "Safety_Stock"]].copy()
+                fig_all = go.Figure()
+                colors_all = px.colors.qualitative.Pastel
+                fig_all.add_trace(
+                    go.Bar(
+                        x=chart_data["Product"],
+                        y=chart_data["Safety_Stock"],
+                        marker_color=colors_all[:len(chart_data)] if len(chart_data) <= len(colors_all) else colors_all,
+                    )
+                )
+                fig_all.update_layout(
+                    title="Safety Stock by Material",
+                    xaxis_title="Material",
+                    yaxis_title="Safety Stock (units)",
+                    height=400,
+                )
+                st.plotly_chart(fig_all, use_container_width=True)
+                
+                # Now show the table
                 display_cols_all = [
                     "Product",
                     "Avg_Day_Demand",
