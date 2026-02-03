@@ -56,7 +56,7 @@ st.markdown(
         ">
           V
         </span>
-        v2.1
+        v2.25
       </span>
       <span style="
           display:inline-flex;
@@ -81,7 +81,7 @@ st.markdown(
         ">
           ⏱
         </span>
-        Released Feb&nbsp;2026
+        Released Jan&nbsp;2026
       </span>
     </div>
     """,
@@ -2921,10 +2921,11 @@ with tab6:
                     border-radius:10px;
                     padding:10px 14px;
                     margin-bottom:8px;
-                    font-size:1.00rem;
                     color:#0b3d91;
                     font-weight:500;">
-                  <b>SCENARIO PLANNING TOOL</b><br>Simulate alternative end-node SL / LT assumptions (<b>analysis‑only</b>), but using the same policy rules as the implemented plan (<b>zero-if-no demand</b>, capping, overrides).
+                  <div style="font-size:1.00rem;"><b>SCENARIO PLANNING TOOL</b></div>
+                  <div style="height:8px;"></div>
+                  <div style="font-size:0.85rem;">Simulate alternative end-node SL / LT assumptions (<b>analysis‑only</b>), but using the same policy rules as the implemented plan (<b>zero-if-no demand</b>, capping, overrides).</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -3123,6 +3124,19 @@ with tab6:
                     return np.nan
             display_comp["% vs Implemented"] = display_comp["Simulated_SS"].apply(pct_vs_impl)
 
+            # Rename columns to shorter versions to reduce table width
+            display_comp_renamed = display_comp.rename(columns={
+                "EndNode_SL_%": "End SL%",
+                "Hop1_SL_%": "H1 SL%",
+                "Hop2_SL_%": "H2 SL%",
+                "Hop3_SL_%": "H3 SL%",
+                "LT_mean_days": "LT μ",
+                "LT_std_days": "LT σ",
+                "Simulated_SS": "SS (units)",
+                "Simulated_SS_USD": "SS (USD)",
+                "% vs Implemented": "% vs Impl"
+            })
+
             # ----------- Pretty pandas styling for DataFrame -----------
             def highlight_pct(val):
                 if pd.isna(val):
@@ -3130,21 +3144,21 @@ with tab6:
                 color = 'green' if val < 0 else 'red' if val > 0 else 'black'
                 return f'color: {color}; font-weight: bold;'
             styled = (
-                display_comp
+                display_comp_renamed
                 .style
                 .format({
-                    "EndNode_SL_%": "{:.2f}",
-                    "Hop1_SL_%": "{:.2f}",
-                    "Hop2_SL_%": "{:.2f}",
-                    "Hop3_SL_%": "{:.2f}",
-                    "LT_mean_days": "{:.2f}",
-                    "LT_std_days": "{:.2f}",
-                    "Simulated_SS": "{:,.0f}",
-                    "Simulated_SS_USD": "${:,.0f}",
-                    "% vs Implemented": "{:+.2f}%"
+                    "End SL%": "{:.2f}",
+                    "H1 SL%": "{:.2f}",
+                    "H2 SL%": "{:.2f}",
+                    "H3 SL%": "{:.2f}",
+                    "LT μ": "{:.2f}",
+                    "LT σ": "{:.2f}",
+                    "SS (units)": "{:,.0f}",
+                    "SS (USD)": "${:,.0f}",
+                    "% vs Impl": "{:+.2f}%"
                 })
-                .applymap(highlight_pct, subset=['% vs Implemented'])
-                .set_properties(**{'background-color': '#f7fafd'}, subset=pd.IndexSlice[:, :])
+                .applymap(highlight_pct, subset=['% vs Impl'])
+                .set_properties(**{'background-color': '#f7fafd', 'font-size': '0.85rem'}, subset=pd.IndexSlice[:, :])
             )
             
             # Put scenario comparison table and graph into a collapsible expander
@@ -3437,7 +3451,6 @@ with tab7:
                 yaxis_title="Units",
                 height=420,
             )
-            st.plotly_chart(fig_drv, use_container_width=True)
 
             # Simple table for attribution breakdown (normal table)
             attrib_display = ss_drv_df_display.rename(
@@ -3458,6 +3471,11 @@ with tab7:
 
             st.markdown("#### SS attribution breakdown (table)")
             st.dataframe(attrib_display_fmt, use_container_width=True)
+            
+            # Horizontal line marker
+            st.markdown("---")
+            
+            st.plotly_chart(fig_drv, use_container_width=True)
 
             # Exec takeaway (kept)
             try:
