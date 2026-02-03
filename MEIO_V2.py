@@ -3189,7 +3189,7 @@ with tab6:
             ))
             
             fig_sim.update_layout(
-                title=f"Safety Stock Investment by Scenario",
+                title="Safety Stock Investment by Scenario",
                 xaxis_title="Scenario",
                 yaxis_title="Safety Stock (USD)",
                 template="plotly_white",
