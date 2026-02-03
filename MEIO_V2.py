@@ -2954,20 +2954,20 @@ with tab2:
                     unsafe_allow_html=True,
                 )
 
-                    def fmt_pct(v):
-                        try:
-                            return f"{float(v):.2f}"
-                        except Exception:
-                            return ""
+                def fmt_pct(v):
+                    try:
+                        return f"{float(v):.2f}"
+                    except Exception:
+                        return ""
 
-                    def fmt_ss(v):
-                        return euro_format(v, False, True)
+                def fmt_ss(v):
+                    return euro_format(v, False, True)
 
-                    def usd_fmt(v):
-                        try:
-                            return "${:,.0f}".format(v) if pd.notna(v) else ""
-                        except Exception:
-                            return str(v)
+                def usd_fmt(v):
+                    try:
+                        return "${:,.0f}".format(v) if pd.notna(v) else ""
+                    except Exception:
+                        return str(v)
 
                     render_card_table(
                         display_comp,
