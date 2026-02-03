@@ -2987,13 +2987,10 @@ with tab6:
                 scenarios = []
                 # Calculate the gap based on current hop tier
                 # Hop 0 (99%) → Hop 1 (95%): 4% gap
-                # Hop 1 (95%) → Hop 2 (90%): 5% gap
-                # Hop 2 (90%) → Hop 3 (85%): 5% gap
+                # Hop 1+ (95% → 90%, 90% → 85%): 5% gap
                 sl_gap = 5.0  # Default gap for hops 1-3
                 if hops == 0:
                     sl_gap = 4.0  # Gap from 99% to 95%
-                elif hops >= 1:
-                    sl_gap = 5.0  # Gap from 95% to 90%, and 90% to 85%
                 
                 for s in range(n_scen):
                     with st.expander(f"Scenario {s+1} inputs", expanded=False):
