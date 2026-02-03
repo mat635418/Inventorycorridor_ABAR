@@ -1842,6 +1842,17 @@ with tab2:
         else:
             chosen_period = CURRENT_MONTH_TS
 
+        # Add cost per kilo slider below PERIOD filter (PR #3)
+        cost_per_kilo = st.slider(
+            "Cost per kilo (USD)",
+            min_value=0.0,
+            max_value=20.0,
+            value=2.0,
+            step=0.10,
+            help="USD cost per kilo for SS simulation",
+            key="tab2_costperkilo"
+        )
+
         st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
     with col_main:
@@ -1866,9 +1877,6 @@ with tab2:
             all_service_nodes = active_nodes(results, period=chosen_period, product=scenario_product)
             location_default = all_service_nodes[0] if all_service_nodes else ""
             location_to_move = st.selectbox("Which location do you want to reroute?", all_service_nodes, index=(all_service_nodes.index(location_default) if location_default in all_service_nodes else 0), key="scen_locmove")
-
-            # ------- NEW USD COST PARAMETER -------
-            cost_per_kilo = st.number_input("Cost per kilo (USD)", min_value=0.0, value=2.0, step=0.01, help="Enter the USD cost per kilo for SS simulation (affects the scenario USD totals).", key="scen_costperkilo")
 
             scenario_lt = df_lt[df_lt["Product"] == scenario_product] if "Product" in df_lt.columns else df_lt.copy()
             mask_to = scenario_lt["To_Location"] == location_to_move
@@ -2061,7 +2069,7 @@ with tab2:
                     def ss_delta_color(val):
                         if pd.isna(val): return "black"
                         return "green" if val < 0 else "red" if val > 0 else "black"
-                    table_md = "<table style='width:100%;text-align:center;background:#f6faf7;'><tr>"+ "".join(
+                    table_md = "<table style='width:100%;text-align:center;background:#f6faf7;font-size:0.85em;'><tr>"+ "".join(
                         f"<th>{col}</th>" for col in list(col_map.values())
                     ) + "</tr>"
                     for _, row in disp_df.iterrows():
@@ -2091,16 +2099,15 @@ with tab2:
                                 v_display = str(v)
                             table_md += f"<td{style}>{v_display}</td>"
                         table_md += "</tr>"
+                    # Grand Total row: show USD totals aligned under their columns
                     table_md += ("<tr style='font-weight:bold;background:#e6f5e4;'>"
                                  "<td>Grand Total</td>"
-                                 f"<td>{format_int_dot(gt_before)}</td>"
-                                 f"<td>{format_int_dot(gt_after)}</td>"
-                                 f"<td style='color:{ss_delta_color(gt_delta)}'>{format_int_dot(gt_delta)}</td>"
-                                 f"<td style='color:{ss_delta_color(gt_delta)}'><strong>{gt_pct:+.1f}%</strong></td>"
-                                 f"<td>{format_int_dot(gt_before_usd)}</td>"
-                                 f"<td>{format_int_dot(gt_after_usd)}</td>"
-                                 f"<td>{format_int_dot(gt_delta_usd)}</td>"
-                                 + "<td colspan='6'></td></tr>")
+                                 "<td colspan='4'></td>"  # Skip columns 2-5: SS Before, SS After, ΔSS units, ΔSS %
+                                 f"<td>{format_usd(gt_before_usd)}</td>"  # Column 6: SS Before (USD)
+                                 f"<td>{format_usd(gt_after_usd)}</td>"   # Column 7: SS After (USD)
+                                 f"<td>{format_usd(gt_delta_usd)}</td>"   # Column 8: ΔSS USD
+                                 "<td colspan='6'></td>"  # Skip columns 9-14: LT Before/After, Hops Before/After, SL Before/After
+                                 "</tr>")
                     table_md += "</table>"
 
                     # Diagnostic if BEEX's SS doesn't change but demand does
@@ -2507,10 +2514,13 @@ with tab3:
             "Local Dem [unit]": _fmt_int,
             "NW Dem [unit]": _fmt_int,
         }
+        # Add light red highlighting to SS column (PR #4)
+        ss_highlight = {'background-color': '#ffcccc'}
         styled = (
             nice.style
             .format(pandas_fmt)
             .set_properties(**header_props, axis=1)
+            .set_properties(**ss_highlight, subset=['SS [unit]'])
         )
         st.dataframe(styled, use_container_width=True)
 
@@ -2618,7 +2628,12 @@ with tab4:
                     "Net Dem [unit]": _fmt_int,
                 }
                 header_style = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
-                styled = eff_top_std.style.format(tbl_fmt).set_properties(**header_style, axis=1)
+                # Add light red highlighting to SS column (PR #5)
+                ss_highlight = {'background-color': '#ffcccc'}
+                styled = (eff_top_std.style
+                         .format(tbl_fmt)
+                         .set_properties(**header_style, axis=1)
+                         .set_properties(**ss_highlight, subset=['SS [unit]']))
                 st.dataframe(styled, use_container_width=True)
             else:
                 st.write("No non-zero nodes for this selection.")
@@ -3154,6 +3169,28 @@ with tab6:
             st.subheader("Scenario Comparison Table")
             st.dataframe(styled, use_container_width=True)
 
+            # Add column chart to visualize scenario impacts (PR #6)
+            st.markdown("---")
+            st.subheader("Scenario Impact Visualization")
+            fig_sim = go.Figure()
+            fig_sim.add_trace(go.Bar(
+                x=display_comp["Scenario"],
+                y=display_comp["Simulated_SS_USD"],
+                text=[f"${v:,.0f}" for v in display_comp["Simulated_SS_USD"]],
+                textposition='auto',
+                marker=dict(
+                    color=display_comp["Simulated_SS_USD"],
+                    colorscale='RdYlGn_r'
+                )
+            ))
+            fig_sim.update_layout(
+                xaxis_title="Scenario",
+                yaxis_title="Simulated SS (USD)",
+                showlegend=False,
+                height=400
+            )
+            st.plotly_chart(fig_sim, use_container_width=True)
+
             st.markdown(
                 """
                 <small>
@@ -3245,61 +3282,6 @@ with tab7:
         else:
             mat_period_df_display = hide_zero_rows(mat_period_df)
             # --- REMOVE the summary KPI table here as requested ---
-
-            st.markdown("---")
-            st.markdown("### Node-level view (normal table)")
-
-            # Prepare a clean, readable table
-            table_cols = [
-                "Product",
-                "Location",
-                "Period",
-                "Forecast",
-                "Agg_Future_Demand",
-                "Agg_Future_Internal",
-                "Agg_Future_External",
-                "Safety_Stock",
-                "Days_Covered_by_SS",
-                "LT_Mean",
-                "LT_Std",
-                "Service_Level_Node",
-                "Tier_Hops",
-                "Adjustment_Status",
-            ]
-            existing_cols = [c for c in table_cols if c in mat_period_df_display.columns]
-            node_table = mat_period_df_display[existing_cols].copy()
-            two_dec_cols = ["Days_Covered_by_SS", "Service_Level_Node"]
-            node_table_fmt = df_format_for_display(
-                node_table,
-                cols=None,
-                two_decimals_cols=two_dec_cols,
-            )
-            if "Period" in node_table_fmt.columns:
-                try:
-                    node_table_fmt["Period"] = node_table_fmt["Period"].apply(period_label)
-                except Exception:
-                    pass
-
-            # Shorten headers, make readable/wrapped
-            col_nice = {
-                "Product": "Material",
-                "Location": "Node",
-                "Period": "Month",
-                "Forecast": "Fcst [unit]",
-                "Agg_Future_Demand": "Net Dem [unit]",
-                "Agg_Future_Internal": "Local Dem",
-                "Agg_Future_External": "NW Dem",
-                "Safety_Stock": "SS [unit]",
-                "Days_Covered_by_SS": "SS Cov [days]",
-                "LT_Mean": "LT µ [days]",
-                "LT_Std": "LT σ [days]",
-                "Service_Level_Node": "SL node",
-                "Tier_Hops": "Tier/Hops",
-                "Adjustment_Status": "Status"
-            }
-            node_table_fmt = node_table_fmt.rename(columns=col_nice)
-            wrap_header = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
-            st.dataframe(node_table_fmt.style.set_properties(**wrap_header, axis=1), use_container_width=True)
 
             # ---- SS ATTRIBUTION (kept as in current version: waterfall + summary) ----
             st.markdown("---")
