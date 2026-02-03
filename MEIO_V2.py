@@ -2675,7 +2675,7 @@ with tab6:
                 height=320
             )
             st.plotly_chart(fig, use_container_width=True)
-
+          try
             st.markdown(
                 """
                 <small>
