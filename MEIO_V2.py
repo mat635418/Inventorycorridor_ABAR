@@ -2101,14 +2101,12 @@ with tab2:
                         table_md += "</tr>"
                     table_md += ("<tr style='font-weight:bold;background:#e6f5e4;'>"
                                  "<td>Grand Total</td>"
-                                 "<td></td>"  # Skip SS Before column
-                                 "<td></td>"  # Skip SS After column
-                                 "<td></td>"  # Skip ΔSS units column
-                                 "<td></td>"  # Skip ΔSS % column
+                                 "<td colspan='4'></td>"  # Skip SS Before, SS After, ΔSS units, ΔSS % columns
                                  f"<td>{format_usd(gt_before_usd)}</td>"
                                  f"<td>{format_usd(gt_after_usd)}</td>"
                                  f"<td>{format_usd(gt_delta_usd)}</td>"
-                                 + "<td></td><td></td><td></td><td></td><td></td><td></td></tr>")
+                                 "<td colspan='6'></td>"  # Skip remaining columns (LT, Hops, SL before/after)
+                                 "</tr>")
                     table_md += "</table>"
 
                     # Diagnostic if BEEX's SS doesn't change but demand does
