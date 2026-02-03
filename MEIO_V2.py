@@ -1816,7 +1816,7 @@ if s_file and d_file and lt_file:
             )
             render_tab1_explainer()
 
-    # TAB 2 -----------------------------------------------------------------
+# TAB 2 -----------------------------------------------------------------
 with tab2:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
@@ -1861,11 +1861,14 @@ with tab2:
 
             scenario_products = active_materials(results, period=chosen_period)
             scenario_product_default = sku if sku in scenario_products else (scenario_products[0] if scenario_products else "")
-            scenario_product = st.selectbox("Which material?", scenario_products, index=(scenario_products.index(scenario_product_default) if scenario_product_default in scenario_products else 0), key="dist_scen_product")
+            scenario_product = st.selectbox("Which material?", scenario_products, index=(scenario_products.index(scenario_product_default) if scenario_product_default in scenario_products else 0), key="scen_sku")
 
             all_service_nodes = active_nodes(results, period=chosen_period, product=scenario_product)
             location_default = all_service_nodes[0] if all_service_nodes else ""
-            location_to_move = st.selectbox("Which location do you want to reroute?", all_service_nodes, index=(all_service_nodes.index(location_default) if location_default in all_service_nodes else 0), key="dist_scen_loc")
+            location_to_move = st.selectbox("Which location do you want to reroute?", all_service_nodes, index=(all_service_nodes.index(location_default) if location_default in all_service_nodes else 0), key="scen_locmove")
+
+            # ------- NEW USD COST PARAMETER -------
+            cost_per_kilo = st.number_input("Cost per kilo (USD)", min_value=0.0, value=2.0, step=0.01, help="Enter the USD cost per kilo for SS simulation (affects the scenario USD totals).", key="scen_costperkilo")
 
             scenario_lt = df_lt[df_lt["Product"] == scenario_product] if "Product" in df_lt.columns else df_lt.copy()
             mask_to = scenario_lt["To_Location"] == location_to_move
@@ -1883,7 +1886,7 @@ with tab2:
                 st.markdown(f"**Current supplier (from node):** `{current_supplier}`")
                 possible_suppliers = [n for n in all_service_nodes if n != location_to_move and n != current_supplier]
                 new_supplier_default = possible_suppliers[0] if possible_suppliers else ""
-                new_supplier = st.selectbox("New supplier (route to node):", possible_suppliers, index=(possible_suppliers.index(new_supplier_default) if new_supplier_default in possible_suppliers else 0), key="dist_scen_to")
+                new_supplier = st.selectbox("New supplier (route to node):", possible_suppliers, index=(possible_suppliers.index(new_supplier_default) if new_supplier_default in possible_suppliers else 0), key="scen_newsup")
                 reroute_enabled = True
 
             # Heating tables (hardcoded)
@@ -1907,7 +1910,24 @@ with tab2:
                 elif month in [7,8,9]: return "SUMMER"
                 else: return "OTHER"
 
-            if reroute_enabled and st.button("Simulate reroute scenario", key="dist_scen_run"):
+            # ---- BUTTON COLOR STYLE: Use custom HTML/CSS to match pic2: lightblue for base, yellow for implemented ----
+            reroute_button_style = """
+                <style>
+                .reroute-btn button {
+                    background: #4fc3e4 !important;
+                    color: #fff !important;
+                    border-radius: 20px !important;
+                    padding: 0.45rem 1.1rem !important;
+                    border: none;
+                    font-weight: 700;
+                    font-size: 1.03rem;
+                    margin-bottom: 7px;
+                }
+                </style>
+            """
+            st.markdown(reroute_button_style, unsafe_allow_html=True)
+
+            if reroute_enabled and st.button("Simulate reroute scenario", key="dist_scen_run", help="Run the scenario with the current choices.", type="primary"):
                 rerouted_lt = scenario_lt.copy()
                 removal_mask = (
                     (rerouted_lt["From_Location"] == current_supplier) &
@@ -1977,8 +1997,12 @@ with tab2:
                     right[['Location', 'Safety_Stock_new', 'LT_Mean_new', 'Tier_Hops_new', 'Service_Level_Node_new']],
                     on='Location', how='outer'
                 )
+                # --------- USD column for delta ---------
+                comparison['SS_old_usd'] = comparison['Safety_Stock_old'].fillna(0) * cost_per_kilo
+                comparison['SS_new_usd'] = comparison['Safety_Stock_new'].fillna(0) * cost_per_kilo
                 comparison['ΔSS'] = comparison['Safety_Stock_new'].fillna(0) - comparison['Safety_Stock_old'].fillna(0)
                 comparison['%ΔSS'] = 100 * comparison['ΔSS'] / comparison['Safety_Stock_old'].replace(0, np.nan)
+                comparison['ΔSS_usd'] = comparison['SS_new_usd'] - comparison['SS_old_usd']
                 comparison['Safety_Stock_old'] = comparison['Safety_Stock_old'].fillna(0).astype(int)
                 comparison['Safety_Stock_new'] = comparison['Safety_Stock_new'].fillna(0).astype(int)
                 comparison['LT_Mean_old'] = comparison['LT_Mean_old'].fillna(0).round().astype(int)
@@ -1998,10 +2022,13 @@ with tab2:
                 )
                 changed_rows = comparison[mask].copy()
 
-                # Grand Total row
+                # Grand Total row, inc. USD
                 gt_before = left['Safety_Stock_old'].sum()
                 gt_after = right['Safety_Stock_new'].sum()
+                gt_before_usd = gt_before * cost_per_kilo
+                gt_after_usd = gt_after * cost_per_kilo
                 gt_delta = gt_after - gt_before
+                gt_delta_usd = gt_after_usd - gt_before_usd
                 gt_pct   = 100 * gt_delta / gt_before if gt_before else float('nan')
 
                 if changed_rows.empty:
@@ -2019,12 +2046,18 @@ with tab2:
                         'Tier_Hops_new': 'Hops After',
                         'Service_Level_Node_old': 'SL Before',
                         'Service_Level_Node_new': 'SL After',
+                        'SS_old_usd': 'SS Before (USD)',
+                        'SS_new_usd': 'SS After (USD)',
+                        'ΔSS_usd': 'ΔSS USD'
                     }
                     disp_df = changed_rows.rename(columns=col_map)
                     def format_int_dot(v):
                         if pd.isna(v): return ""
                         try: return "{:,.0f}".format(int(round(v))).replace(",", ".")
                         except: return str(int(v))
+                    def format_usd(v):
+                        try: return f"${v:,.0f}".replace(",", ".")
+                        except: return ""
                     def ss_delta_color(val):
                         if pd.isna(val): return "black"
                         return "green" if val < 0 else "red" if val > 0 else "black"
@@ -2044,6 +2077,8 @@ with tab2:
                                 color = ss_delta_color(row["ΔSS %"])
                                 v_display = f"{format_int_dot(v)}" if pd.notnull(v) else ""
                                 style = f" style='color:{color}'"
+                            elif col in ("SS Before (USD)", "SS After (USD)", "ΔSS USD"):
+                                v_display = format_usd(v)
                             elif col in ("SL Before", "SL After"):
                                 v_display = f"{v:.2%}" if pd.notnull(v) else ""
                             elif col in ("LT Before", "LT After"):
@@ -2062,6 +2097,9 @@ with tab2:
                                  f"<td>{format_int_dot(gt_after)}</td>"
                                  f"<td style='color:{ss_delta_color(gt_delta)}'>{format_int_dot(gt_delta)}</td>"
                                  f"<td style='color:{ss_delta_color(gt_delta)}'><strong>{gt_pct:+.1f}%</strong></td>"
+                                 f"<td>{format_int_dot(gt_before_usd)}</td>"
+                                 f"<td>{format_int_dot(gt_after_usd)}</td>"
+                                 f"<td>{format_int_dot(gt_delta_usd)}</td>"
                                  + "<td colspan='6'></td></tr>")
                     table_md += "</table>"
 
@@ -2071,7 +2109,6 @@ with tab2:
                     beex_demand_old = left[left['Location'] == new_supplier].get('Agg_Future_Demand', pd.Series([0])).sum()
                     beex_demand_new = right[right['Location'] == new_supplier].get('Agg_Future_Demand', pd.Series([0])).sum()
                     if beex_new == beex_old and beex_demand_new != beex_demand_old:
-                        # Capping is strictly limiting SS!
                         st.warning(f"Note: BEEX's SS did not change, even though demand increased. This is due to capping (cap_range={cap_range}) for SS as a % of demand in your scenario.")
 
                     st.markdown(
@@ -2785,7 +2822,7 @@ with tab2:
                     c_val = f"{net_wape:.1f}" if not np.isnan(net_wape) else "N/A"
                     st.metric("Network WAPE (%)", c_val)
 
-    # TAB 6 -----------------------------------------------------------------
+# TAB 6 -----------------------------------------------------------------
     with tab6:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
@@ -2797,9 +2834,7 @@ with tab2:
 
             avail_locs = active_nodes(results, product=calc_sku)
             if not avail_locs:
-                avail_locs = sorted(
-                    results[results["Product"] == calc_sku]["Location"].unique().tolist()
-                )
+                avail_locs = sorted(results[results["Product"] == calc_sku]["Location"].unique().tolist())
             if not avail_locs:
                 avail_locs = ["(no location)"]
             calc_loc_default = (
@@ -2830,6 +2865,9 @@ with tab2:
                 chosen_label = period_label(CURRENT_MONTH_TS)
             calc_period = period_label_map.get(chosen_label, default_period)
 
+            # ------- NEW USD COST PARAMETER -------
+            cost_per_kilo_tab6 = st.number_input("Cost per kilo (USD)", min_value=0.0, value=2.0, step=0.01, help="USD cost per kilo for scenario simulation", key="sim_costperkilo")
+            
             row_export = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
             row_export = row_export[
                 (row_export["Product"] == calc_sku)
@@ -2856,6 +2894,13 @@ with tab2:
                     .calc-mapping-container {
                       max-width: 560px;
                     }
+                    /* BUTTON COLORS for "accordions" (expander): pic1&2 style */
+                    .st-ef.sd .st-af {
+                        background: #4fc3e4;
+                    }
+                    .st-ef.sd:last-child .st-af {
+                        background: #ffe082 !important;
+                    }
                   </style>
                   """,
                 unsafe_allow_html=True,
@@ -2881,27 +2926,18 @@ with tab2:
                 st.warning("Selection not found in results.")
             else:
                 row = row_df.iloc[0]
-
                 base_hop_sl = {0: 99.0, 1: 95.0, 2: 90.0, 3: 85.0}
                 base_end_sl_pct = base_hop_sl[0]
                 hop_ratios = {h: base_hop_sl[h] / base_end_sl_pct for h in base_hop_sl}
-
                 node_sl = float(row.get("Service_Level_Node", service_level))
                 node_z = float(row.get("Z_node", norm.ppf(node_sl)))
                 hops = int(row.get("Tier_Hops", 0))
-
-                st.markdown(
-                    "**Applied Hop Logic → Service Level mapping:**"
-                )
+                st.markdown("**Applied Hop Logic → Service Level mapping:**")
                 hop_image_path = "HOP_SLjpg.jpg"
                 if os.path.exists(hop_image_path):
                     st.image(hop_image_path, width=500)
                 else:
-                    st.info(
-                        "Network hop illustration not found on the server "
-                        f"(expected at '{hop_image_path}'). "
-                        "Please add this image file next to MEIO_V2.py."
-                    )
+                    st.info("Network hop illustration not found on the server (expected at 'HOP_SLjpg.jpg'). Please add this image file next to MEIO_V2.py.")
 
                 avg_daily = row.get("D_day", np.nan)
                 days_cov = row.get("Days_Covered_by_SS", np.nan)
@@ -2961,7 +2997,7 @@ with tab2:
                         font-size:1.00rem;
                         color:#0b3d91;
                         font-weight:500;">
-                      <b>SCENARIO PLANNING TOOL</b><br>Simulate alternative end-node SL / LT assumptions (<b>analysis‑only</b>), but using the same policy rules as the implemented plan (<b>zero-if-n[...]
+                      <b>SCENARIO PLANNING TOOL</b><br>Simulate alternative end-node SL / LT assumptions (<b>analysis‑only</b>), but using the same policy rules as the implemented plan (<b>zero-if-no-demand, capping, B616</b>).
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -2989,7 +3025,6 @@ with tab2:
                     base_sigma_d_day = base_agg_std / math.sqrt(float(days_per_month))
                     base_d_day = base_agg_demand / float(days_per_month)
                     base_var_d_day = base_sigma_d_day**2
-
                     if base_agg_demand < 20.0:
                         base_var_d_day = max(base_var_d_day, base_d_day)
 
@@ -3031,7 +3066,6 @@ with tab2:
                                 sc_sl_default = float(base_sl_node * 100.0)
                             else:
                                 sc_sl_default = min(99.9, float(base_sl_node * 100.0) + 0.5 * s)
-
                             sc_sl = st.slider(
                                 f"Scenario {s+1} end-node SL (%)",
                                 50.0,
@@ -3072,6 +3106,7 @@ with tab2:
                                 value=sc_lt_std_default,
                                 key=f"sc_lt_std_{s}",
                             )
+                            # Note: cost per kilo comes from above, not per scenario
                             scenarios.append(
                                 {
                                     "SL_pct": sc_sl,
@@ -3107,6 +3142,7 @@ with tab2:
                             apply_cap=apply_cap,
                             cap_range=cap_range,
                         )
+                        sc_ss_usd = sc_ss * cost_per_kilo_tab6
 
                         scen_rows.append(
                             {
@@ -3118,10 +3154,10 @@ with tab2:
                                 "LT_mean_days": sc["LT_mean"],
                                 "LT_std_days": sc["LT_std"],
                                 "Simulated_SS": sc_ss,
+                                "Simulated_SS_USD": sc_ss_usd,
                             }
                         )
-                    scen_df = pd.DataFrame(scen_rows)
-
+                    base_ss_policy_usd = base_ss_policy * cost_per_kilo_tab6
                     base_calibrated_row = {
                         "Scenario": "Base-calibrated",
                         "EndNode_SL_%": base_sl_node * 100.0,
@@ -3131,6 +3167,7 @@ with tab2:
                         "LT_mean_days": base_LT_mean,
                         "LT_std_days": base_LT_std,
                         "Simulated_SS": base_ss_policy,
+                        "Simulated_SS_USD": base_ss_policy_usd,
                     }
                     impl_row = {
                         "Scenario": "Implemented",
@@ -3141,17 +3178,18 @@ with tab2:
                         "LT_mean_days": np.nan,
                         "LT_std_days": np.nan,
                         "Simulated_SS": float(row["Safety_Stock"]),
+                        "Simulated_SS_USD": float(row["Safety_Stock"]) * cost_per_kilo_tab6,
                     }
                     compare_df = pd.concat(
-                        [pd.DataFrame([base_calibrated_row, impl_row]), scen_df],
+                        [pd.DataFrame([base_calibrated_row, impl_row]), pd.DataFrame(scen_rows)],
                         ignore_index=True,
                         sort=False,
                     )
                     display_comp = compare_df.copy()
                     display_comp["Simulated_SS"] = display_comp["Simulated_SS"].astype(float)
+                    display_comp["Simulated_SS_USD"] = display_comp["Simulated_SS_USD"].astype(float)
 
                     implemented_ss = float(row["Safety_Stock"])
-
                     def pct_vs_impl(v):
                         try:
                             if implemented_ss <= 0 or pd.isna(v):
@@ -3159,7 +3197,6 @@ with tab2:
                             return (float(v) / implemented_ss - 1.0) * 100.0
                         except Exception:
                             return np.nan
-
                     display_comp["Pct_vs_Implemented_%"] = display_comp["Simulated_SS"].apply(pct_vs_impl)
 
                     st.markdown(
@@ -3171,16 +3208,18 @@ with tab2:
                         """,
                         unsafe_allow_html=True,
                     )
-
                     def fmt_pct(v):
                         try:
                             return f"{float(v):.2f}"
                         except Exception:
                             return ""
-
                     def fmt_ss(v):
                         return euro_format(v, False, True)
-
+                    def fmt_usd(v):
+                        try:
+                            return f"${float(v):,.0f}".replace(",", ".")
+                        except:
+                            return ""
                     render_card_table(
                         display_comp,
                         id_col="Scenario",
@@ -3210,36 +3249,65 @@ with tab2:
                                 "pill": "blue",
                             },
                             {
+                                "header": "Simulated SS (USD)",
+                                "col": "Simulated_SS_USD",
+                                "fmt": fmt_usd,
+                                "pill": None,
+                            },
+                            {
                                 "header": "% vs Implemented",
                                 "col": "Pct_vs_Implemented_%",
                                 "fmt": fmt_pct,
                                 "pill": None,
                             },
-                            {
-                                "header": "—",
-                                "col": "Simulated_SS",
-                                "fmt": lambda v: "",
-                                "pill": None,
-                            },
                         ],
-                        container_height=220,
+                        container_height=250,
                     )
-
+                    # ------- COLORED BARS, BASE=lightblue, IMPLEMENTED=yellow, S* = orange -------
                     fig_bar = go.Figure()
-                    colors = px.colors.qualitative.Pastel
+                    base_color = "#4fc3e4"
+                    impl_color = "#ffe082"
+                    scen_color = "#ffa07a"
+                    colors = [base_color, impl_color] + [scen_color] * n_scen
                     fig_bar.add_trace(
                         go.Bar(
                             x=display_comp["Scenario"],
                             y=display_comp["Simulated_SS"],
-                            marker_color=colors[: len(display_comp)],
+                            marker_color=colors[:len(display_comp)],
+                            name="SS (units)",
+                            text=display_comp["Simulated_SS"].apply(fmt_ss),
+                            hoverinfo="text",
                         )
                     )
+                    fig_bar.add_trace(
+                        go.Bar(
+                            x=display_comp["Scenario"],
+                            y=display_comp["Simulated_SS_USD"],
+                            marker_color=colors[:len(display_comp)],
+                            name="SS (USD)",
+                            text=display_comp["Simulated_SS_USD"].apply(fmt_usd),
+                            visible='legendonly'
+                        )
+                    )
+                    # Add secondary y axis if you wish to overlay both
                     fig_bar.update_layout(
-                        title="Scenario SS Comparison (policy-consistent)",
+                        title="Scenario SS Comparison",
                         yaxis_title="SS (units)",
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="left",
+                            x=0,
+                            bgcolor="rgba(255,255,255,0.8)",
+                            bordercolor="#e0e0e0",
+                            borderwidth=1,
+                            font=dict(size=12),
+                        ),
+                        margin=dict(l=20, r=10, t=10, b=10),
+                        hovermode="x unified",
                     )
                     st.plotly_chart(fig_bar, use_container_width=True)
-
     # TAB 7 -----------------------------------------------------------------
     with tab7:
         col_main, col_badge = st.columns([17, 3])
