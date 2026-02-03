@@ -55,7 +55,7 @@ st.markdown(
         ">
           V
         </span>
-        v1.21
+        v2.1
       </span>
       <span style="
           display:inline-flex;
@@ -1817,304 +1817,416 @@ if s_file and d_file and lt_file:
             render_tab1_explainer()
 
     # TAB 2 -----------------------------------------------------------------
-    with tab2:
-        col_main, col_badge = st.columns([17, 3])
-        with col_badge:
-            render_logo_above_parameters(scale=1.5)
+with tab2:
+    col_main, col_badge = st.columns([17, 3])
+    with col_badge:
+        render_logo_above_parameters(scale=1.5)
 
-            sku_default = default_product
-            sku_index = all_products.index(sku_default) if all_products else 0
-            sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="network_sku")
+        sku_default = default_product
+        sku_index = all_products.index(sku_default) if all_products else 0
+        sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="network_sku")
 
-            if period_labels:
-                try:
-                    default_label = period_label(default_period) if default_period is not None else period_labels[-1]
-                    period_index = period_labels.index(default_label) if default_label in period_labels else len(period_labels) - 1
-                except Exception:
-                    period_index = len(period_labels) - 1
-                chosen_label = st.selectbox(
-                    "PERIOD",
-                    period_labels,
-                    index=period_index,
-                    key="network_period",
-                )
-                chosen_period = period_label_map.get(chosen_label, default_period)
-            else:
-                chosen_period = CURRENT_MONTH_TS
+        if period_labels:
+            try:
+                default_label = period_label(default_period) if default_period is not None else period_labels[-1]
+                period_index = period_labels.index(default_label) if default_label in period_labels else len(period_labels) - 1
+            except Exception:
+                period_index = len(period_labels) - 1
+            chosen_label = st.selectbox(
+                "PERIOD",
+                period_labels,
+                index=period_index,
+                key="network_period",
+            )
+            chosen_period = period_label_map.get(chosen_label, default_period)
+        else:
+            chosen_period = CURRENT_MONTH_TS
 
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
-        with col_main:
-            render_selection_line("Selected:", product=sku, period_text=period_label(chosen_period))
-            st.subheader("🕸️ Network Topology")
+    with col_main:
+        render_selection_line("Selected:", product=sku, period_text=period_label(chosen_period))
+        st.subheader("🕸️ Network Topology")
 
+        # ---------- Distribution Strategy Scenario Planning Tool ----------
+        with st.expander("🚚 Distribution Strategy Scenario Planning ('What-If' Routing)", expanded=False):
             st.markdown(
                 """
-                <div style="font-size:0.85rem; margin-bottom:4px; color:#555;">
-                  Only nodes with non‑zero demand or corridor in the selected period are drawn.
-                  Routes that connect to fully inactive nodes are hidden to keep the view focused.
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                **'What if I move a location from being served by node A to being served by node B?'**
 
-            st.markdown(
+                - Select a node to reroute, its current supplier (upstream), and new supplier.
+                - See the impact on Safety Stock at the moved node, the old supplier, and overall.
                 """
-                <style>
-                    iframe {
-                        display: block;
-                        margin-left: auto;
-                        margin-right: auto;
-                        border: none;
-                    }
-                </style>
-                """,
-                unsafe_allow_html=True,
             )
+            # select "Product" for scenario, restrict to active nodes for this SKU/period
+            scenario_products = active_materials(results, period=chosen_period)
+            scenario_product = st.selectbox("Which material?", scenario_products, key="dist_scen_product")
+            all_service_nodes = active_nodes(results, period=chosen_period, product=scenario_product)
+            location_to_move = st.selectbox("Which location do you want to reroute?", all_service_nodes, key="dist_scen_loc")
 
-            label_data = (
-                results[results["Period"] == chosen_period]
-                .set_index(["Product", "Location"])
-                .to_dict("index")
-            )
-            sku_lt = df_lt[df_lt["Product"] == sku] if "Product" in df_lt.columns else df_lt.copy()
-
-            net = Network(
-                height="1200px",
-                width="100%",
-                directed=True,
-                bgcolor="#ffffff",
-                font_color="#222222",
-            )
-
-            hubs = {"B616", "BEEX", "LUEX"}
-
-            active_nodes_for_sku = set(
-                active_nodes(results, period=chosen_period, product=sku)
-            )
-
-            if not sku_lt.empty:
-                froms = set(sku_lt["From_Location"].dropna().unique().tolist())
-                tos = set(sku_lt["To_Location"].dropna().unique().tolist())
-                route_nodes = (froms.union(tos)).intersection(active_nodes_for_sku)
-                all_nodes = route_nodes.union(hubs.intersection(active_nodes_for_sku))
+            # Find current upstream supplier(s) for the selected location
+            scenario_lt = df_lt[df_lt["Product"] == scenario_product] if "Product" in df_lt.columns else df_lt.copy()
+            mask_to = scenario_lt["To_Location"] == location_to_move
+            if not scenario_lt[mask_to].empty:
+                current_suppliers = scenario_lt[mask_to]["From_Location"].dropna().unique().tolist()
             else:
-                all_nodes = hubs.intersection(active_nodes_for_sku)
+                current_suppliers = []
 
-            if not all_nodes:
-                all_nodes = hubs
+            if not current_suppliers:
+                st.info("This location has no supplier in the current network topology for this period (cannot reroute).")
+                reroute_enabled = False
+            else:
+                current_supplier = st.selectbox("Current supplier (from node):", current_suppliers, key="dist_scen_from")
+                # Choose all possible other sources for this location
+                possible_suppliers = [n for n in all_service_nodes if n != location_to_move and n != current_supplier]
+                new_supplier = st.selectbox("New supplier (route to node):", possible_suppliers, key="dist_scen_to")
+                reroute_enabled = True
 
-            demand_lookup = {}
-            for n in all_nodes:
-                demand_lookup[n] = label_data.get(
-                    (sku, n),
-                    {
-                        "Forecast": 0,
-                        "Agg_Future_Internal": 0,
-                        "Agg_Future_External": 0,
-                        "Safety_Stock": 0,
-                        "Tier_Hops": np.nan,
-                        "Service_Level_Node": np.nan,
-                        "D_day": 0,
-                        "Days_Covered_by_SS": np.nan,
-                        "Max_Corridor": 0,
-                        "Agg_Future_Demand": 0,
-                    },
+            if reroute_enabled and st.button("Simulate reroute scenario", key="dist_scen_run"):
+                # Make a copy of LT DataFrame and reroute
+                rerouted_lt = scenario_lt.copy()
+                # Remove the old edge
+                removal_mask = (
+                    (rerouted_lt["From_Location"] == current_supplier) &
+                    (rerouted_lt["To_Location"] == location_to_move)
                 )
-
-            for n in sorted(all_nodes):
-                m = demand_lookup.get(
-                    n,
-                    {
-                        "Forecast": 0,
-                        "Agg_Future_Internal": 0,
-                        "Agg_Future_External": 0,
-                        "Safety_Stock": 0,
-                        "Tier_Hops": np.nan,
-                        "Service_Level_Node": np.nan,
-                        "D_day": 0,
-                        "Days_Covered_by_SS": np.nan,
-                        "Max_Corridor": 0,
-                        "Agg_Future_Demand": 0,
-                    },
-                )
-
-                node_active = (
-                    abs(float(m.get("Agg_Future_Demand", 0)))
-                    + abs(float(m.get("Forecast", 0)))
-                    + abs(float(m.get("Safety_Stock", 0)))
-                    + abs(float(m.get("Max_Corridor", float(m.get("Safety_Stock", 0)) + float(m.get("Forecast", 0)))))
-                    > 0
-                )
-
-                if not node_active:
-                    continue
-
-                tier_hops = m.get("Tier_Hops", np.nan)
-                try:
-                    hops_val = int(tier_hops) if not pd.isna(tier_hops) else 0
-                except Exception:
-                    hops_val = 0
-
-                if n == "B616":
-                    bg, border, font_color, size = "#dcedc8", "#8bc34a", "#0b3d91", 14
-                elif n in {"BEEX", "LUEX"}:
-                    bg, border, font_color, size = "#bbdefb", "#64b5f6", "#0b3d91", 14
-                else:
-                    if hops_val <= 0:
-                        bg = "#fffde7"
-                        border = "#fbc02d"
-                    elif hops_val == 1:
-                        bg = "#fff9c4"
-                        border = "#f9a825"
-                    elif hops_val == 2:
-                        bg = "#fff59d"
-                        border = "#f57f17"
-                    else:
-                        bg = "#fff176"
-                        border = "#f57f17"
-                    font_color, size = "#222222", 12
-
-                sl_node = m.get("Service_Level_Node", None)
-                if pd.notna(sl_node):
-                    try:
-                        sl_label = f"{float(sl_node) * 100:.2f}%"
-                    except Exception:
-                        sl_label = str(sl_node)
-                else:
-                    sl_label = "-"
-
-                lbl = (
-                    f"{n}\n"
-                    f"FC: {euro_format(m.get('Forecast', 0), show_zero=True)}\n"
-                    f"DFC: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\n"
-                    f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\n"
-                    f"SL: {sl_label}"
-                )
-                net.add_node(
-                    n,
-                    label=lbl,
-                    title=lbl,
-                    color={"background": bg, "border": border},
-                    shape="box",
-                    font={"color": font_color, "size": size},
-                )
-
-            visible_nodes = {n["id"] for n in net.nodes}
-            if not sku_lt.empty:
-                for _, r in sku_lt.iterrows():
-                    from_n, to_n = r["From_Location"], r["To_Location"]
-                    if pd.isna(from_n) or pd.isna(to_n):
-                        continue
-                    if (from_n not in visible_nodes) or (to_n not in visible_nodes):
-                        continue
-                    edge_color = "#888888"
-                    lt_val = r.get("Lead_Time_Days", 0)
-                    label = f"{int(lt_val)}d" if not pd.isna(lt_val) else ""
-                    net.add_edge(
-                        from_n,
-                        to_n,
-                        label=label,
-                        color=edge_color,
-                        smooth={"enabled": True, "type": "dynamic", "roundness": 0.4},
-                    )
-
-            net.set_options(
-                """
-                {
-                  "physics": {
-                    "enabled": true,
-                    "stabilization": {
-                      "enabled": true,
-                      "iterations": 300,
-                      "fit": true
-                    },
-                    "barnesHut": {
-                      "gravitationalConstant": -3000,
-                      "centralGravity": 0.1,
-                      "springLength": 50,
-                      "springConstant": 0.02,
-                      "damping": 0.09,
-                      "avoidOverlap": 1.0
+                rerouted_lt = rerouted_lt[~removal_mask]
+                # Add new edge (using same LT and Std as the original if possible, else median)
+                # Try to guess good values for Lead_Time fields
+                orig = scenario_lt[removal_mask]
+                if not orig.empty:
+                    first_row = orig.iloc[0]
+                    new_row = {
+                        "Product": scenario_product,
+                        "From_Location": new_supplier,
+                        "To_Location": location_to_move,
+                        "Lead_Time_Days": first_row.get("Lead_Time_Days", 7),
+                        "Lead_Time_Std_Dev": first_row.get("Lead_Time_Std_Dev", 2)
                     }
-                  },
-                  "nodes": {
-                    "borderWidthSelected": 2
-                  },
-                  "edges": {
-                    "smooth": {
-                      "enabled": true,
-                      "type": "dynamic",
-                      "roundness": 0.4
+                else:
+                    new_row = {
+                        "Product": scenario_product,
+                        "From_Location": new_supplier,
+                        "To_Location": location_to_move,
+                        "Lead_Time_Days": rerouted_lt["Lead_Time_Days"].median() if not rerouted_lt.empty else 7,
+                        "Lead_Time_Std_Dev": rerouted_lt["Lead_Time_Std_Dev"].median() if not rerouted_lt.empty else 2
                     }
-                  },
-                  "interaction": {
-                    "hover": true,
-                    "zoomView": true,
-                    "dragView": true,
-                    "dragNodes": true
-                  },
-                  "layout": {
-                    "improvedLayout": true
-                  }
-                }
-                """
-            )
-            tmpfile = "net.html"
-            net.save_graph(tmpfile)
-            html_text = open(tmpfile, "r", encoding="utf-8").read()
-            injection_css = """
+                # Append
+                rerouted_lt = pd.concat([rerouted_lt, pd.DataFrame([new_row])], ignore_index=True)
+
+                # Re-run pipeline (only for this product and chosen_period for speed)
+                reroute_df_d = df_d[(df_d["Product"] == scenario_product) & (df_d["Period"] == chosen_period)].copy()
+                reroute_stats = stats[(stats["Product"] == scenario_product)].copy()
+                rerouted_results, _ = run_pipeline(
+                    df_d=reroute_df_d,
+                    stats=reroute_stats,
+                    df_lt=rerouted_lt,
+                    service_level=service_level,
+                    transitive=use_transitive,
+                    rho=var_rho,
+                    lt_mode_param=lt_mode,
+                    zero_if_no_net_fcst=zero_if_no_net_fcst,
+                    apply_cap=apply_cap,
+                    cap_range=cap_range,
+                )
+                old_results = results[
+                    (results["Product"] == scenario_product) &
+                    (results["Period"] == chosen_period)
+                ]
+
+                def get_ss(df, loc):
+                    r = df[df["Location"] == loc]
+                    return float(r["Safety_Stock"].values[0]) if not r.empty else 0.0
+
+                moved_old_ss = get_ss(old_results, location_to_move)
+                moved_new_ss = get_ss(rerouted_results, location_to_move)
+                from_old_ss = get_ss(old_results, current_supplier)
+                from_new_ss = get_ss(rerouted_results, current_supplier)
+                to_old_ss = get_ss(old_results, new_supplier)
+                to_new_ss = get_ss(rerouted_results, new_supplier)
+                overall_old = old_results["Safety_Stock"].sum()
+                overall_new = rerouted_results["Safety_Stock"].sum()
+
+                st.success(
+                    f"""
+                    **Result:**  
+                    - At <b>{location_to_move}</b>: Safety Stock changed from <b>{int(moved_old_ss)}</b> to <b>{int(moved_new_ss)}</b> units  
+                    - At old supplier <b>{current_supplier}</b>: changed from <b>{int(from_old_ss)}</b> to <b>{int(from_new_ss)}</b>  
+                    - At new supplier <b>{new_supplier}</b>: changed from <b>{int(to_old_ss)}</b> to <b>{int(to_new_ss)}</b>  
+                    - <b>Overall Safety Stock (all network, this material, this period):</b> {int(overall_old)} → <b>{int(overall_new)}</b> ({'%.0f' % (overall_new-overall_old)} units change)
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.write("You can repeat with different routing choices. To get back to the base plan, reload data or change period.")
+
+        # --------------------------------------------------------------------
+        st.markdown(
+            """
+            <div style="font-size:0.85rem; margin-bottom:4px; color:#555;">
+              Only nodes with non‑zero demand or corridor in the selected period are drawn.
+              Routes that connect to fully inactive nodes are hidden to keep the view focused.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            """
             <style>
-              html, body { height: 100%; margin: 0; padding: 0; }
-              #mynetwork {
-                display:flex !important;
-                align-items:center;
-                justify-content:center;
-                height:1200px !important;
-                width:100% !important;
-              }
-              .vis-network {
-                display:block !important;
-                margin: 0 auto !important;
-              }
-            </style>
-            """
-            injection_js = """
-            <script>
-              function fitAndCenterNetwork() {
-                try {
-                  if (typeof network !== 'undefined') {
-                    network.fit({ animation: false });
-                  }
-                } catch (e) {
-                  console.warn("Network fit failed:", e);
+                iframe {
+                    display: block;
+                    margin-left: auto;
+                    margin-right: auto;
+                    border: none;
                 }
-              }
-              setTimeout(fitAndCenterNetwork, 700);
-            </script>
-            """
-            if "</head>" in html_text:
-                html_text = html_text.replace("</head>", injection_css + "</head>", 1)
-            if "</body>" in html_text:
-                html_text = html_text.replace("</body>", injection_js + "</body>", 1)
-            else:
-                html_text += injection_js
-            components.html(html_text, height=1250)
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
-            st.markdown(
-                """
-                <div style="text-align:center; font-size:12px; padding:8px 0;">
-                  <div style="display:inline-block; background:#f7f9fc; padding:8px 12px; border-radius:8px;">
-                    <strong>Legend:</strong><br/>
-                    FC = Local Forecast &nbsp;&nbsp;|&nbsp;&nbsp;
-                    DFC = Downstream FC (rolled-up) &nbsp;&nbsp;|&nbsp;&nbsp;
-                    SS  = Safety Stock (final policy value)<br/>
-                    Node border intensity loosely reflects hop distance from end-nodes.
-                  </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+        label_data = (
+            results[results["Period"] == chosen_period]
+            .set_index(["Product", "Location"])
+            .to_dict("index")
+        )
+        sku_lt = df_lt[df_lt["Product"] == sku] if "Product" in df_lt.columns else df_lt.copy()
+
+        net = Network(
+            height="900px",
+            width="100%",
+            directed=True,
+            bgcolor="#ffffff",
+            font_color="#222222",
+        )
+
+        hubs = {"B616", "BEEX", "LUEX"}
+
+        active_nodes_for_sku = set(
+            active_nodes(results, period=chosen_period, product=sku)
+        )
+
+        if not sku_lt.empty:
+            froms = set(sku_lt["From_Location"].dropna().unique().tolist())
+            tos = set(sku_lt["To_Location"].dropna().unique().tolist())
+            route_nodes = (froms.union(tos)).intersection(active_nodes_for_sku)
+            all_nodes = route_nodes.union(hubs.intersection(active_nodes_for_sku))
+        else:
+            all_nodes = hubs.intersection(active_nodes_for_sku)
+
+        if not all_nodes:
+            all_nodes = hubs
+
+        demand_lookup = {}
+        for n in all_nodes:
+            demand_lookup[n] = label_data.get(
+                (sku, n),
+                {
+                    "Forecast": 0,
+                    "Agg_Future_Internal": 0,
+                    "Agg_Future_External": 0,
+                    "Safety_Stock": 0,
+                    "Tier_Hops": np.nan,
+                    "Service_Level_Node": np.nan,
+                    "D_day": 0,
+                    "Days_Covered_by_SS": np.nan,
+                    "Max_Corridor": 0,
+                    "Agg_Future_Demand": 0,
+                },
             )
+
+        for n in sorted(all_nodes):
+            m = demand_lookup.get(
+                n,
+                {
+                    "Forecast": 0,
+                    "Agg_Future_Internal": 0,
+                    "Agg_Future_External": 0,
+                    "Safety_Stock": 0,
+                    "Tier_Hops": np.nan,
+                    "Service_Level_Node": np.nan,
+                    "D_day": 0,
+                    "Days_Covered_by_SS": np.nan,
+                    "Max_Corridor": 0,
+                    "Agg_Future_Demand": 0,
+                },
+            )
+
+            node_active = (
+                abs(float(m.get("Agg_Future_Demand", 0)))
+                + abs(float(m.get("Forecast", 0)))
+                + abs(float(m.get("Safety_Stock", 0)))
+                + abs(float(m.get("Max_Corridor", float(m.get("Safety_Stock", 0)) + float(m.get("Forecast", 0)))))
+                > 0
+            )
+
+            if not node_active:
+                continue
+
+            tier_hops = m.get("Tier_Hops", np.nan)
+            try:
+                hops_val = int(tier_hops) if not pd.isna(tier_hops) else 0
+            except Exception:
+                hops_val = 0
+
+            if n == "B616":
+                bg, border, font_color, size = "#dcedc8", "#8bc34a", "#0b3d91", 14
+            elif n in {"BEEX", "LUEX"}:
+                bg, border, font_color, size = "#bbdefb", "#64b5f6", "#0b3d91", 14
+            else:
+                if hops_val <= 0:
+                    bg = "#fffde7"
+                    border = "#fbc02d"
+                elif hops_val == 1:
+                    bg = "#fff9c4"
+                    border = "#f9a825"
+                elif hops_val == 2:
+                    bg = "#fff59d"
+                    border = "#f57f17"
+                else:
+                    bg = "#fff176"
+                    border = "#f57f17"
+                font_color, size = "#222222", 12
+
+            sl_node = m.get("Service_Level_Node", None)
+            if pd.notna(sl_node):
+                try:
+                    sl_label = f"{float(sl_node) * 100:.2f}%"
+                except Exception:
+                    sl_label = str(sl_node)
+            else:
+                sl_label = "-"
+
+            lbl = (
+                f"{n}\n"
+                f"FC: {euro_format(m.get('Forecast', 0), show_zero=True)}\n"
+                f"DFC: {euro_format(m.get('Agg_Future_External', 0), show_zero=True)}\n"
+                f"SS: {euro_format(m.get('Safety_Stock', 0), show_zero=True)}\n"
+                f"SL: {sl_label}"
+            )
+            net.add_node(
+                n,
+                label=lbl,
+                title=lbl,
+                color={"background": bg, "border": border},
+                shape="box",
+                font={"color": font_color, "size": size},
+            )
+
+        visible_nodes = {n["id"] for n in net.nodes}
+        if not sku_lt.empty:
+            for _, r in sku_lt.iterrows():
+                from_n, to_n = r["From_Location"], r["To_Location"]
+                if pd.isna(from_n) or pd.isna(to_n):
+                    continue
+                if (from_n not in visible_nodes) or (to_n not in visible_nodes):
+                    continue
+                edge_color = "#888888"
+                lt_val = r.get("Lead_Time_Days", 0)
+                label = f"{int(lt_val)}d" if not pd.isna(lt_val) else ""
+                net.add_edge(
+                    from_n,
+                    to_n,
+                    label=label,
+                    color=edge_color,
+                    smooth={"enabled": True, "type": "dynamic", "roundness": 0.4},
+                )
+
+        net.set_options(
+            """
+            {
+              "physics": {
+                "enabled": true,
+                "stabilization": {
+                  "enabled": true,
+                  "iterations": 300,
+                  "fit": true
+                },
+                "barnesHut": {
+                  "gravitationalConstant": -3000,
+                  "centralGravity": 0.1,
+                  "springLength": 50,
+                  "springConstant": 0.02,
+                  "damping": 0.09,
+                  "avoidOverlap": 1.0
+                }
+              },
+              "nodes": {
+                "borderWidthSelected": 2
+              },
+              "edges": {
+                "smooth": {
+                  "enabled": true,
+                  "type": "dynamic",
+                  "roundness": 0.4
+                }
+              },
+              "interaction": {
+                "hover": true,
+                "zoomView": true,
+                "dragView": true,
+                "dragNodes": true
+              },
+              "layout": {
+                "improvedLayout": true
+              }
+            }
+            """
+        )
+        tmpfile = "net.html"
+        net.save_graph(tmpfile)
+        html_text = open(tmpfile, "r", encoding="utf-8").read()
+        injection_css = """
+        <style>
+          html, body { height: 100%; margin: 0; padding: 0; }
+          #mynetwork {
+            display:flex !important;
+            align-items:center;
+            justify-content:center;
+            height:900px !important;
+            width:100% !important;
+          }
+          .vis-network {
+            display:block !important;
+            margin: 0 auto !important;
+          }
+        </style>
+        """
+        injection_js = """
+        <script>
+          function fitAndCenterNetwork() {
+            try {
+              if (typeof network !== 'undefined') {
+                network.fit({ animation: false });
+              }
+            } catch (e) {
+              console.warn("Network fit failed:", e);
+            }
+          }
+          setTimeout(fitAndCenterNetwork, 700);
+        </script>
+        """
+        if "</head>" in html_text:
+            html_text = html_text.replace("</head>", injection_css + "</head>", 1)
+        if "</body>" in html_text:
+            html_text = html_text.replace("</body>", injection_js + "</body>", 1)
+        else:
+            html_text += injection_js
+        components.html(html_text, height=940)  # reduced from 1250
+
+        st.markdown(
+            """
+            <div style="text-align:center; font-size:12px; padding:8px 0;">
+              <div style="display:inline-block; background:#f7f9fc; padding:8px 12px; border-radius:8px;">
+                <strong>Legend:</strong><br/>
+                FC = Local Forecast &nbsp;&nbsp;|&nbsp;&nbsp;
+                DFC = Downstream FC (rolled-up) &nbsp;&nbsp;|&nbsp;&nbsp;
+                SS  = Safety Stock (final policy value)<br/>
+                Node border intensity loosely reflects hop distance from end-nodes.
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     # TAB 3 -----------------------------------------------------------------
     with tab3:
