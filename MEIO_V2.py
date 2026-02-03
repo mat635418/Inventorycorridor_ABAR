@@ -1817,7 +1817,7 @@ if s_file and d_file and lt_file:
             render_tab1_explainer()
 
     # TAB 2 -----------------------------------------------------------------
-    with tab2:
+with tab2:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
