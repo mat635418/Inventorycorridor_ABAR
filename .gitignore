@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Streamlit artifacts
+lib/
+net.html
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+venv/
+env/
