@@ -482,40 +482,46 @@ def render_run_and_snapshot_header(
                 Network snapshot – {snapshot_label}
               </div>
               <div class="run-snapshot-inner">
-                <div class="run-snapshot-container">
-                  <div class="snap-card">
-                    <div class="snap-card-label">Total Local Demand (month)</div>
-                    <div class="snap-card-value">{euro_format(tot_local_demand, True)}</div>
-                  </div>
-                  <div class="snap-card">
-                    <div class="snap-card-label">Safety Stock (sum)</div>
-                    <div class="snap-card-value snap-card-value-green">{euro_format(tot_ss, True)}</div>
-                  </div>
-                  <div class="snap-card">
-                    <div class="snap-card-label">SS / Demand Coverage</div>
-                    <div class="snap-card-value snap-card-value-orange">
-                      {ss_ratio_pct:.1f}%&nbsp;({coverage_months:.2f} months)
+                <div style="display: flex; gap: 10px;">
+                  <div style="flex: 0 0 75%; display: flex; flex-direction: column; gap: 10px;">
+                    <div class="run-snapshot-container" style="grid-template-columns: repeat(3, 1fr); margin: 0;">
+                      <div class="snap-card">
+                        <div class="snap-card-label">Total Local Demand (month)</div>
+                        <div class="snap-card-value">{euro_format(tot_local_demand, True)}</div>
+                      </div>
+                      <div class="snap-card">
+                        <div class="snap-card-label">Safety Stock (sum)</div>
+                        <div class="snap-card-value snap-card-value-green">{euro_format(tot_ss, True)}</div>
+                      </div>
+                      <div class="snap-card">
+                        <div class="snap-card-label">SS / Demand Coverage</div>
+                        <div class="snap-card-value">
+                          {coverage_months:.2f} months
+                        </div>
+                      </div>
+                    </div>
+                    <div class="run-snapshot-container" style="grid-template-columns: repeat(2, 1fr); margin: 0;">
+                      <div class="snap-card">
+                        <div class="snap-card-label">Active Materials (with corridor)</div>
+                        <div class="snap-card-value">{n_active_materials}</div>
+                      </div>
+                      <div class="snap-card">
+                        <div class="snap-card-label">Active Nodes (with corridor)</div>
+                        <div class="snap-card-value">{n_active_nodes}</div>
+                      </div>
                     </div>
                   </div>
-                  <div class="snap-card">
-                    <div class="snap-card-label">Active Materials (with corridor)</div>
-                    <div class="snap-card-value">{n_active_materials}</div>
-                  </div>
-                </div>
-                <div class="run-snapshot-container" style="grid-template-columns: minmax(260px, 1.4fr) repeat(1, minmax(180px, 1fr)); margin-top:6px;">
-                  <div class="run-card">
-                    <div class="run-card-title">Run configuration</div>
-                    <div class="run-card-body">
-                      <div><strong>ID:</strong> {run_id}</div>
-                      <div><strong>Time:</strong> {now_str}</div>
-                      <div><strong>End-node SL:</strong> {service_level*100:.2f}%</div>
-                      <div><strong>Zero SS if no demand:</strong> {str(zero_if_no_net_fcst)}</div>
-                      <div><strong>SS capping:</strong> {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)</div>
+                  <div style="flex: 0 0 25%;">
+                    <div class="run-card" style="height: 100%;">
+                      <div class="run-card-title">Run configuration</div>
+                      <div class="run-card-body">
+                        <div><strong>ID:</strong> {run_id}</div>
+                        <div><strong>Time:</strong> {now_str}</div>
+                        <div><strong>End-node SL:</strong> {service_level*100:.2f}%</div>
+                        <div><strong>Zero SS if no demand:</strong> {str(zero_if_no_net_fcst)}</div>
+                        <div><strong>SS capping:</strong> {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)</div>
+                      </div>
                     </div>
-                  </div>
-                  <div class="snap-card">
-                    <div class="snap-card-label">Active Nodes (with corridor)</div>
-                    <div class="snap-card-value">{n_active_nodes}</div>
                   </div>
                 </div>
               </div>
@@ -2480,11 +2486,31 @@ with tab3:
         }
         # Add light red highlighting to SS column (PR #4)
         ss_highlight = {'background-color': '#ffcccc'}
+        
+        # Define status values and their corresponding background colors
+        STATUS_COLORS = {
+            'Capped (High)': '#fffacd',      # light yellow
+            'Capped (Low)': '#fffacd',       # light yellow
+            'Optimal (Statistical)': '#90ee90'  # light green
+        }
+        
+        # Function to get background color style for Status column values
+        def get_status_background_color(val):
+            val_str = str(val)
+            return f'background-color: {STATUS_COLORS[val_str]}' if val_str in STATUS_COLORS else ''
+        
+        # Function to generate styles for Status column
+        def get_status_column_styles(col):
+            if col.name == 'Status':
+                return col.map(get_status_background_color)
+            return [''] * len(col)
+        
         styled = (
             nice.style
             .format(pandas_fmt)
             .set_properties(**header_props, axis=1)
             .set_properties(**ss_highlight, subset=['SS [unit]'])
+            .apply(get_status_column_styles, axis=0)
         )
         st.dataframe(styled, use_container_width=True)
 
