@@ -3167,6 +3167,47 @@ with tab6:
                 """,
                 unsafe_allow_html=True,
             )
+
+            # ---- Column chart showing simulation impact ----
+            st.markdown("---")
+            st.subheader("Simulation Impact Visualization")
+            
+            # Create column chart for Simulated_SS_USD
+            fig_sim = go.Figure()
+            
+            fig_sim.add_trace(go.Bar(
+                x=display_comp["Scenario"],
+                y=display_comp["Simulated_SS_USD"],
+                text=[f"${v:,.0f}" for v in display_comp["Simulated_SS_USD"]],
+                textposition='auto',
+                marker=dict(
+                    color=display_comp["Simulated_SS_USD"],
+                    colorscale='RdYlGn_r',
+                    showscale=False
+                ),
+                name="Safety Stock (USD)"
+            ))
+            
+            fig_sim.update_layout(
+                title=f"Safety Stock Investment by Scenario",
+                xaxis_title="Scenario",
+                yaxis_title="Safety Stock (USD)",
+                template="plotly_white",
+                height=450,
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig_sim, use_container_width=True)
+            
+            st.markdown(
+                """
+                <small>
+                This chart visualizes the financial impact of different scenarios on safety stock investment.
+                Compare the cost implications across all scenarios to make informed decisions.
+                </small>
+                """,
+                unsafe_allow_html=True,
+            )
     
 # ---- TAB 7: Remove first table. Correct SS coverage KPI calculation. ----
 with tab7:
@@ -3245,61 +3286,6 @@ with tab7:
         else:
             mat_period_df_display = hide_zero_rows(mat_period_df)
             # --- REMOVE the summary KPI table here as requested ---
-
-            st.markdown("---")
-            st.markdown("### Node-level view (normal table)")
-
-            # Prepare a clean, readable table
-            table_cols = [
-                "Product",
-                "Location",
-                "Period",
-                "Forecast",
-                "Agg_Future_Demand",
-                "Agg_Future_Internal",
-                "Agg_Future_External",
-                "Safety_Stock",
-                "Days_Covered_by_SS",
-                "LT_Mean",
-                "LT_Std",
-                "Service_Level_Node",
-                "Tier_Hops",
-                "Adjustment_Status",
-            ]
-            existing_cols = [c for c in table_cols if c in mat_period_df_display.columns]
-            node_table = mat_period_df_display[existing_cols].copy()
-            two_dec_cols = ["Days_Covered_by_SS", "Service_Level_Node"]
-            node_table_fmt = df_format_for_display(
-                node_table,
-                cols=None,
-                two_decimals_cols=two_dec_cols,
-            )
-            if "Period" in node_table_fmt.columns:
-                try:
-                    node_table_fmt["Period"] = node_table_fmt["Period"].apply(period_label)
-                except Exception:
-                    pass
-
-            # Shorten headers, make readable/wrapped
-            col_nice = {
-                "Product": "Material",
-                "Location": "Node",
-                "Period": "Month",
-                "Forecast": "Fcst [unit]",
-                "Agg_Future_Demand": "Net Dem [unit]",
-                "Agg_Future_Internal": "Local Dem",
-                "Agg_Future_External": "NW Dem",
-                "Safety_Stock": "SS [unit]",
-                "Days_Covered_by_SS": "SS Cov [days]",
-                "LT_Mean": "LT µ [days]",
-                "LT_Std": "LT σ [days]",
-                "Service_Level_Node": "SL node",
-                "Tier_Hops": "Tier/Hops",
-                "Adjustment_Status": "Status"
-            }
-            node_table_fmt = node_table_fmt.rename(columns=col_nice)
-            wrap_header = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
-            st.dataframe(node_table_fmt.style.set_properties(**wrap_header, axis=1), use_container_width=True)
 
             # ---- SS ATTRIBUTION (kept as in current version: waterfall + summary) ----
             st.markdown("---")
