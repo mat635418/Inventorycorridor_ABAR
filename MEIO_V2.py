@@ -2487,12 +2487,17 @@ with tab3:
         # --- Formatting ---
         def _fmt_int(val):
             try:
-                return f"{int(round(val)):,}".replace(",", ".")
+                # Format with dots for thousands (European format)
+                formatted = f"{int(round(val)):,}"
+                return formatted.replace(",", ".")
             except:
                 return ""
         def _fmt_2dec(val):
             try:
-                return f"{val:,.2f}".replace(",", ".")
+                # Format with dots for thousands and comma for decimal (European format)
+                formatted = f"{val:,.2f}"
+                # Replace comma (thousands) with dot, and dot (decimal) with comma
+                return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
             except:
                 return ""
         # header styles for wrapping
@@ -2511,6 +2516,7 @@ with tab3:
             nice.style
             .format(pandas_fmt)
             .set_properties(**header_props, axis=1)
+            .set_properties(**{'background-color': '#ffcccc'}, subset=['SS [unit]'])
         )
         st.dataframe(styled, use_container_width=True)
 
