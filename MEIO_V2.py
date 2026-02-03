@@ -1954,7 +1954,7 @@ with tab2:
                 if not direct_route.empty:
                     new_lt_days  = float(direct_route.iloc[0]["Lead_Time_Days"]) + heating_days
                     new_lt_stddev = float(direct_route.iloc[0]["Lead_Time_Std_Dev"])
-                    lead_time_note = f"Used explicit lead time from {new_supplier} to {location_to_move} plus {heating_days}d heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
+                    lead_time_note = f"Used <strong>explicit lead time from {new_supplier} to {location_to_move}</strong> plus <strong>{heating_days}d heating</strong>: <strong>{new_lt_days:.1f}d</strong>, stddev <strong>{new_lt_stddev:.1f}d</strong>."
                 else:
                     poss_lts = scenario_lt[scenario_lt["From_Location"] == new_supplier]
                     if not poss_lts.empty:
@@ -1962,11 +1962,11 @@ with tab2:
                         new_lt_days = float(poss_lts.loc[min_idx, "Lead_Time_Days"]) + heating_days
                         new_lt_stddev = float(poss_lts.loc[min_idx, "Lead_Time_Std_Dev"])
                         extra_note = f" (minimal outbound LT from {new_supplier})"
-                        lead_time_note = f"No direct LT; used minimal outbound LT from {new_supplier}{extra_note} plus {heating_days}d heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
+                        lead_time_note = f"No direct LT; used <strong>minimal outbound LT from {new_supplier}{extra_note}</strong> plus <strong>{heating_days}d heating</strong>: <strong>{new_lt_days:.1f}d</strong>, stddev <strong>{new_lt_stddev:.1f}d</strong>."
                     else:
                         new_lt_days = (float(rerouted_lt["Lead_Time_Days"].median()) if not rerouted_lt.empty else 7.0) + heating_days
                         new_lt_stddev = float(rerouted_lt["Lead_Time_Std_Dev"].median()) if not rerouted_lt.empty else 2.0
-                        lead_time_note = f"No data: used network median LT for this SKU plus {heating_days}d heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
+                        lead_time_note = f"No data: used <strong>network median LT for this SKU</strong> plus <strong>{heating_days}d heating</strong>: <strong>{new_lt_days:.1f}d</strong>, stddev <strong>{new_lt_stddev:.1f}d</strong>."
                 new_row = {
                     "Product": scenario_product,
                     "From_Location": new_supplier,
@@ -2085,7 +2085,11 @@ with tab2:
                                 color = ss_delta_color(row["ΔSS %"])
                                 v_display = f"{format_int_dot(v)}" if pd.notnull(v) else ""
                                 style = f" style='color:{color}'"
-                            elif col in ("SS Before (USD)", "SS After (USD)", "ΔSS USD"):
+                            elif col == "ΔSS USD":
+                                color = ss_delta_color(row["ΔSS %"])
+                                v_display = format_usd(v)
+                                style = f" style='color:{color}'"
+                            elif col in ("SS Before (USD)", "SS After (USD)"):
                                 v_display = format_usd(v)
                             elif col in ("SL Before", "SL After"):
                                 v_display = f"{v:.2%}" if pd.notnull(v) else ""
@@ -2111,7 +2115,7 @@ with tab2:
                                  "<td colspan='6'></td>"  # Columns 6-11: Skip LT, Hops, SL columns
                                  f"<td>{format_usd(gt_before_usd)}</td>"  # Column 12: SS Before (USD)
                                  f"<td>{format_usd(gt_after_usd)}</td>"   # Column 13: SS After (USD)
-                                 f"<td>{format_usd(gt_delta_usd)}</td>"   # Column 14: ΔSS USD
+                                 f"<td style='color:{gt_delta_color}'>{format_usd(gt_delta_usd)}</td>"   # Column 14: ΔSS USD
                                  "</tr>")
                     table_md += "</table>"
 
@@ -2504,7 +2508,11 @@ with tab3:
                 return ""
         def _fmt_2dec(val):
             try:
-                return f"{val:,.2f}".replace(",", ".")
+                # Use comma as decimal separator for avg/day column
+                formatted = f"{val:.2f}"
+                # Replace dot with comma for decimal separator
+                formatted = formatted.replace(".", ",")
+                return formatted
             except:
                 return ""
         # header styles for wrapping
@@ -2753,10 +2761,16 @@ with tab5:
                     ]
                     display_cols = [c for c in cols if c in net_table_fmt.columns]
                     table_std = net_table_fmt[display_cols].copy()
+                    # Format with dots as thousands separator (European style)
+                    def fmt_with_dots(val):
+                        try:
+                            return f"{int(val):,}".replace(",", ".")
+                        except:
+                            return str(val)
                     fmt_dict = {
-                        "Network_Consumption": "{:,.0f}",
-                        "Network_Forecast_Hist": "{:,.0f}",
-                        "Net_Abs_Error": "{:,.0f}"
+                        "Network_Consumption": fmt_with_dots,
+                        "Network_Forecast_Hist": fmt_with_dots,
+                        "Net_Abs_Error": fmt_with_dots
                     }
                     def highlight_err(val):
                         try:
@@ -3177,6 +3191,19 @@ with tab6:
             # Add column chart to visualize scenario impacts (PR #6)
             st.markdown("---")
             st.subheader("Scenario Impact Visualization")
+            
+            # Define unique light pastel colors for each scenario
+            scenario_colors = {
+                "Base-calibrated": "#B3E5FC",  # Light pastel blue
+                "Implemented": "#FFF9C4",      # Light pastel yellow
+                "S1": "#C8E6C9",               # Light pastel green
+                "S2": "#FFCCBC",               # Light pastel orange
+                "S3": "#E1BEE7"                # Light pastel purple
+            }
+            
+            # Assign colors based on scenario names
+            bar_colors = [scenario_colors.get(scenario, "#E0E0E0") for scenario in display_comp["Scenario"]]
+            
             fig_sim = go.Figure()
             fig_sim.add_trace(go.Bar(
                 x=display_comp["Scenario"],
@@ -3184,8 +3211,7 @@ with tab6:
                 text=[f"${v:,.0f}" for v in display_comp["Simulated_SS_USD"]],
                 textposition='auto',
                 marker=dict(
-                    color=display_comp["Simulated_SS_USD"],
-                    colorscale='RdYlGn_r'
+                    color=bar_colors
                 )
             ))
             fig_sim.update_layout(
