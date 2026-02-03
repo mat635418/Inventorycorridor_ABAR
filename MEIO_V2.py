@@ -3410,6 +3410,11 @@ with tab7:
             for k in ss_attrib:
                 ss_attrib[k] = float(ss_attrib[k])
             ss_sum = sum(ss_attrib.values())
+
+            # >>>>>>>>>>> ADD THIS DEFINITION <<<<<<<<<<<<<<<<<<<
+            total_ss = per_node["Safety_Stock"].sum()
+            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
             residual = float(total_ss) - ss_sum
             if abs(residual) > 1e-6:
                 ss_attrib["Caps — Reductions (policy lowering SS)"] += residual
