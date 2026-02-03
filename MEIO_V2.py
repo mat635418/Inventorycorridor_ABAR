@@ -1819,6 +1819,7 @@ if s_file and d_file and lt_file:
     # TAB 2 -----------------------------------------------------------------
 with tab2:
     col_main, col_badge = st.columns([17, 3])
+    # Badge/controls col unchanged
     with col_badge:
         render_logo_above_parameters(scale=1.5)
 
@@ -1858,11 +1859,15 @@ with tab2:
                 - See the impact on Safety Stock at the moved node, the old supplier, and overall.
                 """
             )
-            # select "Product" for scenario, restrict to active nodes for this SKU/period
+
+            # SCENARIO DEFAULTS: match filtering of main topology view!
             scenario_products = active_materials(results, period=chosen_period)
-            scenario_product = st.selectbox("Which material?", scenario_products, key="dist_scen_product")
+            scenario_product_default = sku if sku in scenario_products else (scenario_products[0] if scenario_products else "")
+            scenario_product = st.selectbox("Which material?", scenario_products, index=(scenario_products.index(scenario_product_default) if scenario_product_default in scenario_products else 0), key="dist_scen_product")
+
             all_service_nodes = active_nodes(results, period=chosen_period, product=scenario_product)
-            location_to_move = st.selectbox("Which location do you want to reroute?", all_service_nodes, key="dist_scen_loc")
+            location_default = all_service_nodes[0] if all_service_nodes else ""
+            location_to_move = st.selectbox("Which location do you want to reroute?", all_service_nodes, index=(all_service_nodes.index(location_default) if location_default in all_service_nodes else 0), key="dist_scen_loc")
 
             # Find current upstream supplier(s) for the selected location
             scenario_lt = df_lt[df_lt["Product"] == scenario_product] if "Product" in df_lt.columns else df_lt.copy()
@@ -1876,10 +1881,12 @@ with tab2:
                 st.info("This location has no supplier in the current network topology for this period (cannot reroute).")
                 reroute_enabled = False
             else:
-                current_supplier = st.selectbox("Current supplier (from node):", current_suppliers, key="dist_scen_from")
+                current_supplier_default = current_suppliers[0]
+                current_supplier = st.selectbox("Current supplier (from node):", current_suppliers, index=(current_suppliers.index(current_supplier_default) if current_supplier_default in current_suppliers else 0), key="dist_scen_from")
                 # Choose all possible other sources for this location
                 possible_suppliers = [n for n in all_service_nodes if n != location_to_move and n != current_supplier]
-                new_supplier = st.selectbox("New supplier (route to node):", possible_suppliers, key="dist_scen_to")
+                new_supplier_default = possible_suppliers[0] if possible_suppliers else ""
+                new_supplier = st.selectbox("New supplier (route to node):", possible_suppliers, index=(possible_suppliers.index(new_supplier_default) if new_supplier_default in possible_suppliers else 0), key="dist_scen_to")
                 reroute_enabled = True
 
             if reroute_enabled and st.button("Simulate reroute scenario", key="dist_scen_run"):
@@ -1892,7 +1899,6 @@ with tab2:
                 )
                 rerouted_lt = rerouted_lt[~removal_mask]
                 # Add new edge (using same LT and Std as the original if possible, else median)
-                # Try to guess good values for Lead_Time fields
                 orig = scenario_lt[removal_mask]
                 if not orig.empty:
                     first_row = orig.iloc[0]
@@ -1947,13 +1953,15 @@ with tab2:
                 overall_old = old_results["Safety_Stock"].sum()
                 overall_new = rerouted_results["Safety_Stock"].sum()
 
-                st.success(
+                st.markdown(
                     f"""
-                    **Result:**  
-                    - At <b>{location_to_move}</b>: Safety Stock changed from <b>{int(moved_old_ss)}</b> to <b>{int(moved_new_ss)}</b> units  
-                    - At old supplier <b>{current_supplier}</b>: changed from <b>{int(from_old_ss)}</b> to <b>{int(from_new_ss)}</b>  
-                    - At new supplier <b>{new_supplier}</b>: changed from <b>{int(to_old_ss)}</b> to <b>{int(to_new_ss)}</b>  
-                    - <b>Overall Safety Stock (all network, this material, this period):</b> {int(overall_old)} → <b>{int(overall_new)}</b> ({'%.0f' % (overall_new-overall_old)} units change)
+                    <div style="background:#e9ffe9; border:1px solid #13be13; border-radius:10px; padding:12px 16px; margin: 0 0 8px 0;">
+                    <b>Result:</b><br>
+                    • At <b>{location_to_move}</b>: Safety Stock changed from <b>{int(moved_old_ss)}</b> to <b>{int(moved_new_ss)}</b> units<br>
+                    • At old supplier <b>{current_supplier}</b>: changed from <b>{int(from_old_ss)}</b> to <b>{int(from_new_ss)}</b><br>
+                    • At new supplier <b>{new_supplier}</b>: changed from <b>{int(to_old_ss)}</b> to <b>{int(to_new_ss)}</b><br>
+                    • <b>Overall Safety Stock (all network, this material, this period):</b> {int(overall_old)} → <b>{int(overall_new)}</b> ({'+' if overall_new-overall_old >= 0 else ''}{int(overall_new-overall_old)} units change)
+                    </div>
                     """,
                     unsafe_allow_html=True,
                 )
@@ -1992,7 +2000,7 @@ with tab2:
         sku_lt = df_lt[df_lt["Product"] == sku] if "Product" in df_lt.columns else df_lt.copy()
 
         net = Network(
-            height="900px",
+            height="900px",  # reduced from 1200px
             width="100%",
             directed=True,
             bgcolor="#ffffff",
@@ -2227,7 +2235,7 @@ with tab2:
             """,
             unsafe_allow_html=True,
         )
-
+  
     # TAB 3 -----------------------------------------------------------------
     with tab3:
         col_main, col_badge = st.columns([17, 3])
