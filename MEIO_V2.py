@@ -2922,37 +2922,37 @@ with tab2:
 
                 # ... rest of tab unchanged until scenario display table ...
 
-                    display_comp = compare_df.copy()
-                    display_comp["Simulated_SS"] = display_comp["Simulated_SS"].astype(float)
+                display_comp = compare_df.copy()
+                display_comp["Simulated_SS"] = display_comp["Simulated_SS"].astype(float)
 
-                    implemented_ss = float(row["Safety_Stock"])
+                implemented_ss = float(row["Safety_Stock"])
 
-                    def pct_vs_impl(v):
-                        try:
-                            if implemented_ss <= 0 or pd.isna(v):
-                                return np.nan
-                            return (float(v) / implemented_ss - 1.0) * 100.0
-                        except Exception:
+                def pct_vs_impl(v):
+                    try:
+                        if implemented_ss <= 0 or pd.isna(v):
                             return np.nan
+                        return (float(v) / implemented_ss - 1.0) * 100.0
+                    except Exception:
+                        return np.nan
 
-                    display_comp["Pct_vs_Implemented_%"] = display_comp["Simulated_SS"].apply(pct_vs_impl)
+                display_comp["Pct_vs_Implemented_%"] = display_comp["Simulated_SS"].apply(pct_vs_impl)
 
-                    # --- DOLLARIZED SS DELTA: scenario vs implemented ---
-                    scenario_ss_usd = display_comp["Simulated_SS"].fillna(0) * cost_per_kilo_usd_tab6
-                    impl_ss_usd = float(row["Safety_Stock"]) * cost_per_kilo_usd_tab6
-                    display_comp["Simulated_SS (USD)"] = scenario_ss_usd.round(2)
-                    display_comp["ΔSS vs Impl (USD)"] = (display_comp["Simulated_SS"].fillna(0) - implemented_ss) * cost_per_kilo_usd_tab6
-                    display_comp["ΔSS vs Impl (USD)"] = display_comp["ΔSS vs Impl (USD)"].round(2)
+                # --- DOLLARIZED SS DELTA: scenario vs implemented ---
+                scenario_ss_usd = display_comp["Simulated_SS"].fillna(0) * cost_per_kilo_usd_tab6
+                impl_ss_usd = float(row["Safety_Stock"]) * cost_per_kilo_usd_tab6
+                display_comp["Simulated_SS (USD)"] = scenario_ss_usd.round(2)
+                display_comp["ΔSS vs Impl (USD)"] = (display_comp["Simulated_SS"].fillna(0) - implemented_ss) * cost_per_kilo_usd_tab6
+                display_comp["ΔSS vs Impl (USD)"] = display_comp["ΔSS vs Impl (USD)"].round(2)
 
-                    st.markdown(
-                        """
-                        - **Implemented** = pipeline SS after all rules.  
-                        - **Base-calibrated** = scenario rebuilt from this node’s own SL / LT / demand, then run through the *same* policy engine.  
-                          → This should now numerically match **Implemented** (up to rounding).
-                        - **S1, S2, S3** = user scenarios; you will only see +/- vs Implemented once you change SL or LT inputs.
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                st.markdown(
+                    """
+                    - **Implemented** = pipeline SS after all rules.  
+                    - **Base-calibrated** = scenario rebuilt from this node’s own SL / LT / demand, then run through the *same* policy engine.  
+                      → This should now numerically match **Implemented** (up to rounding).
+                    - **S1, S2, S3** = user scenarios; you will only see +/- vs Implemented once you change SL or LT inputs.
+                    """,
+                    unsafe_allow_html=True,
+                )
 
                     def fmt_pct(v):
                         try:
