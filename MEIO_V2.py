@@ -2675,7 +2675,7 @@ with tab6:
                 height=320
             )
             st.plotly_chart(fig, use_container_width=True)
-          try
+          
             st.markdown(
                 """
                 <small>
@@ -2689,8 +2689,7 @@ with tab6:
                 """,
                 unsafe_allow_html=True,
             )
-            except Exception:
-                pass
+
                 
 # TAB 8 -----------------------------------------------------------------
 with tab8:
