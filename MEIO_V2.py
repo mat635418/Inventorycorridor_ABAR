@@ -2099,13 +2099,14 @@ with tab2:
                                 v_display = str(v)
                             table_md += f"<td{style}>{v_display}</td>"
                         table_md += "</tr>"
+                    # Grand Total row: show USD totals aligned under their columns
                     table_md += ("<tr style='font-weight:bold;background:#e6f5e4;'>"
                                  "<td>Grand Total</td>"
-                                 "<td colspan='4'></td>"  # Skip SS Before, SS After, ΔSS units, ΔSS % columns
-                                 f"<td>{format_usd(gt_before_usd)}</td>"
-                                 f"<td>{format_usd(gt_after_usd)}</td>"
-                                 f"<td>{format_usd(gt_delta_usd)}</td>"
-                                 "<td colspan='6'></td>"  # Skip remaining columns (LT, Hops, SL before/after)
+                                 "<td colspan='4'></td>"  # Skip columns 2-5: SS Before, SS After, ΔSS units, ΔSS %
+                                 f"<td>{format_usd(gt_before_usd)}</td>"  # Column 6: SS Before (USD)
+                                 f"<td>{format_usd(gt_after_usd)}</td>"   # Column 7: SS After (USD)
+                                 f"<td>{format_usd(gt_delta_usd)}</td>"   # Column 8: ΔSS USD
+                                 "<td colspan='6'></td>"  # Skip columns 9-14: LT Before/After, Hops Before/After, SL Before/After
                                  "</tr>")
                     table_md += "</table>"
 
