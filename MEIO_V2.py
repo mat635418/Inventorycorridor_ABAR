@@ -2855,7 +2855,7 @@ with tab6:
                 st.markdown("**Applied Hop Logic → Service Level mapping:**")
                 hop_image_path = "HOP_SLjpg.jpg"
                 if os.path.exists(hop_image_path):
-                    st.image(hop_image_path, use_column_width=True)
+                    st.image(hop_image_path)
                 else:
                     st.info("Network hop illustration not found on the server (expected at 'HOP_SLjpg.jpg'). Please add this image file next to MEIO_V2.py.")
             
