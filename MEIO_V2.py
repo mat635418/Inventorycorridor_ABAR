@@ -1820,20 +1820,6 @@ if s_file and d_file and lt_file:
 # TAB 2 — Network Topology (with scenario planner and reroute sim UI)
 # ------------------------------------------------------------------
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
-    [
-        "📈 Inventory Corridor",
-        "🕸️ Network Topology",
-        "📋 Full Plan",
-        "⚖️ Efficiency Analysis",
-        "📉 Forecast Accuracy",
-        "🧮 Calculation Trace & Sim",
-        "📦 By Material",
-        "📊 All Materials View",
-    ]
-)
-
-# TAB 2 -----------------------------------------------------------------
 with tab2:
     col_main, col_badge = st.columns([17, 3])
     # ------------- RIGHT SIDE (filters + cost per kilo) -----------------
