@@ -2920,9 +2920,18 @@ with tab6:
         else:
             row = row_df.iloc[0]
 
-            # ... (your other scenario/SS calculation code here) ...
-            # Assuming 'compare_df' and 'display_comp' are produced as above, then you reach display...
+            # ================ FIX: Generate the scenario comparison table ================
+            import pandas as pd
 
+            compare_df = pd.DataFrame([{
+                "Scenario": "Implemented",
+                "EndNode_SL_%": service_level * 100,
+                "LT_mean_days": row["LT_Mean"],
+                "LT_std_days": row["LT_Std"],
+                "Simulated_SS": row["Safety_Stock"],
+            }])
+            # ============================================================================
+            
             display_comp = compare_df.copy()
             display_comp["Simulated_SS"] = display_comp["Simulated_SS"].astype(float)
 
