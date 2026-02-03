@@ -2846,58 +2846,71 @@ with tab6:
             node_sl = float(row.get("Service_Level_Node", service_level))
             node_z = float(row.get("Z_node", norm.ppf(node_sl)))
             hops = int(row.get("Tier_Hops", 0))
-            st.markdown("**Applied Hop Logic → Service Level mapping:**")
-            hop_image_path = "HOP_SLjpg.jpg"
-            if os.path.exists(hop_image_path):
-                st.image(hop_image_path, width=500)
-            else:
-                st.info("Network hop illustration not found on the server (expected at 'HOP_SLjpg.jpg'). Please add this image file next to MEIO_V2.py.")
-
-            avg_daily = row.get("D_day", np.nan)
-            days_cov = row.get("Days_Covered_by_SS", np.nan)
-            avg_daily_txt = f"{avg_daily:.2f}" if pd.notna(avg_daily) else "N/A"
-            days_cov_txt = f"{days_cov:.1f}" if pd.notna(days_cov) else "N/A"
+            
+            # Create a row layout with hop logic picture on left and calculation values on right
             st.markdown("---")
-            summary_html = f"""
-            <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px; font-size:13px;">
-              <div style="flex:0 0 48%;background:#e8f0ff;border-radius:8px;padding:12px;">
-                <div style="font-size:12px;color:#0b3d91;font-weight:600;">Applied Node SL</div>
-                <div style="font-size:18px;font-weight:800;color:#0b3d91;">{node_sl*100:.2f}%</div>
-                <div style="font-size:11px;color:#444;margin-top:6px;">(hops = {hops})</div>
-              </div>
-              <div style="flex:0 0 48%;background:#fff3e0;border-radius:8px;padding:12px;">
-                <div style="font-size:12px;color:#a64d00;font-weight:600;">Applied Z</div>
-                <div style="font-size:18px;font-weight:800;color:#a64d00;">{node_z:.4f}</div>
-                <div style="font-size:11px;color:#444;margin-top:6px;">(for SL {node_sl*100:.2f}%)</div>
-              </div>
-              <div style="flex:0 0 48%;background:#e8f8f0;border-radius:8px;padding:12px;">
-                <div style="font-size:12px;color:#00695c;font-weight:600;">Network Demand (monthly)</div>
-                <div style="font-size:18px;font-weight:800;color:#00695c;">{euro_format(row['Agg_Future_Demand'], True)}</div>
-              </div>
-              <div style="flex:0 0 48%;background:#fbeff2;border-radius:8px;padding:12px;">
-                <div style="font-size:12px;color:#880e4f;font-weight:600;">Network Std Dev (monthly)</div>
-                <div style="font-size:18px;font-weight:800;color:#880e4f;">{euro_format(row['Agg_Std_Hist'], True)}</div>
-              </div>
-              <div style="flex:0 0 48%;background:#f0f4c3;border-radius:8px;padding:12px;">
-                <div style="font-size:12px;color:#827717;font-weight:600;">Avg LT (days)</div>
-                <div style="font-size:18px;font-weight:800;color:#827717;">{row['LT_Mean']}</div>
-              </div>
-              <div style="flex:0 0 48%;background:#e1f5fe;border-radius:8px;padding:12px;">
-                <div style="font-size:12px;color:#01579b;font-weight:600;">LT Std Dev (days)</div>
-                <div style="font-size:18px;font-weight:800;color:#01579b;">{row['LT_Std']}</div>
-              </div>
-              <div style="flex:0 0 48%;background:#ffffff;border-radius:8px;padding:12px;border:1px solid #eaeaea;">
-                <div style="font-size:12px;color:#333;font-weight:600;">Avg Daily Demand</div>
-                <div style="font-size:16px;font-weight:800;color:#333;">{avg_daily_txt} units/day</div>
-              </div>
-              <div style="flex:0 0 48%;background:#ffffff;border-radius:8px;padding:12px;border:1px solid #eaeaea;">
-                <div style="font-size:12px;color:#333;font-weight:600;">Days Covered by SS</div>
-                <div style="font-size:16px;font-weight:800;color:#333;">{days_cov_txt} days</div>
-              </div>
-            </div>
-            """
-            st.markdown("**Values used for the calculation (highlighted above):**")
-            st.markdown(summary_html, unsafe_allow_html=True)
+            col_hop_image, col_calc_values = st.columns([1, 1])
+            
+            with col_hop_image:
+                st.markdown("**Applied Hop Logic → Service Level mapping:**")
+                hop_image_path = "HOP_SLjpg.jpg"
+                if os.path.exists(hop_image_path):
+                    st.image(hop_image_path, use_column_width=True)
+                else:
+                    st.info("Network hop illustration not found on the server (expected at 'HOP_SLjpg.jpg'). Please add this image file next to MEIO_V2.py.")
+            
+            with col_calc_values:
+                avg_daily = row.get("D_day", np.nan)
+                days_cov = row.get("Days_Covered_by_SS", np.nan)
+                avg_daily_txt = f"{avg_daily:.2f}" if pd.notna(avg_daily) else "N/A"
+                days_cov_txt = f"{days_cov:.1f}" if pd.notna(days_cov) else "N/A"
+                
+                st.markdown("**Values used for the calculation:**")
+                summary_html = f"""
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+                  <div style="flex:0 0 48%;background:#e8f0ff;border-radius:6px;padding:8px;">
+                    <div style="font-size:10px;color:#0b3d91;font-weight:600;">Applied Node SL</div>
+                    <div style="font-size:15px;font-weight:800;color:#0b3d91;">{node_sl*100:.2f}%</div>
+                    <div style="font-size:9px;color:#444;margin-top:4px;">(hops = {hops})</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#fff3e0;border-radius:6px;padding:8px;">
+                    <div style="font-size:10px;color:#a64d00;font-weight:600;">Applied Z</div>
+                    <div style="font-size:15px;font-weight:800;color:#a64d00;">{node_z:.4f}</div>
+                    <div style="font-size:9px;color:#444;margin-top:4px;">(SL {node_sl*100:.2f}%)</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#e8f8f0;border-radius:6px;padding:8px;">
+                    <div style="font-size:10px;color:#00695c;font-weight:600;">Network Demand</div>
+                    <div style="font-size:15px;font-weight:800;color:#00695c;">{euro_format(row['Agg_Future_Demand'], True)}</div>
+                    <div style="font-size:9px;color:#444;margin-top:4px;">(monthly)</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#fbeff2;border-radius:6px;padding:8px;">
+                    <div style="font-size:10px;color:#880e4f;font-weight:600;">Network Std Dev</div>
+                    <div style="font-size:15px;font-weight:800;color:#880e4f;">{euro_format(row['Agg_Std_Hist'], True)}</div>
+                    <div style="font-size:9px;color:#444;margin-top:4px;">(monthly)</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#f0f4c3;border-radius:6px;padding:8px;">
+                    <div style="font-size:10px;color:#827717;font-weight:600;">Avg LT</div>
+                    <div style="font-size:15px;font-weight:800;color:#827717;">{row['LT_Mean']}</div>
+                    <div style="font-size:9px;color:#444;margin-top:4px;">(days)</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#e1f5fe;border-radius:6px;padding:8px;">
+                    <div style="font-size:10px;color:#01579b;font-weight:600;">LT Std Dev</div>
+                    <div style="font-size:15px;font-weight:800;color:#01579b;">{row['LT_Std']}</div>
+                    <div style="font-size:9px;color:#444;margin-top:4px;">(days)</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#ffffff;border-radius:6px;padding:8px;border:1px solid #ddd;">
+                    <div style="font-size:10px;color:#333;font-weight:600;">Avg Daily Demand</div>
+                    <div style="font-size:14px;font-weight:800;color:#333;">{avg_daily_txt}</div>
+                    <div style="font-size:9px;color:#444;margin-top:4px;">(units/day)</div>
+                  </div>
+                  <div style="flex:0 0 48%;background:#ffffff;border-radius:6px;padding:8px;border:1px solid #ddd;">
+                    <div style="font-size:10px;color:#333;font-weight:600;">Days Covered by SS</div>
+                    <div style="font-size:14px;font-weight:800;color:#333;">{days_cov_txt}</div>
+                    <div style="font-size:9px;color:#444;margin-top:4px;">(days)</div>
+                  </div>
+                </div>
+                """
+                st.markdown(summary_html, unsafe_allow_html=True)
 
             st.markdown("---")
             st.markdown(
@@ -3133,56 +3146,59 @@ with tab6:
                 .applymap(highlight_pct, subset=['% vs Implemented'])
                 .set_properties(**{'background-color': '#f7fafd'}, subset=pd.IndexSlice[:, :])
             )
-            st.subheader("Scenario Comparison Table")
-            st.dataframe(styled, use_container_width=True)
+            
+            # Put scenario comparison table and graph into a collapsible expander
+            with st.expander("📊 View Scenario Comparison Table & Visualization", expanded=False):
+                st.subheader("Scenario Comparison Table")
+                st.dataframe(styled, use_container_width=True)
 
-            # Add column chart to visualize scenario impacts (PR #6)
-            st.markdown("---")
-            st.subheader("Scenario Impact Visualization")
-            
-            # Define unique light pastel colors for each scenario
-            scenario_colors = {
-                "Base-calibrated": "#B3E5FC",  # Light pastel blue
-                "Implemented": "#FFF9C4",      # Light pastel yellow
-                "S1": "#C8E6C9",               # Light pastel green
-                "S2": "#FFCCBC",               # Light pastel orange
-                "S3": "#E1BEE7"                # Light pastel purple
-            }
-            
-            # Assign colors based on scenario names
-            bar_colors = [scenario_colors.get(scenario, "#E0E0E0") for scenario in display_comp["Scenario"]]
-            
-            fig_sim = go.Figure()
-            fig_sim.add_trace(go.Bar(
-                x=display_comp["Scenario"],
-                y=display_comp["Simulated_SS_USD"],
-                text=[f"${v:,.0f}" for v in display_comp["Simulated_SS_USD"]],
-                textposition='auto',
-                marker=dict(
-                    color=bar_colors
+                # Add column chart to visualize scenario impacts (PR #6)
+                st.markdown("---")
+                st.subheader("Scenario Impact Visualization")
+                
+                # Define unique light pastel colors for each scenario
+                scenario_colors = {
+                    "Base-calibrated": "#B3E5FC",  # Light pastel blue
+                    "Implemented": "#FFF9C4",      # Light pastel yellow
+                    "S1": "#C8E6C9",               # Light pastel green
+                    "S2": "#FFCCBC",               # Light pastel orange
+                    "S3": "#E1BEE7"                # Light pastel purple
+                }
+                
+                # Assign colors based on scenario names
+                bar_colors = [scenario_colors.get(scenario, "#E0E0E0") for scenario in display_comp["Scenario"]]
+                
+                fig_sim = go.Figure()
+                fig_sim.add_trace(go.Bar(
+                    x=display_comp["Scenario"],
+                    y=display_comp["Simulated_SS_USD"],
+                    text=[f"${v:,.0f}" for v in display_comp["Simulated_SS_USD"]],
+                    textposition='auto',
+                    marker=dict(
+                        color=bar_colors
+                    )
+                ))
+                fig_sim.update_layout(
+                    xaxis_title="Scenario",
+                    yaxis_title="Simulated SS (USD)",
+                    showlegend=False,
+                    height=400
                 )
-            ))
-            fig_sim.update_layout(
-                xaxis_title="Scenario",
-                yaxis_title="Simulated SS (USD)",
-                showlegend=False,
-                height=400
-            )
-            st.plotly_chart(fig_sim, use_container_width=True)
+                st.plotly_chart(fig_sim, use_container_width=True)
 
-            st.markdown(
-                """
-                <small>
-                <ul>
-                  <li><b>Implemented</b> = pipeline SS after all rules.</li>
-                  <li><b>Base-calibrated</b> = scenario rebuilt from node's own SL / LT / demand, then run through the same policy engine. Should match Implemented.</li>
-                  <li><b>S1, S2, S3</b> = user scenarios</li>
-                  <li><b>% vs Implemented</b> highlights decreases in green, increases in red.</li>
-                </ul>
-                </small>
-                """,
-                unsafe_allow_html=True,
-            )
+                st.markdown(
+                    """
+                    <small>
+                    <ul>
+                      <li><b>Implemented</b> = pipeline SS after all rules.</li>
+                      <li><b>Base-calibrated</b> = scenario rebuilt from node's own SL / LT / demand, then run through the same policy engine. Should match Implemented.</li>
+                      <li><b>S1, S2, S3</b> = user scenarios</li>
+                      <li><b>% vs Implemented</b> highlights decreases in green, increases in red.</li>
+                    </ul>
+                    </small>
+                    """,
+                    unsafe_allow_html=True,
+                )
     
 # ---- TAB 7: Remove first table. Correct SS coverage KPI calculation. ----
 with tab7:
