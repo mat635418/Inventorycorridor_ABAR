@@ -2487,20 +2487,26 @@ with tab3:
         # Add light red highlighting to SS column (PR #4)
         ss_highlight = {'background-color': '#ffcccc'}
         
-        # Function to apply conditional coloring to Status column
-        def color_status(val):
+        # Function to get background color style for Status column values
+        def get_status_background_color(val):
             if 'Capped' in str(val):
                 return 'background-color: #fffacd'  # light yellow
             elif 'Statistical' in str(val):
                 return 'background-color: #90ee90'  # light green
             return ''
         
+        # Function to apply status coloring to the Status column only
+        def apply_status_coloring(col):
+            if col.name == 'Status':
+                return col.map(get_status_background_color)
+            return [''] * len(col)
+        
         styled = (
             nice.style
             .format(pandas_fmt)
             .set_properties(**header_props, axis=1)
             .set_properties(**ss_highlight, subset=['SS [unit]'])
-            .apply(lambda x: x.map(color_status) if x.name == 'Status' else [''] * len(x), axis=0)
+            .apply(apply_status_coloring, axis=0)
         )
         st.dataframe(styled, use_container_width=True)
 
