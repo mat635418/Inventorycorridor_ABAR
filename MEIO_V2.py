@@ -482,40 +482,46 @@ def render_run_and_snapshot_header(
                 Network snapshot – {snapshot_label}
               </div>
               <div class="run-snapshot-inner">
-                <div class="run-snapshot-container">
-                  <div class="snap-card">
-                    <div class="snap-card-label">Total Local Demand (month)</div>
-                    <div class="snap-card-value">{euro_format(tot_local_demand, True)}</div>
-                  </div>
-                  <div class="snap-card">
-                    <div class="snap-card-label">Safety Stock (sum)</div>
-                    <div class="snap-card-value snap-card-value-green">{euro_format(tot_ss, True)}</div>
-                  </div>
-                  <div class="snap-card">
-                    <div class="snap-card-label">SS / Demand Coverage</div>
-                    <div class="snap-card-value snap-card-value-orange">
-                      {ss_ratio_pct:.1f}%&nbsp;({coverage_months:.2f} months)
+                <div style="display: flex; gap: 10px;">
+                  <div style="flex: 0 0 75%; display: flex; flex-direction: column; gap: 10px;">
+                    <div class="run-snapshot-container" style="grid-template-columns: repeat(3, 1fr); margin: 0;">
+                      <div class="snap-card">
+                        <div class="snap-card-label">Total Local Demand (month)</div>
+                        <div class="snap-card-value">{euro_format(tot_local_demand, True)}</div>
+                      </div>
+                      <div class="snap-card">
+                        <div class="snap-card-label">Safety Stock (sum)</div>
+                        <div class="snap-card-value snap-card-value-green">{euro_format(tot_ss, True)}</div>
+                      </div>
+                      <div class="snap-card">
+                        <div class="snap-card-label">SS / Demand Coverage</div>
+                        <div class="snap-card-value">
+                          {coverage_months:.2f} months
+                        </div>
+                      </div>
+                    </div>
+                    <div class="run-snapshot-container" style="grid-template-columns: repeat(2, 1fr); margin: 0;">
+                      <div class="snap-card">
+                        <div class="snap-card-label">Active Materials (with corridor)</div>
+                        <div class="snap-card-value">{n_active_materials}</div>
+                      </div>
+                      <div class="snap-card">
+                        <div class="snap-card-label">Active Nodes (with corridor)</div>
+                        <div class="snap-card-value">{n_active_nodes}</div>
+                      </div>
                     </div>
                   </div>
-                  <div class="snap-card">
-                    <div class="snap-card-label">Active Materials (with corridor)</div>
-                    <div class="snap-card-value">{n_active_materials}</div>
-                  </div>
-                </div>
-                <div class="run-snapshot-container" style="grid-template-columns: minmax(260px, 1.4fr) repeat(1, minmax(180px, 1fr)); margin-top:6px;">
-                  <div class="run-card">
-                    <div class="run-card-title">Run configuration</div>
-                    <div class="run-card-body">
-                      <div><strong>ID:</strong> {run_id}</div>
-                      <div><strong>Time:</strong> {now_str}</div>
-                      <div><strong>End-node SL:</strong> {service_level*100:.2f}%</div>
-                      <div><strong>Zero SS if no demand:</strong> {str(zero_if_no_net_fcst)}</div>
-                      <div><strong>SS capping:</strong> {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)</div>
+                  <div style="flex: 0 0 25%;">
+                    <div class="run-card" style="height: 100%;">
+                      <div class="run-card-title">Run configuration</div>
+                      <div class="run-card-body">
+                        <div><strong>ID:</strong> {run_id}</div>
+                        <div><strong>Time:</strong> {now_str}</div>
+                        <div><strong>End-node SL:</strong> {service_level*100:.2f}%</div>
+                        <div><strong>Zero SS if no demand:</strong> {str(zero_if_no_net_fcst)}</div>
+                        <div><strong>SS capping:</strong> {str(apply_cap)} ({cap_range[0]}–{cap_range[1]} % of network demand)</div>
+                      </div>
                     </div>
-                  </div>
-                  <div class="snap-card">
-                    <div class="snap-card-label">Active Nodes (with corridor)</div>
-                    <div class="snap-card-value">{n_active_nodes}</div>
                   </div>
                 </div>
               </div>
@@ -2480,11 +2486,21 @@ with tab3:
         }
         # Add light red highlighting to SS column (PR #4)
         ss_highlight = {'background-color': '#ffcccc'}
+        
+        # Function to apply conditional coloring to Status column
+        def color_status(val):
+            if 'Capped' in str(val):
+                return 'background-color: #fffacd'  # light yellow
+            elif 'Statistical' in str(val):
+                return 'background-color: #90ee90'  # light green
+            return ''
+        
         styled = (
             nice.style
             .format(pandas_fmt)
             .set_properties(**header_props, axis=1)
             .set_properties(**ss_highlight, subset=['SS [unit]'])
+            .apply(lambda x: x.map(color_status) if x.name == 'Status' else [''] * len(x), axis=0)
         )
         st.dataframe(styled, use_container_width=True)
 
