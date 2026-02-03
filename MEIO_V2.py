@@ -3301,221 +3301,221 @@ with tab7:
             wrap_header = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
             st.dataframe(node_table_fmt.style.set_properties(**wrap_header, axis=1), use_container_width=True)
 
-                # ---- SS ATTRIBUTION (kept as in current version: waterfall + summary) ----
-                st.markdown("---")
-                st.markdown("### Why do we carry this SS? — SS attribution")
+            # ---- SS ATTRIBUTION (kept as in current version: waterfall + summary) ----
+            st.markdown("---")
+            st.markdown("### Why do we carry this SS? — SS attribution")
 
-                mat = mat_period_df.copy()
-                for c in [
-                    "LT_Mean",
-                    "LT_Std",
-                    "Agg_Std_Hist",
-                    "Pre_Rule_SS",
-                    "Safety_Stock",
-                    "Forecast",
-                    "Agg_Future_Demand",
-                    "Agg_Future_Internal",
-                    "Agg_Future_External",
-                    "D_day",
-                    "Days_Covered_by_SS",
-                ]:
-                    mat[c] = mat[c].fillna(0)
+            mat = mat_period_df.copy()
+            for c in [
+                "LT_Mean",
+                "LT_Std",
+                "Agg_Std_Hist",
+                "Pre_Rule_SS",
+                "Safety_Stock",
+                "Forecast",
+                "Agg_Future_Demand",
+                "Agg_Future_Internal",
+                "Agg_Future_External",
+                "D_day",
+                "Days_Covered_by_SS",
+            ]:
+                mat[c] = mat[c].fillna(0)
 
-                mat["term1"] = (mat["Agg_Std_Hist"] ** 2 / float(days_per_month)) * mat["LT_Mean"]
-                mat["term2"] = (mat["LT_Std"] ** 2) * (
-                    mat["Agg_Future_Demand"] / float(days_per_month)
-                ) ** 2
-                z_current = norm.ppf(service_level)
-                mat["demand_uncertainty_raw"] = z_current * np.sqrt(mat["term1"].clip(lower=0))
-                mat["lt_uncertainty_raw"] = z_current * np.sqrt(mat["term2"].clip(lower=0))
+            mat["term1"] = (mat["Agg_Std_Hist"] ** 2 / float(days_per_month)) * mat["LT_Mean"]
+            mat["term2"] = (mat["LT_Std"] ** 2) * (
+                mat["Agg_Future_Demand"] / float(days_per_month)
+            ) ** 2
+            z_current = norm.ppf(service_level)
+            mat["demand_uncertainty_raw"] = z_current * np.sqrt(mat["term1"].clip(lower=0))
+            mat["lt_uncertainty_raw"] = z_current * np.sqrt(mat["term2"].clip(lower=0))
 
-                per_node = mat.copy()
-                per_node["is_forced_zero"] = per_node["Adjustment_Status"] == "Forced to Zero"
-                per_node["is_b616_override"] = (per_node["Location"] == "B616") & (
-                    per_node["Safety_Stock"] == 0
-                )
-                per_node["pre_ss"] = per_node["Pre_Rule_SS"].clip(lower=0)
-                per_node["share_denom"] = (
-                    per_node["demand_uncertainty_raw"] + per_node["lt_uncertainty_raw"]
-                )
+            per_node = mat.copy()
+            per_node["is_forced_zero"] = per_node["Adjustment_Status"] == "Forced to Zero"
+            per_node["is_b616_override"] = (per_node["Location"] == "B616") & (
+                per_node["Safety_Stock"] == 0
+            )
+            per_node["pre_ss"] = per_node["Pre_Rule_SS"].clip(lower=0)
+            per_node["share_denom"] = (
+                per_node["demand_uncertainty_raw"] + per_node["lt_uncertainty_raw"]
+            )
 
-                def demand_share_calc(r):
-                    if r["share_denom"] > 0:
-                        return r["pre_ss"] * (r["demand_uncertainty_raw"] / r["share_denom"])
-                    return (r["pre_ss"] / 2) if r["pre_ss"] > 0 else 0.0
+            def demand_share_calc(r):
+                if r["share_denom"] > 0:
+                    return r["pre_ss"] * (r["demand_uncertainty_raw"] / r["share_denom"])
+                return (r["pre_ss"] / 2) if r["pre_ss"] > 0 else 0.0
 
-                def lt_share_calc(r):
-                    if r["share_denom"] > 0:
-                        return r["pre_ss"] * (r["lt_uncertainty_raw"] / r["share_denom"])
-                    return (r["pre_ss"] / 2) if r["pre_ss"] > 0 else 0.0
+            def lt_share_calc(r):
+                if r["share_denom"] > 0:
+                    return r["pre_ss"] * (r["lt_uncertainty_raw"] / r["share_denom"])
+                return (r["pre_ss"] / 2) if r["pre_ss"] > 0 else 0.0
 
-                per_node["demand_share"] = per_node.apply(demand_share_calc, axis=1)
-                per_node["lt_share"] = per_node.apply(lt_share_calc, axis=1)
-                per_node["forced_zero_amount"] = per_node.apply(
-                    lambda r: r["pre_ss"] if r["is_forced_zero"] else 0.0,
-                    axis=1,
-                )
-                per_node["b616_override_amount"] = per_node.apply(
-                    lambda r: r["pre_ss"] if r["is_b616_override"] else 0.0,
-                    axis=1,
-                )
+            per_node["demand_share"] = per_node.apply(demand_share_calc, axis=1)
+            per_node["lt_share"] = per_node.apply(lt_share_calc, axis=1)
+            per_node["forced_zero_amount"] = per_node.apply(
+                lambda r: r["pre_ss"] if r["is_forced_zero"] else 0.0,
+                axis=1,
+            )
+            per_node["b616_override_amount"] = per_node.apply(
+                lambda r: r["pre_ss"] if r["is_b616_override"] else 0.0,
+                axis=1,
+            )
 
-                def retained_ratio_calc(r):
-                    if r["pre_ss"] <= 0:
-                        return 0.0
-                    if r["is_forced_zero"] or r["is_b616_override"]:
-                        return 0.0
-                    return float(r["Safety_Stock"]) / float(r["pre_ss"]) if r["pre_ss"] > 0 else 0.0
-
-                per_node["retained_ratio"] = per_node.apply(retained_ratio_calc, axis=1)
-                per_node["retained_demand"] = per_node["demand_share"] * per_node["retained_ratio"]
-                per_node["retained_lt"] = per_node.apply(
-                    lambda r: r["lt_share"] * r["retained_ratio"], axis=1
-                )
-                per_node["retained_stat_total"] = per_node["retained_demand"] + per_node["retained_lt"]
-
-                def direct_frac_calc(r):
-                    if r["Agg_Future_Demand"] > 0:
-                        return float(r["Forecast"]) / float(r["Agg_Future_Demand"])
+            def retained_ratio_calc(r):
+                if r["pre_ss"] <= 0:
                     return 0.0
+                if r["is_forced_zero"] or r["is_b616_override"]:
+                    return 0.0
+                return float(r["Safety_Stock"]) / float(r["pre_ss"]) if r["pre_ss"] > 0 else 0.0
 
-                per_node["direct_frac"] = per_node.apply(direct_frac_calc, axis=1).clip(lower=0, upper=1)
-                per_node["direct_retained_ss"] = per_node["retained_stat_total"] * per_node["direct_frac"]
-                per_node["indirect_retained_ss"] = per_node["retained_stat_total"] * (
-                    1 - per_node["direct_frac"]
-                )
-                per_node["cap_reduction"] = per_node.apply(
-                    lambda r: max(r["pre_ss"] - r["Safety_Stock"], 0.0)
-                    if not (r["is_forced_zero"] or r["is_b616_override"])
-                    else 0.0,
-                    axis=1,
-                )
-                per_node["cap_increase"] = per_node.apply(
-                    lambda r: max(r["Safety_Stock"] - r["pre_ss"], 0.0)
-                    if not (r["is_forced_zero"] or r["is_b616_override"])
-                    else 0.0,
-                    axis=1,
-                )
+            per_node["retained_ratio"] = per_node.apply(retained_ratio_calc, axis=1)
+            per_node["retained_demand"] = per_node["demand_share"] * per_node["retained_ratio"]
+            per_node["retained_lt"] = per_node.apply(
+                lambda r: r["lt_share"] * r["retained_ratio"], axis=1
+            )
+            per_node["retained_stat_total"] = per_node["retained_demand"] + per_node["retained_lt"]
 
-                ss_attrib = {
-                    "Demand Uncertainty (SS portion)": per_node["retained_demand"].sum(),
-                    "Lead-time Uncertainty (SS portion)": per_node["retained_lt"].sum(),
-                    "Direct Local Forecast (SS portion)": per_node["direct_retained_ss"].sum(),
-                    "Indirect Network Demand (SS portion)": per_node["indirect_retained_ss"].sum(),
-                    "Caps — Reductions (policy lowering SS)": per_node["cap_reduction"].sum(),
-                    "Caps — Increases (policy increasing SS)": per_node["cap_increase"].sum(),
-                    "Forced Zero Overrides (policy)": per_node["forced_zero_amount"].sum(),
-                    "B616 Policy Override": per_node["b616_override_amount"].sum(),
-                }
-                for k in ss_attrib:
-                    ss_attrib[k] = float(ss_attrib[k])
+            def direct_frac_calc(r):
+                if r["Agg_Future_Demand"] > 0:
+                    return float(r["Forecast"]) / float(r["Agg_Future_Demand"])
+                return 0.0
+
+            per_node["direct_frac"] = per_node.apply(direct_frac_calc, axis=1).clip(lower=0, upper=1)
+            per_node["direct_retained_ss"] = per_node["retained_stat_total"] * per_node["direct_frac"]
+            per_node["indirect_retained_ss"] = per_node["retained_stat_total"] * (
+                1 - per_node["direct_frac"]
+            )
+            per_node["cap_reduction"] = per_node.apply(
+                lambda r: max(r["pre_ss"] - r["Safety_Stock"], 0.0)
+                if not (r["is_forced_zero"] or r["is_b616_override"])
+                else 0.0,
+                axis=1,
+            )
+            per_node["cap_increase"] = per_node.apply(
+                lambda r: max(r["Safety_Stock"] - r["pre_ss"], 0.0)
+                if not (r["is_forced_zero"] or r["is_b616_override"])
+                else 0.0,
+                axis=1,
+            )
+
+            ss_attrib = {
+                "Demand Uncertainty (SS portion)": per_node["retained_demand"].sum(),
+                "Lead-time Uncertainty (SS portion)": per_node["retained_lt"].sum(),
+                "Direct Local Forecast (SS portion)": per_node["direct_retained_ss"].sum(),
+                "Indirect Network Demand (SS portion)": per_node["indirect_retained_ss"].sum(),
+                "Caps — Reductions (policy lowering SS)": per_node["cap_reduction"].sum(),
+                "Caps — Increases (policy increasing SS)": per_node["cap_increase"].sum(),
+                "Forced Zero Overrides (policy)": per_node["forced_zero_amount"].sum(),
+                "B616 Policy Override": per_node["b616_override_amount"].sum(),
+            }
+            for k in ss_attrib:
+                ss_attrib[k] = float(ss_attrib[k])
+            ss_sum = sum(ss_attrib.values())
+            residual = float(total_ss) - ss_sum
+            if abs(residual) > 1e-6:
+                ss_attrib["Caps — Reductions (policy lowering SS)"] += residual
                 ss_sum = sum(ss_attrib.values())
-                residual = float(total_ss) - ss_sum
-                if abs(residual) > 1e-6:
-                    ss_attrib["Caps — Reductions (policy lowering SS)"] += residual
-                    ss_sum = sum(ss_attrib.values())
 
-                ss_drv_df = pd.DataFrame(
-                    {
-                        "driver": list(ss_attrib.keys()),
-                        "amount": [float(v) for v in ss_attrib.values()],
-                    }
+            ss_drv_df = pd.DataFrame(
+                {
+                    "driver": list(ss_attrib.keys()),
+                    "amount": [float(v) for v in ss_attrib.values()],
+                }
+            )
+            ss_drv_df_display = ss_drv_df[ss_drv_df["amount"] != 0].copy()
+            denom = total_ss if total_ss > 0 else ss_drv_df["amount"].sum()
+            denom = denom if denom > 0 else 1.0
+            ss_drv_df_display["pct_of_total_ss"] = (
+                ss_drv_df_display["amount"] / denom * 100
+            )
+
+            labels = ss_drv_df_display["driver"].tolist() + ["Total SS"]
+            values = ss_drv_df_display["amount"].tolist() + [total_ss]
+            measures = ["relative"] * len(ss_drv_df_display) + ["total"]
+
+            decreasing_color = "rgba(255, 138, 128, 0.8)"
+            increasing_color = "rgba(129, 199, 132, 0.8)"
+            total_color = "rgba(144, 202, 249, 0.8)"
+
+            fig_drv = go.Figure(
+                go.Waterfall(
+                    name="SS Attribution",
+                    orientation="v",
+                    measure=measures,
+                    x=labels,
+                    y=values,
+                    text=[f"{v:,.0f}" for v in ss_drv_df_display["amount"].tolist()]
+                    + [f"{total_ss:,.0f}"],
+                    connector={"line": {"color": "rgba(63,63,63,0.25)"}},
+                    decreasing=dict(marker=dict(color=decreasing_color)),
+                    increasing=dict(marker=dict(color=increasing_color)),
+                    totals=dict(marker=dict(color=total_color)),
                 )
-                ss_drv_df_display = ss_drv_df[ss_drv_df["amount"] != 0].copy()
-                denom = total_ss if total_ss > 0 else ss_drv_df["amount"].sum()
-                denom = denom if denom > 0 else 1.0
-                ss_drv_df_display["pct_of_total_ss"] = (
-                    ss_drv_df_display["amount"] / denom * 100
+            )
+            fig_drv.update_layout(
+                title=f"{selected_product} — SS Attribution Waterfall (adds to {euro_format(total_ss, True)})",
+                xaxis_title="Driver",
+                yaxis_title="Units",
+                height=420,
+            )
+            st.plotly_chart(fig_drv, use_container_width=True)
+
+            # Simple table for attribution breakdown (normal table)
+            attrib_display = ss_drv_df_display.rename(
+                columns={
+                    "driver": "Driver",
+                    "amount": "Units",
+                    "pct_of_total_ss": "Pct_of_total_SS",
+                }
+            )
+
+            attrib_display_fmt = attrib_display.copy()
+            attrib_display_fmt["Units"] = attrib_display_fmt["Units"].apply(
+                lambda v: euro_format(v, False, True)
+            )
+            attrib_display_fmt["Pct_of_total_SS"] = attrib_display_fmt[
+                "Pct_of_total_SS"
+            ].apply(lambda v: f"{v:.1f}%")
+
+            st.markdown("#### SS attribution breakdown (table)")
+            st.dataframe(attrib_display_fmt, use_container_width=True)
+
+            # Exec takeaway (kept)
+            try:
+                top3 = (
+                    ss_drv_df_display.sort_values(
+                        "pct_of_total_ss", ascending=False
+                    ).head(3).copy()
                 )
+                total_top3 = top3["pct_of_total_ss"].sum()
 
-                labels = ss_drv_df_display["driver"].tolist() + ["Total SS"]
-                values = ss_drv_df_display["amount"].tolist() + [total_ss]
-                measures = ["relative"] * len(ss_drv_df_display) + ["total"]
-
-                decreasing_color = "rgba(255, 138, 128, 0.8)"
-                increasing_color = "rgba(129, 199, 132, 0.8)"
-                total_color = "rgba(144, 202, 249, 0.8)"
-
-                fig_drv = go.Figure(
-                    go.Waterfall(
-                        name="SS Attribution",
-                        orientation="v",
-                        measure=measures,
-                        x=labels,
-                        y=values,
-                        text=[f"{v:,.0f}" for v in ss_drv_df_display["amount"].tolist()]
-                        + [f"{total_ss:,.0f}"],
-                        connector={"line": {"color": "rgba(63,63,63,0.25)"}},
-                        decreasing=dict(marker=dict(color=decreasing_color)),
-                        increasing=dict(marker=dict(color=increasing_color)),
-                        totals=dict(marker=dict(color=total_color)),
+                pieces = []
+                for _, r in top3.iterrows():
+                    if total_top3 > 0:
+                        norm_pct = r["pct_of_total_ss"] / total_top3 * 100.0
+                    else:
+                        norm_pct = 0.0
+                    pieces.append(
+                        f"{r['driver']} (<strong>{norm_pct:.1f}%</strong>)"
                     )
-                )
-                fig_drv.update_layout(
-                    title=f"{selected_product} — SS Attribution Waterfall (adds to {euro_format(total_ss, True)})",
-                    xaxis_title="Driver",
-                    yaxis_title="Units",
-                    height=420,
-                )
-                st.plotly_chart(fig_drv, use_container_width=True)
 
-                # Simple table for attribution breakdown (normal table)
-                attrib_display = ss_drv_df_display.rename(
-                    columns={
-                        "driver": "Driver",
-                        "amount": "Units",
-                        "pct_of_total_ss": "Pct_of_total_SS",
-                    }
-                )
-
-                attrib_display_fmt = attrib_display.copy()
-                attrib_display_fmt["Units"] = attrib_display_fmt["Units"].apply(
-                    lambda v: euro_format(v, False, True)
-                )
-                attrib_display_fmt["Pct_of_total_SS"] = attrib_display_fmt[
-                    "Pct_of_total_SS"
-                ].apply(lambda v: f"{v:.1f}%")
-
-                st.markdown("#### SS attribution breakdown (table)")
-                st.dataframe(attrib_display_fmt, use_container_width=True)
-
-                # Exec takeaway (kept)
-                try:
-                    top3 = (
-                        ss_drv_df_display.sort_values(
-                            "pct_of_total_ss", ascending=False
-                        ).head(3).copy()
+                if pieces:
+                    takeaway = (
+                        f"For <strong>{selected_product}</strong> in "
+                        f"<strong>{period_label(selected_period)}</strong>, "
+                        f"safety stock is mainly explained by: " + "; ".join(pieces) + "."
                     )
-                    total_top3 = top3["pct_of_total_ss"].sum()
-
-                    pieces = []
-                    for _, r in top3.iterrows():
-                        if total_top3 > 0:
-                            norm_pct = r["pct_of_total_ss"] / total_top3 * 100.0
-                        else:
-                            norm_pct = 0.0
-                        pieces.append(
-                            f"{r['driver']} (<strong>{norm_pct:.1f}%</strong>)"
-                        )
-
-                    if pieces:
-                        takeaway = (
-                            f"For <strong>{selected_product}</strong> in "
-                            f"<strong>{period_label(selected_period)}</strong>, "
-                            f"safety stock is mainly explained by: " + "; ".join(pieces) + "."
-                        )
-                        st.markdown(
-                            f"""
-                            <div style="margin-top:8px;padding:8px 10px;border-radius:8px;
-                                background:#f5f9ff;border:1px solid #c5cae9;font-size:0.95rem;">
-                              <strong>Executive takeaway:</strong><br/>
-                              {takeaway}
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-                except Exception:
-                    pass
+                    st.markdown(
+                        f"""
+                        <div style="margin-top:8px;padding:8px 10px;border-radius:8px;
+                            background:#f5f9ff;border:1px solid #c5cae9;font-size:0.95rem;">
+                          <strong>Executive takeaway:</strong><br/>
+                          {takeaway}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            except Exception:
+                pass
 
 # TAB 8 -----------------------------------------------------------------
 with tab8:
@@ -3742,9 +3742,8 @@ with tab8:
                 cards_html_parts.append(card_html)
             cards_html_parts.append("</div></div>")
             final_html = "".join(cards_html_parts)
-            st.markdown(final_html, unsafe_allow_html=True)                )
-            else:
-                st.info("No nonzero Safety Stock values for wordcloud in this period.")
+            st.markdown(final_html, unsafe_allow_html=True)
+        # END of else for agg_all.empty in tab8
 
 # END OF MAIN CODE
 # Now, handle no-data fallback if main data was not uploaded
