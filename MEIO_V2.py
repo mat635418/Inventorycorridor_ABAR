@@ -1817,7 +1817,7 @@ if s_file and d_file and lt_file:
             render_tab1_explainer()
 
     # TAB 2 -----------------------------------------------------------------
-    with tab2:
+with tab2:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
@@ -1848,8 +1848,7 @@ if s_file and d_file and lt_file:
         render_selection_line("Selected:", product=sku, period_text=period_label(chosen_period))
         st.subheader("🕸️ Network Topology")
 
-        # ---- SCENARIO PLANNING BOX ----
-        st.markdown("---")
+        # ---------- Scenario Planning ----------
         with st.expander("🚚 Distribution Strategy Scenario Planning ('What-If' Routing)", expanded=False):
             st.markdown(
                 """
@@ -1874,6 +1873,7 @@ if s_file and d_file and lt_file:
             else:
                 current_suppliers = []
 
+            # "Current Supplier" is now always read-only (not selectable)
             if not current_suppliers:
                 st.info("This location has no supplier in the current network topology for this period (cannot reroute).")
                 reroute_enabled = False
@@ -1886,7 +1886,7 @@ if s_file and d_file and lt_file:
                 new_supplier = st.selectbox("New supplier (route to node):", possible_suppliers, index=(possible_suppliers.index(new_supplier_default) if new_supplier_default in possible_suppliers else 0), key="dist_scen_to")
                 reroute_enabled = True
 
-            # Heating tables (hardcoded)
+            # ---- Hardcoded Heating Tables ----
             heating_winter = {
                 "BEEX": 0, "DEF1": 0, "DEF2": 21, "DEH1": 0, "DEW1": 14, "FRA1": 2, "FRM1": 0, "LUEX": 14,
                 "LUL1": 14, "PLPL": 1, "RSKR": 1, "SIS1": 4, "TRTU": 1, "TRTZ": 1, "ZASA": 0
@@ -1895,17 +1895,23 @@ if s_file and d_file and lt_file:
                 "BEEX": 0, "DEF1": 0, "DEF2": 14, "DEH1": 0, "DEW1": 14, "FRA1": 1.5, "FRM1": 0, "LUEX": 14,
                 "LUL1": 14, "PLPL": 1, "RSKR": 1, "SIS1": 4, "TRTU": 1, "TRTZ": 1, "ZASA": 0
             }
+
+            # Helper for season from timestamp
             def infer_season(ts):
                 if isinstance(ts, pd.Timestamp):
                     month = ts.month
                 else:
+                    # assume it's parseable
                     try:
                         month = pd.to_datetime(ts).month
                     except Exception:
                         return "WINTER"
-                if month in [10,11,12,1,2,3]: return "WINTER"
-                elif month in [7,8,9]: return "SUMMER"
-                else: return "OTHER"
+                if month in [10,11,12,1,2,3]:
+                    return "WINTER"
+                elif month in [7,8,9]:
+                    return "SUMMER"
+                else:
+                    return "OTHER"
 
             if reroute_enabled and st.button("Simulate reroute scenario", key="dist_scen_run"):
                 rerouted_lt = scenario_lt.copy()
@@ -1914,11 +1920,18 @@ if s_file and d_file and lt_file:
                     (rerouted_lt["To_Location"] == location_to_move)
                 )
                 rerouted_lt = rerouted_lt[~removal_mask]
+
+                # Determine what heating to add (by season & plant ID = location_to_move)
                 season = infer_season(chosen_period)
-                if season == "WINTER": heating_table = heating_winter
-                elif season == "SUMMER": heating_table = heating_summer
-                else: heating_table = heating_winter
+                if season == "WINTER":
+                    heating_table = heating_winter
+                elif season == "SUMMER":
+                    heating_table = heating_summer
+                else:
+                    heating_table = heating_winter  # fallback
+
                 heating_days = heating_table.get(location_to_move, 0)
+                # get direct or minimal LT as before
                 direct_route = scenario_lt[
                     (scenario_lt["From_Location"] == new_supplier) & (scenario_lt["To_Location"] == location_to_move)
                 ]
@@ -1948,7 +1961,6 @@ if s_file and d_file and lt_file:
                 }
                 rerouted_lt = pd.concat([rerouted_lt, pd.DataFrame([new_row])], ignore_index=True)
 
-                # --------- Run pipeline ---------
                 reroute_df_d = df_d[(df_d["Product"] == scenario_product) & (df_d["Period"] == chosen_period)].copy()
                 reroute_stats = stats[(stats["Product"] == scenario_product)].copy()
                 rerouted_results, _ = run_pipeline(
@@ -1967,6 +1979,7 @@ if s_file and d_file and lt_file:
                     (results["Product"] == scenario_product) &
                     (results["Period"] == chosen_period)
                 ]
+
                 left = old_results.copy()
                 right = rerouted_results.copy()
                 for col in ['Safety_Stock', 'LT_Mean', 'Tier_Hops', 'Service_Level_Node']:
@@ -1978,7 +1991,8 @@ if s_file and d_file and lt_file:
                     on='Location', how='outer'
                 )
                 comparison['ΔSS'] = comparison['Safety_Stock_new'].fillna(0) - comparison['Safety_Stock_old'].fillna(0)
-                comparison['%ΔSS'] = 100 * comparison['ΔSS'] / comparison['Safety_Stock_old'].replace(0, np.nan)
+                comparison['%ΔSS'] = 100 * comparison['ΔSS'] / comparison['Safety_Stock_old'].replace(0,np.nan)
+                # Integer formatting for SS, LT, hops
                 comparison['Safety_Stock_old'] = comparison['Safety_Stock_old'].fillna(0).astype(int)
                 comparison['Safety_Stock_new'] = comparison['Safety_Stock_new'].fillna(0).astype(int)
                 comparison['LT_Mean_old'] = comparison['LT_Mean_old'].fillna(0).round().astype(int)
@@ -1986,24 +2000,13 @@ if s_file and d_file and lt_file:
                 comparison['Tier_Hops_old'] = comparison['Tier_Hops_old'].fillna(0).astype(int)
                 comparison['Tier_Hops_new'] = comparison['Tier_Hops_new'].fillna(0).astype(int)
 
-                # Always include BEEX, current supplier, location rerouted
-                always_include = set([new_supplier, current_supplier, location_to_move])
-                key_nodes_mask = comparison['Location'].isin(always_include)
                 mask = (
                     (comparison['Safety_Stock_old'] != comparison['Safety_Stock_new']) |
                     (comparison['LT_Mean_old'] != comparison['LT_Mean_new']) |
                     (comparison['Tier_Hops_old'] != comparison['Tier_Hops_new']) |
-                    (comparison['Service_Level_Node_old'] != comparison['Service_Level_Node_new']) |
-                    key_nodes_mask
+                    (comparison['Service_Level_Node_old'] != comparison['Service_Level_Node_new'])
                 )
                 changed_rows = comparison[mask].copy()
-
-                # Grand Total row
-                gt_before = left['Safety_Stock_old'].sum()
-                gt_after = right['Safety_Stock_new'].sum()
-                gt_delta = gt_after - gt_before
-                gt_pct   = 100 * gt_delta / gt_before if gt_before else float('nan')
-
                 if changed_rows.empty:
                     st.info("No nodes changed their Safety Stock, tier, or lead time due to this reroute.")
                 else:
@@ -2021,13 +2024,17 @@ if s_file and d_file and lt_file:
                         'Service_Level_Node_new': 'SL After',
                     }
                     disp_df = changed_rows.rename(columns=col_map)
+
                     def format_int_dot(v):
                         if pd.isna(v): return ""
-                        try: return "{:,.0f}".format(int(round(v))).replace(",", ".")
+                        try:
+                            return "{:,.0f}".format(int(round(v))).replace(",", ".")
                         except: return str(int(v))
+
                     def ss_delta_color(val):
                         if pd.isna(val): return "black"
                         return "green" if val < 0 else "red" if val > 0 else "black"
+
                     table_md = "<table style='width:100%;text-align:center;background:#f6faf7;'><tr>"+ "".join(
                         f"<th>{col}</th>" for col in list(col_map.values())
                     ) + "</tr>"
@@ -2056,24 +2063,7 @@ if s_file and d_file and lt_file:
                                 v_display = str(v)
                             table_md += f"<td{style}>{v_display}</td>"
                         table_md += "</tr>"
-                    table_md += ("<tr style='font-weight:bold;background:#e6f5e4;'>"
-                                 "<td>Grand Total</td>"
-                                 f"<td>{format_int_dot(gt_before)}</td>"
-                                 f"<td>{format_int_dot(gt_after)}</td>"
-                                 f"<td style='color:{ss_delta_color(gt_delta)}'>{format_int_dot(gt_delta)}</td>"
-                                 f"<td style='color:{ss_delta_color(gt_delta)}'><strong>{gt_pct:+.1f}%</strong></td>"
-                                 + "<td colspan='6'></td></tr>")
                     table_md += "</table>"
-
-                    # Diagnostic if BEEX's SS doesn't change but demand does
-                    beex_old = left[left['Location'] == new_supplier]['Safety_Stock_old'].sum()
-                    beex_new = right[right['Location'] == new_supplier]['Safety_Stock_new'].sum()
-                    beex_demand_old = left[left['Location'] == new_supplier].get('Agg_Future_Demand', pd.Series([0])).sum()
-                    beex_demand_new = right[right['Location'] == new_supplier].get('Agg_Future_Demand', pd.Series([0])).sum()
-                    if beex_new == beex_old and beex_demand_new != beex_demand_old:
-                        # Capping is strictly limiting SS!
-                        st.warning(f"Note: BEEX's SS did not change, even though demand increased. This is due to capping (cap_range={cap_range}) for SS as a % of demand in your scenario.")
-
                     st.markdown(
                         f"""
                         <div style="background:#f6faf7; border:1px solid #7fd47c; border-radius:10px; padding:12px 16px; margin:0 0 8px 0;">
@@ -2087,7 +2077,7 @@ if s_file and d_file and lt_file:
                     st.markdown(f"<div style='margin-top:7px;font-size:1em;'>{lead_time_note}</div>", unsafe_allow_html=True)
                 st.write("You can repeat with different routing choices. To get back to the base plan, reload data or change period.")
 
-        # ---- TOPOLOGY MAP (outside expander) ----
+        # ----------- (AFTER expander, always) TOPOLOGY MAP IS RENDERED -----------
         st.markdown(
             """
             <div style="font-size:0.85rem; margin-bottom:4px; color:#555;">
@@ -2098,24 +2088,41 @@ if s_file and d_file and lt_file:
             unsafe_allow_html=True,
         )
 
-        # -------- MAP CODE UNCHANGED, always after scenario box --------
+        st.markdown(
+            """
+            <style>
+                iframe {
+                    display: block;
+                    margin-left: auto;
+                    margin-right: auto;
+                    border: none;
+                }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         label_data = (
             results[results["Period"] == chosen_period]
             .set_index(["Product", "Location"])
             .to_dict("index")
         )
         sku_lt = df_lt[df_lt["Product"] == sku] if "Product" in df_lt.columns else df_lt.copy()
+
         net = Network(
-            height="900px",
+            height="900px",  # reduced from 1200px
             width="100%",
             directed=True,
             bgcolor="#ffffff",
             font_color="#222222",
         )
+
         hubs = {"B616", "BEEX", "LUEX"}
+
         active_nodes_for_sku = set(
             active_nodes(results, period=chosen_period, product=sku)
         )
+
         if not sku_lt.empty:
             froms = set(sku_lt["From_Location"].dropna().unique().tolist())
             tos = set(sku_lt["To_Location"].dropna().unique().tolist())
@@ -2123,8 +2130,10 @@ if s_file and d_file and lt_file:
             all_nodes = route_nodes.union(hubs.intersection(active_nodes_for_sku))
         else:
             all_nodes = hubs.intersection(active_nodes_for_sku)
+
         if not all_nodes:
             all_nodes = hubs
+
         demand_lookup = {}
         for n in all_nodes:
             demand_lookup[n] = label_data.get(
@@ -2142,6 +2151,7 @@ if s_file and d_file and lt_file:
                     "Agg_Future_Demand": 0,
                 },
             )
+
         for n in sorted(all_nodes):
             m = demand_lookup.get(
                 n,
@@ -2158,6 +2168,7 @@ if s_file and d_file and lt_file:
                     "Agg_Future_Demand": 0,
                 },
             )
+
             node_active = (
                 abs(float(m.get("Agg_Future_Demand", 0)))
                 + abs(float(m.get("Forecast", 0)))
@@ -2165,13 +2176,16 @@ if s_file and d_file and lt_file:
                 + abs(float(m.get("Max_Corridor", float(m.get("Safety_Stock", 0)) + float(m.get("Forecast", 0)))))
                 > 0
             )
+
             if not node_active:
                 continue
+
             tier_hops = m.get("Tier_Hops", np.nan)
             try:
                 hops_val = int(tier_hops) if not pd.isna(tier_hops) else 0
             except Exception:
                 hops_val = 0
+
             if n == "B616":
                 bg, border, font_color, size = "#dcedc8", "#8bc34a", "#0b3d91", 14
             elif n in {"BEEX", "LUEX"}:
@@ -2190,6 +2204,7 @@ if s_file and d_file and lt_file:
                     bg = "#fff176"
                     border = "#f57f17"
                 font_color, size = "#222222", 12
+
             sl_node = m.get("Service_Level_Node", None)
             if pd.notna(sl_node):
                 try:
@@ -2198,6 +2213,7 @@ if s_file and d_file and lt_file:
                     sl_label = str(sl_node)
             else:
                 sl_label = "-"
+
             lbl = (
                 f"{n}\n"
                 f"FC: {euro_format(m.get('Forecast', 0), show_zero=True)}\n"
@@ -2213,6 +2229,7 @@ if s_file and d_file and lt_file:
                 shape="box",
                 font={"color": font_color, "size": size},
             )
+
         visible_nodes = {n["id"] for n in net.nodes}
         if not sku_lt.empty:
             for _, r in sku_lt.iterrows():
@@ -2231,6 +2248,7 @@ if s_file and d_file and lt_file:
                     color=edge_color,
                     smooth={"enabled": True, "type": "dynamic", "roundness": 0.4},
                 )
+
         net.set_options(
             """
             {
@@ -2311,7 +2329,8 @@ if s_file and d_file and lt_file:
             html_text = html_text.replace("</body>", injection_js + "</body>", 1)
         else:
             html_text += injection_js
-        components.html(html_text, height=940)
+        components.html(html_text, height=940)  # reduced from 1250
+
         st.markdown(
             """
             <div style="text-align:center; font-size:12px; padding:8px 0;">
