@@ -2069,7 +2069,7 @@ with tab2:
                     def ss_delta_color(val):
                         if pd.isna(val): return "black"
                         return "green" if val < 0 else "red" if val > 0 else "black"
-                    table_md = "<table style='width:100%;text-align:center;background:#f6faf7;font-size:0.70em;'><tr>"+ "".join(
+                    table_md = "<table style='width:100%;text-align:center;background:#f6faf7;font-size:0.75em;'><tr>"+ "".join(
                         f"<th>{col}</th>" for col in list(col_map.values())
                     ) + "</tr>"
                     for _, row in disp_df.iterrows():
@@ -2100,8 +2100,8 @@ with tab2:
                             table_md += f"<td{style}>{v_display}</td>"
                         table_md += "</tr>"
                     # Grand Total row: show totals for ΔSS units, ΔSS %, and USD columns
-                    # Columns: 1=Node, 2=SS Before, 3=SS After, 4=ΔSS units, 5=ΔSS %, 6=LT Before, 7=LT After,
-                    #          8=Hops Before, 9=Hops After, 10=SL Before, 11=SL After, 12=SS Before (USD), 13=SS After (USD), 14=ΔSS USD
+                    # Columns: 1=Node, 2=SS Before, 3=SS After, 4=ΔSS units, 5=ΔSS %, 6-11=LT/Hops/SL (6 columns),
+                    #          12=SS Before (USD), 13=SS After (USD), 14=ΔSS USD
                     gt_delta_color = ss_delta_color(gt_pct)
                     table_md += ("<tr style='font-weight:bold;background:#e6f5e4;'>"
                                  "<td>Grand Total</td>"  # Column 1: Node
