@@ -2487,16 +2487,20 @@ with tab3:
         # Add light red highlighting to SS column (PR #4)
         ss_highlight = {'background-color': '#ffcccc'}
         
+        # Define status values and their corresponding background colors
+        STATUS_COLORS = {
+            'Capped (High)': '#fffacd',      # light yellow
+            'Capped (Low)': '#fffacd',       # light yellow
+            'Optimal (Statistical)': '#90ee90'  # light green
+        }
+        
         # Function to get background color style for Status column values
         def get_status_background_color(val):
-            if 'Capped' in str(val):
-                return 'background-color: #fffacd'  # light yellow
-            elif 'Statistical' in str(val):
-                return 'background-color: #90ee90'  # light green
-            return ''
+            val_str = str(val)
+            return f'background-color: {STATUS_COLORS[val_str]}' if val_str in STATUS_COLORS else ''
         
-        # Function to apply status coloring to the Status column only
-        def apply_status_coloring(col):
+        # Function to generate styles for Status column
+        def get_status_column_styles(col):
             if col.name == 'Status':
                 return col.map(get_status_background_color)
             return [''] * len(col)
@@ -2506,7 +2510,7 @@ with tab3:
             .format(pandas_fmt)
             .set_properties(**header_props, axis=1)
             .set_properties(**ss_highlight, subset=['SS [unit]'])
-            .apply(apply_status_coloring, axis=0)
+            .apply(get_status_column_styles, axis=0)
         )
         st.dataframe(styled, use_container_width=True)
 
