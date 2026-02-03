@@ -1819,7 +1819,6 @@ if s_file and d_file and lt_file:
     # TAB 2 -----------------------------------------------------------------
 with tab2:
     col_main, col_badge = st.columns([17, 3])
-    # Badge/controls col unchanged
     with col_badge:
         render_logo_above_parameters(scale=1.5)
 
@@ -1849,214 +1848,236 @@ with tab2:
         render_selection_line("Selected:", product=sku, period_text=period_label(chosen_period))
         st.subheader("🕸️ Network Topology")
 
-with st.expander("🚚 Distribution Strategy Scenario Planning ('What-If' Routing)", expanded=False):
-    st.markdown(
-        """
-        **'What if I move a location from being served by node A to being served by node B?'**
-
-        - Select a node to reroute, its current supplier (upstream), and new supplier.
-        - Optionally, add extra 'heating' time in days for the new route.
-        - See the impact on Safety Stock, lead times, and service tier for all directly and indirectly affected nodes!
-        """
-    )
-
-    scenario_products = active_materials(results, period=chosen_period)
-    scenario_product_default = sku if sku in scenario_products else (scenario_products[0] if scenario_products else "")
-    scenario_product = st.selectbox("Which material?", scenario_products, index=(scenario_products.index(scenario_product_default) if scenario_product_default in scenario_products else 0), key="dist_scen_product")
-
-    all_service_nodes = active_nodes(results, period=chosen_period, product=scenario_product)
-    location_default = all_service_nodes[0] if all_service_nodes else ""
-    location_to_move = st.selectbox("Which location do you want to reroute?", all_service_nodes, index=(all_service_nodes.index(location_default) if location_default in all_service_nodes else 0), key="dist_scen_loc")
-
-    scenario_lt = df_lt[df_lt["Product"] == scenario_product] if "Product" in df_lt.columns else df_lt.copy()
-    mask_to = scenario_lt["To_Location"] == location_to_move
-    if not scenario_lt[mask_to].empty:
-        current_suppliers = scenario_lt[mask_to]["From_Location"].dropna().unique().tolist()
-    else:
-        current_suppliers = []
-
-    if not current_suppliers:
-        st.info("This location has no supplier in the current network topology for this period (cannot reroute).")
-        reroute_enabled = False
-    else:
-        current_supplier_default = current_suppliers[0]
-        current_supplier = st.selectbox("Current supplier (from node):", current_suppliers, index=(current_suppliers.index(current_supplier_default) if current_supplier_default in current_suppliers else 0), key="dist_scen_from")
-        possible_suppliers = [n for n in all_service_nodes if n != location_to_move and n != current_supplier]
-        new_supplier_default = possible_suppliers[0] if possible_suppliers else ""
-        new_supplier = st.selectbox("New supplier (route to node):", possible_suppliers, index=(possible_suppliers.index(new_supplier_default) if new_supplier_default in possible_suppliers else 0), key="dist_scen_to")
-        reroute_enabled = True
-
-        # HEATING time selection
-        add_heating = st.checkbox(
-            f"Do you need to add heating time in the newly defined route from {new_supplier} to {location_to_move}?",
-            value=False,
-            key="route_heating_flag"
-        )
-        heating_days = 0
-        if add_heating:
-            heating_days = st.number_input("Heating time to add in days:", min_value=1, max_value=60, value=14, key="route_heating_days")
-
-    if reroute_enabled and st.button("Simulate reroute scenario", key="dist_scen_run"):
-        rerouted_lt = scenario_lt.copy()
-        # Remove OLD edge
-        removal_mask = (
-            (rerouted_lt["From_Location"] == current_supplier) &
-            (rerouted_lt["To_Location"] == location_to_move)
-        )
-        rerouted_lt = rerouted_lt[~removal_mask]
-
-        # --- Smart New Lead Time Selection WITH User Heating Time ---
-        direct_route = scenario_lt[
-            (scenario_lt["From_Location"] == new_supplier) & (scenario_lt["To_Location"] == location_to_move)
-        ]
-        extra_note = ""
-        if not direct_route.empty:
-            new_lt_days  = float(direct_route.iloc[0]["Lead_Time_Days"]) + heating_days
-            new_lt_stddev = float(direct_route.iloc[0]["Lead_Time_Std_Dev"])
-            lead_time_note = f"Used explicit lead time from {new_supplier} to {location_to_move} plus heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
-        else:
-            poss_lts = scenario_lt[scenario_lt["From_Location"] == new_supplier]
-            if not poss_lts.empty:
-                # Use the outbound minimal LT from new supplier
-                min_idx = poss_lts["Lead_Time_Days"].idxmin()
-                new_lt_days = float(poss_lts.loc[min_idx, "Lead_Time_Days"]) + heating_days
-                new_lt_stddev = float(poss_lts.loc[min_idx, "Lead_Time_Std_Dev"])
-                extra_note = f" (minimal outbound LT from {new_supplier})"
-                lead_time_note = f"No direct LT; used minimal outbound LT from {new_supplier}{extra_note} plus heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
-            else:
-                new_lt_days = (float(rerouted_lt["Lead_Time_Days"].median()) if not rerouted_lt.empty else 7.0) + heating_days
-                new_lt_stddev = float(rerouted_lt["Lead_Time_Std_Dev"].median()) if not rerouted_lt.empty else 2.0
-                lead_time_note = f"No data: used network median LT for this SKU plus heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
-        new_row = {
-            "Product": scenario_product,
-            "From_Location": new_supplier,
-            "To_Location": location_to_move,
-            "Lead_Time_Days": new_lt_days,
-            "Lead_Time_Std_Dev": new_lt_stddev
-        }
-        rerouted_lt = pd.concat([rerouted_lt, pd.DataFrame([new_row])], ignore_index=True)
-
-        reroute_df_d = df_d[(df_d["Product"] == scenario_product) & (df_d["Period"] == chosen_period)].copy()
-        reroute_stats = stats[(stats["Product"] == scenario_product)].copy()
-        rerouted_results, _ = run_pipeline(
-            df_d=reroute_df_d,
-            stats=reroute_stats,
-            df_lt=rerouted_lt,
-            service_level=service_level,
-            transitive=use_transitive,
-            rho=var_rho,
-            lt_mode_param=lt_mode,
-            zero_if_no_net_fcst=zero_if_no_net_fcst,
-            apply_cap=apply_cap,
-            cap_range=cap_range,
-        )
-        old_results = results[
-            (results["Product"] == scenario_product) &
-            (results["Period"] == chosen_period)
-        ]
-
-        # --- Find ALL nodes whose SS, LT, hop, or SL changes ---
-        # We do this by merging the old and new results on Location.
-        left = old_results.copy()
-        right = rerouted_results.copy()
-        for col in ['Safety_Stock', 'LT_Mean', 'Tier_Hops', 'Service_Level_Node']:
-            left.rename(columns={col: col+'_old'}, inplace=True)
-            right.rename(columns={col: col+'_new'}, inplace=True)
-        comparison = pd.merge(
-            left[['Location', 'Safety_Stock_old', 'LT_Mean_old', 'Tier_Hops_old', 'Service_Level_Node_old']],
-            right[['Location', 'Safety_Stock_new', 'LT_Mean_new', 'Tier_Hops_new', 'Service_Level_Node_new']],
-            on='Location', how='outer'
-        )
-        comparison['ΔSS'] = comparison['Safety_Stock_new'].fillna(0) - comparison['Safety_Stock_old'].fillna(0)
-        comparison['%ΔSS'] = 100 * comparison['ΔSS'] / comparison['Safety_Stock_old'].replace(0,np.nan)
-        # Integer formatting for SS, LT, hops
-        comparison['Safety_Stock_old'] = comparison['Safety_Stock_old'].fillna(0).astype(int)
-        comparison['Safety_Stock_new'] = comparison['Safety_Stock_new'].fillna(0).astype(int)
-        comparison['LT_Mean_old'] = comparison['LT_Mean_old'].fillna(0).round().astype(int)
-        comparison['LT_Mean_new'] = comparison['LT_Mean_new'].fillna(0).round().astype(int)
-        comparison['Tier_Hops_old'] = comparison['Tier_Hops_old'].fillna(0).astype(int)
-        comparison['Tier_Hops_new'] = comparison['Tier_Hops_new'].fillna(0).astype(int)
-
-        # Show every row where at least one of (SS, LT, hops, SL) changed
-        mask = (
-            (comparison['Safety_Stock_old'] != comparison['Safety_Stock_new']) |
-            (comparison['LT_Mean_old'] != comparison['LT_Mean_new']) |
-            (comparison['Tier_Hops_old'] != comparison['Tier_Hops_new']) |
-            (comparison['Service_Level_Node_old'] != comparison['Service_Level_Node_new'])
-        )
-        changed_rows = comparison[mask].copy()
-        if changed_rows.empty:
-            st.info("No nodes changed their Safety Stock, tier, or lead time due to this reroute.")
-        else:
-            col_map = {
-                'Location': 'Node',
-                'Safety_Stock_old': 'SS Before',
-                'Safety_Stock_new': 'SS After',
-                'ΔSS': 'ΔSS units',
-                '%ΔSS': 'ΔSS %',
-                'LT_Mean_old': 'LT Before',
-                'LT_Mean_new': 'LT After',
-                'Tier_Hops_old': 'Hops Before',
-                'Tier_Hops_new': 'Hops After',
-                'Service_Level_Node_old': 'SL Before',
-                'Service_Level_Node_new': 'SL After',
-            }
-            disp_df = changed_rows.rename(columns=col_map)
-
-            def format_int_dot(v):
-                if pd.isna(v): return ""
-                try:
-                    return "{:,.0f}".format(int(round(v))).replace(",", ".")
-                except: return str(int(v))
-
-            def ss_delta_color(val):
-                if pd.isna(val): return "black"
-                return "green" if val < 0 else "red" if val > 0 else "black"
-
-            table_md = "<table style='width:100%;text-align:center;background:#f6faf7;'><tr>"+ "".join(
-                f"<th>{col}</th>" for col in list(col_map.values())
-            ) + "</tr>"
-            for _, row in disp_df.iterrows():
-                table_md += "<tr>"
-                for col in list(col_map.values()):
-                    v = row[col]
-                    style = ""
-                    if col == "ΔSS %":
-                        color = ss_delta_color(v)
-                        v_display = f"<strong>{v:+.1f}%</strong>" if pd.notnull(v) else ""
-                        style = f" style='color:{color}'"
-                    elif col == "ΔSS units":
-                        color = ss_delta_color(row["ΔSS %"])
-                        v_display = f"{format_int_dot(v)}" if pd.notnull(v) else ""
-                        style = f" style='color:{color}'"
-                    elif col in ("SL Before", "SL After"):
-                        v_display = f"{v:.2%}" if pd.notnull(v) else ""
-                    elif col in ("LT Before", "LT After"):
-                        v_display = format_int_dot(v)
-                    elif col in ("SS Before", "SS After"):
-                        v_display = format_int_dot(v)
-                    elif col in ("Hops Before", "Hops After"):
-                        v_display = f"{v:d}" if not pd.isna(v) else "0"
-                    else:
-                        v_display = str(v)
-                    table_md += f"<td{style}>{v_display}</td>"
-                table_md += "</tr>"
-            table_md += "</table>"
+        # ---------- Scenario Planning ----------
+        with st.expander("🚚 Distribution Strategy Scenario Planning ('What-If' Routing)", expanded=False):
             st.markdown(
-                f"""
-                <div style="background:#f6faf7; border:1px solid #7fd47c; border-radius:10px; padding:12px 16px; margin:0 0 8px 0;">
-                <b>Result – Each changed node:</b>
-                {table_md}
-                <div style='font-size:0.9em;color:#444;margin-top:6px;'>SS change color: <span style='color:green'>green</span> if SS decreases, <span style='color:red'>red</span> if SS increases.</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+                """
+                **'What if I move a location from being served by node A to being served by node B?'**
+                - Select a node to reroute, and the new supplier for that node.
+                - Heating time is automatically determined by plant and season.
+                """
             )
-            st.markdown(f"<div style='margin-top:7px;font-size:1em;'>{lead_time_note}</div>", unsafe_allow_html=True)
-        st.write("You can repeat with different routing choices. To get back to the base plan, reload data or change period.") 
-        
-                
-        # --------------------------------------------------------------------
+
+            scenario_products = active_materials(results, period=chosen_period)
+            scenario_product_default = sku if sku in scenario_products else (scenario_products[0] if scenario_products else "")
+            scenario_product = st.selectbox("Which material?", scenario_products, index=(scenario_products.index(scenario_product_default) if scenario_product_default in scenario_products else 0), key="dist_scen_product")
+
+            all_service_nodes = active_nodes(results, period=chosen_period, product=scenario_product)
+            location_default = all_service_nodes[0] if all_service_nodes else ""
+            location_to_move = st.selectbox("Which location do you want to reroute?", all_service_nodes, index=(all_service_nodes.index(location_default) if location_default in all_service_nodes else 0), key="dist_scen_loc")
+
+            scenario_lt = df_lt[df_lt["Product"] == scenario_product] if "Product" in df_lt.columns else df_lt.copy()
+            mask_to = scenario_lt["To_Location"] == location_to_move
+            if not scenario_lt[mask_to].empty:
+                current_suppliers = scenario_lt[mask_to]["From_Location"].dropna().unique().tolist()
+            else:
+                current_suppliers = []
+
+            # "Current Supplier" is now always read-only (not selectable)
+            if not current_suppliers:
+                st.info("This location has no supplier in the current network topology for this period (cannot reroute).")
+                reroute_enabled = False
+                current_supplier = None
+            else:
+                current_supplier = current_suppliers[0]
+                st.markdown(f"**Current supplier (from node):** `{current_supplier}`")
+                possible_suppliers = [n for n in all_service_nodes if n != location_to_move and n != current_supplier]
+                new_supplier_default = possible_suppliers[0] if possible_suppliers else ""
+                new_supplier = st.selectbox("New supplier (route to node):", possible_suppliers, index=(possible_suppliers.index(new_supplier_default) if new_supplier_default in possible_suppliers else 0), key="dist_scen_to")
+                reroute_enabled = True
+
+            # ---- Hardcoded Heating Tables ----
+            heating_winter = {
+                "BEEX": 0, "DEF1": 0, "DEF2": 21, "DEH1": 0, "DEW1": 14, "FRA1": 2, "FRM1": 0, "LUEX": 14,
+                "LUL1": 14, "PLPL": 1, "RSKR": 1, "SIS1": 4, "TRTU": 1, "TRTZ": 1, "ZASA": 0
+            }
+            heating_summer = {
+                "BEEX": 0, "DEF1": 0, "DEF2": 14, "DEH1": 0, "DEW1": 14, "FRA1": 1.5, "FRM1": 0, "LUEX": 14,
+                "LUL1": 14, "PLPL": 1, "RSKR": 1, "SIS1": 4, "TRTU": 1, "TRTZ": 1, "ZASA": 0
+            }
+
+            # Helper for season from timestamp
+            def infer_season(ts):
+                if isinstance(ts, pd.Timestamp):
+                    month = ts.month
+                else:
+                    # assume it's parseable
+                    try:
+                        month = pd.to_datetime(ts).month
+                    except Exception:
+                        return "WINTER"
+                if month in [10,11,12,1,2,3]:
+                    return "WINTER"
+                elif month in [7,8,9]:
+                    return "SUMMER"
+                else:
+                    return "OTHER"
+
+            if reroute_enabled and st.button("Simulate reroute scenario", key="dist_scen_run"):
+                rerouted_lt = scenario_lt.copy()
+                removal_mask = (
+                    (rerouted_lt["From_Location"] == current_supplier) &
+                    (rerouted_lt["To_Location"] == location_to_move)
+                )
+                rerouted_lt = rerouted_lt[~removal_mask]
+
+                # Determine what heating to add (by season & plant ID = location_to_move)
+                season = infer_season(chosen_period)
+                if season == "WINTER":
+                    heating_table = heating_winter
+                elif season == "SUMMER":
+                    heating_table = heating_summer
+                else:
+                    heating_table = heating_winter  # fallback
+
+                heating_days = heating_table.get(location_to_move, 0)
+                # get direct or minimal LT as before
+                direct_route = scenario_lt[
+                    (scenario_lt["From_Location"] == new_supplier) & (scenario_lt["To_Location"] == location_to_move)
+                ]
+                extra_note = ""
+                if not direct_route.empty:
+                    new_lt_days  = float(direct_route.iloc[0]["Lead_Time_Days"]) + heating_days
+                    new_lt_stddev = float(direct_route.iloc[0]["Lead_Time_Std_Dev"])
+                    lead_time_note = f"Used explicit lead time from {new_supplier} to {location_to_move} plus {heating_days}d heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
+                else:
+                    poss_lts = scenario_lt[scenario_lt["From_Location"] == new_supplier]
+                    if not poss_lts.empty:
+                        min_idx = poss_lts["Lead_Time_Days"].idxmin()
+                        new_lt_days = float(poss_lts.loc[min_idx, "Lead_Time_Days"]) + heating_days
+                        new_lt_stddev = float(poss_lts.loc[min_idx, "Lead_Time_Std_Dev"])
+                        extra_note = f" (minimal outbound LT from {new_supplier})"
+                        lead_time_note = f"No direct LT; used minimal outbound LT from {new_supplier}{extra_note} plus {heating_days}d heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
+                    else:
+                        new_lt_days = (float(rerouted_lt["Lead_Time_Days"].median()) if not rerouted_lt.empty else 7.0) + heating_days
+                        new_lt_stddev = float(rerouted_lt["Lead_Time_Std_Dev"].median()) if not rerouted_lt.empty else 2.0
+                        lead_time_note = f"No data: used network median LT for this SKU plus {heating_days}d heating: {new_lt_days:.1f}d, stddev {new_lt_stddev:.1f}d."
+                new_row = {
+                    "Product": scenario_product,
+                    "From_Location": new_supplier,
+                    "To_Location": location_to_move,
+                    "Lead_Time_Days": new_lt_days,
+                    "Lead_Time_Std_Dev": new_lt_stddev
+                }
+                rerouted_lt = pd.concat([rerouted_lt, pd.DataFrame([new_row])], ignore_index=True)
+
+                reroute_df_d = df_d[(df_d["Product"] == scenario_product) & (df_d["Period"] == chosen_period)].copy()
+                reroute_stats = stats[(stats["Product"] == scenario_product)].copy()
+                rerouted_results, _ = run_pipeline(
+                    df_d=reroute_df_d,
+                    stats=reroute_stats,
+                    df_lt=rerouted_lt,
+                    service_level=service_level,
+                    transitive=use_transitive,
+                    rho=var_rho,
+                    lt_mode_param=lt_mode,
+                    zero_if_no_net_fcst=zero_if_no_net_fcst,
+                    apply_cap=apply_cap,
+                    cap_range=cap_range,
+                )
+                old_results = results[
+                    (results["Product"] == scenario_product) &
+                    (results["Period"] == chosen_period)
+                ]
+
+                left = old_results.copy()
+                right = rerouted_results.copy()
+                for col in ['Safety_Stock', 'LT_Mean', 'Tier_Hops', 'Service_Level_Node']:
+                    left.rename(columns={col: col+'_old'}, inplace=True)
+                    right.rename(columns={col: col+'_new'}, inplace=True)
+                comparison = pd.merge(
+                    left[['Location', 'Safety_Stock_old', 'LT_Mean_old', 'Tier_Hops_old', 'Service_Level_Node_old']],
+                    right[['Location', 'Safety_Stock_new', 'LT_Mean_new', 'Tier_Hops_new', 'Service_Level_Node_new']],
+                    on='Location', how='outer'
+                )
+                comparison['ΔSS'] = comparison['Safety_Stock_new'].fillna(0) - comparison['Safety_Stock_old'].fillna(0)
+                comparison['%ΔSS'] = 100 * comparison['ΔSS'] / comparison['Safety_Stock_old'].replace(0,np.nan)
+                # Integer formatting for SS, LT, hops
+                comparison['Safety_Stock_old'] = comparison['Safety_Stock_old'].fillna(0).astype(int)
+                comparison['Safety_Stock_new'] = comparison['Safety_Stock_new'].fillna(0).astype(int)
+                comparison['LT_Mean_old'] = comparison['LT_Mean_old'].fillna(0).round().astype(int)
+                comparison['LT_Mean_new'] = comparison['LT_Mean_new'].fillna(0).round().astype(int)
+                comparison['Tier_Hops_old'] = comparison['Tier_Hops_old'].fillna(0).astype(int)
+                comparison['Tier_Hops_new'] = comparison['Tier_Hops_new'].fillna(0).astype(int)
+
+                mask = (
+                    (comparison['Safety_Stock_old'] != comparison['Safety_Stock_new']) |
+                    (comparison['LT_Mean_old'] != comparison['LT_Mean_new']) |
+                    (comparison['Tier_Hops_old'] != comparison['Tier_Hops_new']) |
+                    (comparison['Service_Level_Node_old'] != comparison['Service_Level_Node_new'])
+                )
+                changed_rows = comparison[mask].copy()
+                if changed_rows.empty:
+                    st.info("No nodes changed their Safety Stock, tier, or lead time due to this reroute.")
+                else:
+                    col_map = {
+                        'Location': 'Node',
+                        'Safety_Stock_old': 'SS Before',
+                        'Safety_Stock_new': 'SS After',
+                        'ΔSS': 'ΔSS units',
+                        '%ΔSS': 'ΔSS %',
+                        'LT_Mean_old': 'LT Before',
+                        'LT_Mean_new': 'LT After',
+                        'Tier_Hops_old': 'Hops Before',
+                        'Tier_Hops_new': 'Hops After',
+                        'Service_Level_Node_old': 'SL Before',
+                        'Service_Level_Node_new': 'SL After',
+                    }
+                    disp_df = changed_rows.rename(columns=col_map)
+
+                    def format_int_dot(v):
+                        if pd.isna(v): return ""
+                        try:
+                            return "{:,.0f}".format(int(round(v))).replace(",", ".")
+                        except: return str(int(v))
+
+                    def ss_delta_color(val):
+                        if pd.isna(val): return "black"
+                        return "green" if val < 0 else "red" if val > 0 else "black"
+
+                    table_md = "<table style='width:100%;text-align:center;background:#f6faf7;'><tr>"+ "".join(
+                        f"<th>{col}</th>" for col in list(col_map.values())
+                    ) + "</tr>"
+                    for _, row in disp_df.iterrows():
+                        table_md += "<tr>"
+                        for col in list(col_map.values()):
+                            v = row[col]
+                            style = ""
+                            if col == "ΔSS %":
+                                color = ss_delta_color(v)
+                                v_display = f"<strong>{v:+.1f}%</strong>" if pd.notnull(v) else ""
+                                style = f" style='color:{color}'"
+                            elif col == "ΔSS units":
+                                color = ss_delta_color(row["ΔSS %"])
+                                v_display = f"{format_int_dot(v)}" if pd.notnull(v) else ""
+                                style = f" style='color:{color}'"
+                            elif col in ("SL Before", "SL After"):
+                                v_display = f"{v:.2%}" if pd.notnull(v) else ""
+                            elif col in ("LT Before", "LT After"):
+                                v_display = format_int_dot(v)
+                            elif col in ("SS Before", "SS After"):
+                                v_display = format_int_dot(v)
+                            elif col in ("Hops Before", "Hops After"):
+                                v_display = f"{v:d}" if not pd.isna(v) else "0"
+                            else:
+                                v_display = str(v)
+                            table_md += f"<td{style}>{v_display}</td>"
+                        table_md += "</tr>"
+                    table_md += "</table>"
+                    st.markdown(
+                        f"""
+                        <div style="background:#f6faf7; border:1px solid #7fd47c; border-radius:10px; padding:12px 16px; margin:0 0 8px 0;">
+                        <b>Result – Each changed node:</b>
+                        {table_md}
+                        <div style='font-size:0.9em;color:#444;margin-top:6px;'>SS change color: <span style='color:green'>green</span> if SS decreases, <span style='color:red'>red</span> if SS increases.</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(f"<div style='margin-top:7px;font-size:1em;'>{lead_time_note}</div>", unsafe_allow_html=True)
+                st.write("You can repeat with different routing choices. To get back to the base plan, reload data or change period.")
+
+        # ----------- (AFTER expander, always) TOPOLOGY MAP IS RENDERED -----------
         st.markdown(
             """
             <div style="font-size:0.85rem; margin-bottom:4px; color:#555;">
