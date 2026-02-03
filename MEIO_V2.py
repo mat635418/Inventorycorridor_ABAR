@@ -1847,7 +1847,7 @@ with tab2:
     with col_main:
         render_selection_line("Selected:", product=sku, period_text=period_label(chosen_period))
         st.subheader("🕸️ Network Topology")
-
+        
         # ---- SCENARIO PLANNING BOX ----
         st.markdown("---")
         with st.expander("🚚 Distribution Strategy Scenario Planning ('What-If' Routing)", expanded=False):
@@ -2364,7 +2364,6 @@ with tab2:
             unsafe_allow_html=True,
         )
 
-# TAB 3 -----------------------------------------------------------------
 with tab3:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
@@ -2448,7 +2447,7 @@ with tab3:
         filtered = filtered[get_active_mask(filtered)]
         filtered = filtered.sort_values("Safety_Stock", ascending=False)
 
-        filtered_display = hide_zero_rows(
+        display_df = hide_zero_rows(
             filtered,
             check_cols=[
                 "Safety_Stock",
@@ -2458,38 +2457,61 @@ with tab3:
                 "Agg_Future_External",
             ],
         )
-        if "Period" in filtered_display.columns:
-            try:
-                filtered_display = filtered_display.copy()
-                filtered_display["Period_Label"] = filtered_display["Period"].apply(period_label)
-            except Exception:
-                filtered_display["Period_Label"] = filtered_display["Period"].astype(str)
+        if "Period" in display_df.columns:
+            display_df = display_df.copy()
+            display_df["Period_Label"] = display_df["Period"].apply(period_label)
         else:
-            filtered_display["Period_Label"] = ""
+            display_df["Period_Label"] = ""
 
-        # === Standard Table formatting ===
-        cols = [
+        # Define column map for compact headers and tooltips for readability.
+        col_map = {
+            "Product": "Material",
+            "Location": "Node",
+            "Period_Label": "Month",
+            "Forecast": "Fcst [unit]",
+            "D_day": "Avg/day [unit]",
+            "Safety_Stock": "SS [unit]",
+            "Days_Covered_by_SS": "SS Cov [days]",
+            "Adjustment_Status": "Status",
+            "Agg_Future_Demand": "Net Dem [unit]",
+            "Agg_Future_Internal": "Local Dem [unit]",
+            "Agg_Future_External": "NW Dem [unit]",
+        }
+        display_cols = [c for c in [
             "Product", "Location", "Period_Label", "Forecast", "D_day", "Safety_Stock",
             "Days_Covered_by_SS", "Adjustment_Status", "Agg_Future_Demand", "Agg_Future_Internal", "Agg_Future_External"
-        ]
-        display_cols = [c for c in cols if c in filtered_display.columns]
-        nice = filtered_display[display_cols].copy()
-        # Formatting for numerics
-        fmt_dict = {
-            "Forecast": "{:,.0f}",
-            "D_day": "{:,.2f}",
-            "Safety_Stock": "{:,.0f}",
-            "Days_Covered_by_SS": "{:,.2f}",
-            "Agg_Future_Demand": "{:,.0f}",
-            "Agg_Future_Internal": "{:,.0f}",
-            "Agg_Future_External": "{:,.0f}",
-        }
-        # Highlights for large SS
-        def highlight_ss(val):
+        ] if c in display_df.columns]
+        nice = display_df[display_cols].copy()
+        nice = nice.rename(columns=col_map)
+
+        # --- Formatting ---
+        def _fmt_int(val):
             try:
-                return "background-color: #d4f2ff" if float(val) > 0 else ""
-            except: return ""
-        styled = nice.style.format(fmt_dict).applymap(highlight_ss, subset=["Safety_Stock"])
+                return f"{int(round(val)):,}".replace(",", ".")
+            except:
+                return ""
+        def _fmt_2dec(val):
+            try:
+                return f"{val:,.2f}".replace(",", ".")
+            except:
+                return ""
+        # header styles for wrapping
+        header_props = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
+
+        pandas_fmt = {
+            "Fcst [unit]": _fmt_int,
+            "Avg/day [unit]": _fmt_2dec,
+            "SS [unit]": _fmt_int,
+            "SS Cov [days]": _fmt_int,
+            "Net Dem [unit]": _fmt_int,
+            "Local Dem [unit]": _fmt_int,
+            "NW Dem [unit]": _fmt_int,
+        }
+        styled = (
+            nice.style
+            .format(pandas_fmt)
+            .set_properties(**header_props, axis=1)
+        )
         st.dataframe(styled, use_container_width=True)
 
 # TAB 4 -----------------------------------------------------------------
@@ -2544,7 +2566,6 @@ with tab4:
     with col_main:
         render_selection_line("Selected:", product=sku, period_text=period_label(eff_period))
         st.subheader("⚖️ Efficiency & Policy Analysis — Summary Metrics")
-
         snapshot_period = eff_period if eff_period in all_periods else (all_periods[-1] if all_periods else None)
         if snapshot_period is None:
             st.warning("No period data available for Efficiency Analysis.")
@@ -2553,64 +2574,59 @@ with tab4:
             eff = get_active_snapshot(results, snapshot_period)
             eff = eff[eff["Product"] == sku].copy()
 
-        eff["SS_to_Demand_Ratio"] = (
-            eff["Safety_Stock"] / eff["Forecast"].replace(0, np.nan)
-        ).fillna(0)
-
-        eff_display = hide_zero_rows(eff)
-
+        # --- AGGREGATE: SS Coverage = sum of SS over sum of daily avg demand ---
         total_ss_sku = eff["Safety_Stock"].sum()
-        total_forecast_sku = eff["Forecast"].sum()
-        sku_ratio = total_ss_sku / total_forecast_sku if total_forecast_sku > 0 else 0
+        total_avg_daily_sku = eff["Forecast"].sum() / days_per_month if days_per_month > 0 else 0
+        sku_coverage = total_ss_sku / total_avg_daily_sku if total_avg_daily_sku > 0 else 0
 
         all_res = get_active_snapshot(results, snapshot_period) if snapshot_period is not None else results
         global_total_ss = all_res["Safety_Stock"].sum()
-        global_total_fc = all_res["Forecast"].sum()
-        global_ratio = global_total_ss / global_total_fc if global_total_fc > 0 else 0
+        global_avg_day = all_res["Forecast"].sum() / days_per_month if days_per_month > 0 else 0
+        global_coverage = global_total_ss / global_avg_day if global_avg_day > 0 else 0
 
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Months of FC held by SS (selection)", f"{sku_ratio:.2f}")
-        m2.metric("Months of FC held by SS (all materials)", f"{global_ratio:.2f}")
-        m3.metric("Total SS for Material", euro_format(int(total_ss_sku), True))
-        m4.metric("Total Forecast", euro_format(int(total_forecast_sku), True))
+        m1.metric("Days of Coverage (selection)", f"{int(round(sku_coverage))}")
+        m2.metric("Days Coverage (all materials)", f"{int(round(global_coverage))}")
+        m3.metric("Total SS", euro_format(int(total_ss_sku), True))
+        m4.metric("Total Forecast", euro_format(int(eff['Forecast'].sum()), True))
         st.markdown("---")
 
         c1, c2 = st.columns([7, 3])
         with c1:
             st.markdown("**Top Nodes by Safety Stock (snapshot)**")
-            if not eff_display.empty:
-                eff_top = eff_display.sort_values("Safety_Stock", ascending=False).head(10)
+            if not eff.empty:
+                eff_top = eff.sort_values("Safety_Stock", ascending=False).head(10)
                 if "Period" in eff_top.columns:
                     eff_top = eff_top.copy()
                     eff_top["Period_Label"] = eff_top["Period"].apply(period_label)
                 else:
                     eff_top["Period_Label"] = ""
-                # Standard table style
                 cols = [
-                    "Location", "Period_Label", "Safety_Stock", "SS_to_Demand_Ratio", "Adjustment_Status", "Forecast", "Agg_Future_Demand"
+                    "Location", "Period_Label", "Safety_Stock", "Days_Covered_by_SS", "Adjustment_Status", "Forecast", "Agg_Future_Demand"
                 ]
                 display_cols = [c for c in cols if c in eff_top.columns]
-                eff_top_std = eff_top[display_cols].copy()
-                fmt_dict = {
-                    "Safety_Stock": "{:,.0f}",
-                    "SS_to_Demand_Ratio": "{:.2f}",
-                    "Forecast": "{:,.0f}",
-                    "Agg_Future_Demand": "{:,.0f}",
+                compact_labels = {
+                    "Location":"Node", "Period_Label":"Month", "Safety_Stock":"SS [unit]",
+                    "Days_Covered_by_SS":"SS Cov [days]", "Adjustment_Status":"Status",
+                    "Forecast":"Fcst [unit]", "Agg_Future_Demand":"Net Dem [unit]"
                 }
-                # color highlight for SS > 0
-                def highlight_ss(val):
-                    try:
-                        return "background-color: #d4f2ff" if float(val) > 0 else ""
-                    except: return ""
-                styled = eff_top_std.style.format(fmt_dict).applymap(highlight_ss, subset=["Safety_Stock"])
+                eff_top_std = eff_top[display_cols].rename(columns=compact_labels)
+                tbl_fmt = {
+                    "SS [unit]": _fmt_int,
+                    "SS Cov [days]": _fmt_int,
+                    "Fcst [unit]": _fmt_int,
+                    "Net Dem [unit]": _fmt_int,
+                }
+                header_style = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
+                styled = eff_top_std.style.format(tbl_fmt).set_properties(**header_style, axis=1)
                 st.dataframe(styled, use_container_width=True)
             else:
                 st.write("No non-zero nodes for this selection.")
 
         with c2:
             st.markdown("**Status Breakdown**")
-            if not eff_display.empty:
-                st.table(eff_display["Adjustment_Status"].value_counts())
+            if not eff.empty:
+                st.table(eff["Adjustment_Status"].value_counts())
             else:
                 st.write("No non-zero nodes for this selection.")
 
@@ -3152,143 +3168,138 @@ with tab6:
                 unsafe_allow_html=True,
             )
     
-    # TAB 7 -----------------------------------------------------------------
-    with tab7:
-        col_main, col_badge = st.columns([17, 3])
-        with col_badge:
-            render_logo_above_parameters(scale=1.5)
+# ---- TAB 7: Remove first table. Correct SS coverage KPI calculation. ----
+with tab7:
+    col_main, col_badge = st.columns([17, 3])
+    with col_badge:
+        render_logo_above_parameters(scale=1.5)
 
-            sel_prod_default = default_product
-            sel_prod_index = all_products.index(sel_prod_default) if all_products else 0
-            selected_product = st.selectbox(
-                "MATERIAL",
-                all_products,
-                index=sel_prod_index,
-                key="mat_sel",
+        sel_prod_default = default_product
+        sel_prod_index = all_products.index(sel_prod_default) if all_products else 0
+        selected_product = st.selectbox(
+            "MATERIAL",
+            all_products,
+            index=sel_prod_index,
+            key="mat_sel",
+        )
+
+        if period_labels:
+            try:
+                sel_label = period_label(default_period) if default_period is not None else period_labels[-1]
+                sel_period_index = (
+                    period_labels.index(sel_label)
+                    if sel_label in period_labels
+                    else len(period_labels) - 1
+                )
+            except Exception:
+                sel_period_index = len(period_labels) - 1
+            chosen_label = st.selectbox(
+                "PERIOD",
+                period_labels,
+                index=sel_period_index,
+                key="mat_period",
             )
+            selected_period = period_label_map.get(chosen_label, default_period)
+        else:
+            selected_period = CURRENT_MONTH_TS
 
-            if period_labels:
+        mat_period_export = get_active_snapshot(
+            results,
+            selected_period if selected_period is not None else default_period,
+        )
+        mat_period_export = mat_period_export[
+            (mat_period_export["Product"] == selected_product)
+        ].copy()
+
+        with st.container():
+            st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
+            st.download_button(
+                "💾 Export CSV",
+                data=mat_period_export.to_csv(index=False),
+                file_name=f"material_view_{selected_product}_{period_label(selected_period)}.csv",
+                mime="text/csv",
+                key="mat_export_btn",
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+    with col_main:
+        render_selection_line(
+            "Selected:",
+            product=selected_product,
+            period_text=period_label(selected_period),
+        )
+        st.subheader("📦 View by Material (+ SS attribution)")
+        render_tab7_explainer()
+
+        mat_period_df = get_active_snapshot(
+            results,
+            selected_period if selected_period is not None else default_period,
+        )
+        mat_period_df = mat_period_df[
+            (mat_period_df["Product"] == selected_product)
+        ].copy()
+
+        if mat_period_df.empty:
+            st.warning("No data for this material/period.")
+        else:
+            mat_period_df_display = hide_zero_rows(mat_period_df)
+            # --- REMOVE the summary KPI table here as requested ---
+
+            st.markdown("---")
+            st.markdown("### Node-level view (normal table)")
+
+            # Prepare a clean, readable table
+            table_cols = [
+                "Product",
+                "Location",
+                "Period",
+                "Forecast",
+                "Agg_Future_Demand",
+                "Agg_Future_Internal",
+                "Agg_Future_External",
+                "Safety_Stock",
+                "Days_Covered_by_SS",
+                "LT_Mean",
+                "LT_Std",
+                "Service_Level_Node",
+                "Tier_Hops",
+                "Adjustment_Status",
+            ]
+            existing_cols = [c for c in table_cols if c in mat_period_df_display.columns]
+            node_table = mat_period_df_display[existing_cols].copy()
+            two_dec_cols = ["Days_Covered_by_SS", "Service_Level_Node"]
+            node_table_fmt = df_format_for_display(
+                node_table,
+                cols=None,
+                two_decimals_cols=two_dec_cols,
+            )
+            if "Period" in node_table_fmt.columns:
                 try:
-                    sel_label = period_label(default_period) if default_period is not None else period_labels[-1]
-                    sel_period_index = (
-                        period_labels.index(sel_label)
-                        if sel_label in period_labels
-                        else len(period_labels) - 1
-                    )
+                    node_table_fmt["Period"] = node_table_fmt["Period"].apply(period_label)
                 except Exception:
-                    sel_period_index = len(period_labels) - 1
-                chosen_label = st.selectbox(
-                    "PERIOD",
-                    period_labels,
-                    index=sel_period_index,
-                    key="mat_period",
-                )
-                selected_period = period_label_map.get(chosen_label, default_period)
-            else:
-                selected_period = CURRENT_MONTH_TS
+                    pass
 
-            mat_period_export = get_active_snapshot(
-                results,
-                selected_period if selected_period is not None else default_period,
-            )
-            mat_period_export = mat_period_export[
-                (mat_period_export["Product"] == selected_product)
-            ].copy()
-
-            with st.container():
-                st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
-                st.download_button(
-                    "💾 Export CSV",
-                    data=mat_period_export.to_csv(index=False),
-                    file_name=f"material_view_{selected_product}_{period_label(selected_period)}.csv",
-                    mime="text/csv",
-                    key="mat_export_btn",
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-
-        with col_main:
-            render_selection_line(
-                "Selected:",
-                product=selected_product,
-                period_text=period_label(selected_period),
-            )
-            st.subheader("📦 View by Material (+ SS attribution)")
-            render_tab7_explainer()
-
-            # ---- MAIN TABLE (REVERTED TO NORMAL TABLE VIEW) ----
-            mat_period_df = get_active_snapshot(
-                results,
-                selected_period if selected_period is not None else default_period,
-            )
-            mat_period_df = mat_period_df[
-                (mat_period_df["Product"] == selected_product)
-            ].copy()
-
-            if mat_period_df.empty:
-                st.warning("No data for this material/period.")
-            else:
-                mat_period_df_display = hide_zero_rows(mat_period_df)
-
-                # Basic KPIs on top
-                total_forecast = mat_period_df["Forecast"].sum()
-                total_ss = mat_period_df["Safety_Stock"].sum()
-                nodes_count = mat_period_df["Location"].nunique()
-                try:
-                    avg_days_covered = (
-                        mat_period_df["Days_Covered_by_SS"]
-                        .replace([np.inf, -np.inf], np.nan)
-                        .mean()
-                    )
-                except Exception:
-                    avg_days_covered = np.nan
-
-                k1, k2, k3, k4 = st.columns(4)
-                k1.metric("Total Local Forecast", euro_format(total_forecast, True))
-                k2.metric("Total Safety Stock (sum nodes)", euro_format(total_ss, True))
-                k3.metric("Nodes", f"{nodes_count}")
-                k4.metric(
-                    "Avg Days Covered (nodes)",
-                    f"{avg_days_covered:.1f}" if not pd.isna(avg_days_covered) else "N/A",
-                )
-
-                st.markdown("---")
-                st.markdown("### Node-level view (normal table)")
-
-                # Prepare a clean, readable table
-                table_cols = [
-                    "Product",
-                    "Location",
-                    "Period",
-                    "Forecast",
-                    "Agg_Future_Demand",
-                    "Agg_Future_Internal",
-                    "Agg_Future_External",
-                    "Safety_Stock",
-                    "Days_Covered_by_SS",
-                    "LT_Mean",
-                    "LT_Std",
-                    "Service_Level_Node",
-                    "Tier_Hops",
-                    "Adjustment_Status",
-                ]
-                existing_cols = [c for c in table_cols if c in mat_period_df_display.columns]
-                node_table = mat_period_df_display[existing_cols].copy()
-
-                # Format numerics for display
-                two_dec_cols = ["Days_Covered_by_SS", "Service_Level_Node"]
-                node_table_fmt = df_format_for_display(
-                    node_table,
-                    cols=None,
-                    two_decimals_cols=two_dec_cols,
-                )
-                if "Period" in node_table_fmt.columns:
-                    try:
-                        node_table_fmt["Period"] = node_table_fmt["Period"].apply(period_label)
-                    except Exception:
-                        pass
-
-                st.dataframe(node_table_fmt, use_container_width=True)
+            # Shorten headers, make readable/wrapped
+            col_nice = {
+                "Product": "Material",
+                "Location": "Node",
+                "Period": "Month",
+                "Forecast": "Fcst [unit]",
+                "Agg_Future_Demand": "Net Dem [unit]",
+                "Agg_Future_Internal": "Local Dem",
+                "Agg_Future_External": "NW Dem",
+                "Safety_Stock": "SS [unit]",
+                "Days_Covered_by_SS": "SS Cov [days]",
+                "LT_Mean": "LT µ [days]",
+                "LT_Std": "LT σ [days]",
+                "Service_Level_Node": "SL node",
+                "Tier_Hops": "Tier/Hops",
+                "Adjustment_Status": "Status"
+            }
+            node_table_fmt = node_table_fmt.rename(columns=col_nice)
+            wrap_header = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
+            st.dataframe(node_table_fmt.style.set_properties(**wrap_header, axis=1), use_container_width=True)
 
                 # ---- SS ATTRIBUTION (kept as in current version: waterfall + summary) ----
                 st.markdown("---")
@@ -3541,6 +3552,9 @@ with tab8:
         else:
             selected_period_all = CURRENT_MONTH_TS
 
+        # --- Choose alarm threshold for SS coverage in days ---
+        alarm_threshold = st.slider("Coverage Days Alarm Threshold", min_value=1, max_value=120, value=30, help="Cards with coverage below this will be shown in red, otherwise in green.")
+
         # --- Aggregate data exactly as before ---
         snapshot_all = get_active_snapshot(
             results,
@@ -3554,11 +3568,9 @@ with tab8:
             Local_Forecast_Month=("Forecast", "sum"),
             Safety_Stock=("Safety_Stock", "sum"),
             Max_Corridor=("Max_Corridor", "sum"),
-            Avg_Day_Demand=("D_day", "mean"),
-            Avg_SS_Days_Coverage=("Days_Covered_by_SS", "mean"),
+            Avg_Day_Demand=("Forecast", lambda x: x.sum() / days_per_month if days_per_month > 0 else 0),
             Nodes=("Location", "nunique"),
         )
-
         if "Tier_Hops" in snapshot_all.columns:
             end_nodes = (
                 snapshot_all[snapshot_all["Tier_Hops"] == 0]
@@ -3570,38 +3582,37 @@ with tab8:
         else:
             agg_all["End_Nodes"] = np.nan
 
-        # keep only rows with non‑zero SS
+        # Only rows with SS>0
         agg_all = agg_all[agg_all["Safety_Stock"] > 0].copy()
-
-        # extra derived field (not strictly needed for visual but kept for export)
         agg_all["Reorder_Point"] = (
             agg_all["Safety_Stock"] + agg_all["Local_Forecast_Month"]
         )
 
-        agg_all["SS_to_Demand_Ratio_%"] = np.where(
-            agg_all["Network_Demand_Month"] > 0,
-            (agg_all["Safety_Stock"] / agg_all["Network_Demand_Month"]) * 100.0,
-            0.0,
+        # --- FIXED: proper total SS coverage in days per material ---
+        agg_all["SS_Coverage_Days"] = agg_all.apply(
+            lambda r: r["Safety_Stock"] / r["Avg_Day_Demand"] if r["Avg_Day_Demand"] > 0 else 0, axis=1
         )
 
-        for c in [
-            "Network_Demand_Month",
-            "Local_Forecast_Month",
-            "Safety_Stock",
-            "Max_Corridor",
-            "Reorder_Point",
-        ]:
-            if c in agg_all.columns:
-                agg_all[c] = agg_all[c].fillna(0.0)
-        for c in [
-            "Avg_Day_Demand",
-            "Avg_SS_Days_Coverage",
-            "SS_to_Demand_Ratio_%"
-        ]:
-            if c in agg_all.columns:
-                agg_all[c] = agg_all[c].fillna(0.0)
+        agg_all["SS_to_Demand_Ratio_%"] = (
+            agg_all["Safety_Stock"] / agg_all["Network_Demand_Month"] * 100.0
+        ).replace([np.inf, -np.inf], 0.0).fillna(0.0)
 
-        # --- CSV export ---
+        # Format for display: all numbers no decimals, avg/day with two decimals
+        def fmt_int(v):
+            try: return f"{int(round(v)):,}".replace(",", ".")
+            except: return ""
+        def fmt_ratio(v):
+            try: return f"{int(round(v))}"
+            except: return ""
+        def fmt_2d(v):
+            try: return f"{v:,.2f}".replace(",", ".")
+            except: return ""
+        def color_cov(days):
+            try:
+                val = float(days)
+                return "red" if val < alarm_threshold else "green"
+            except: return "grey"
+
         with st.container():
             st.markdown(
                 '<div class="export-csv-btn">', unsafe_allow_html=True
@@ -3614,9 +3625,7 @@ with tab8:
                 key="allmat_export_btn",
             )
             st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown(
-                "<div style='height:6px'></div>", unsafe_allow_html=True
-            )
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
     with col_main:
         render_selection_line(
@@ -3641,22 +3650,11 @@ with tab8:
             agg_view = agg_all.sort_values(
                 "Avg_Day_Demand", ascending=False
             ).reset_index(drop=True)
-
-            # --- CSS for card‑like layout (kept, but simplified color logic for last column) ---
             st.markdown(
                 """
                 <style>
-                  .mat-strip-container {
-                    width: 100%;
-                    overflow-x: auto;
-                    padding-bottom: 6px;
-                  }
-                  .mat-cards-row {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 8px;
-                    min-width: 650px;
-                  }
+                  .mat-strip-container { width: 100%; overflow-x: auto; padding-bottom: 6px;}
+                  .mat-cards-row { display: flex; flex-direction: column; gap: 8px; min-width: 650px;}
                   .mat-card {
                     display: grid;
                     grid-template-columns: 150px repeat(4, minmax(110px, 1fr));
@@ -3667,96 +3665,59 @@ with tab8:
                     box-shadow: 0 2px 4px rgba(15,23,42,0.10);
                   }
                   .mat-card-col-header {
-                    font-size: 0.70rem;
-                    font-weight: 600;
-                    color: #616161;
-                    text-transform: uppercase;
-                    letter-spacing: 0.03em;
-                    margin-bottom: 2px;
+                    font-size: 0.70rem; font-weight: 600; color: #616161;
+                    text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 2px;
                   }
                   .mat-card-col-value {
-                    font-size: 0.95rem;
-                    font-weight: 700;
-                    color: #111827;
+                    font-size: 0.95rem; font-weight: 700; color: #111827;
                   }
                   .mat-product-badge {
-                    display: flex;
-                    align-items: center;
-                    justify-content: flex-start;
-                    padding: 6px 10px;
-                    border-radius: 999px;
-                    font-weight: 800;
-                    font-size: 0.92rem;
-                    color: #424242;
-                    white-space: nowrap;
-                    background: #f5f5f5;
-                    border: 1px solid #e0e0e0;
+                    display: flex; align-items: center; justify-content: flex-start;
+                    padding: 6px 10px; border-radius: 999px; font-weight: 800; font-size: 0.92rem;
+                    color: #424242; white-space: nowrap; background: #f5f5f5; border: 1px solid #e0e0e0;
                   }
-                  .mat-product-chevron {
-                    margin-right: 6px;
-                    font-size: 0.80rem;
-                    color: #757575;
-                  }
+                  .mat-product-chevron { margin-right: 6px; font-size: 0.80rem; color: #757575;}
                   .mat-pill-blue {
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    min-width: 54px;
-                    padding: 2px 8px;
-                    border-radius: 999px;
-                    font-size: 0.85rem;
-                    font-weight: 700;
-                    color: #ffffff;
-                    background: linear-gradient(90deg,#2196f3,#64b5f6);
+                    display: inline-flex; align-items: center; justify-content: center;
+                    min-width: 54px; padding: 2px 8px; border-radius: 999px;
+                    font-size: 0.85rem; font-weight: 700; color: #ffffff;
+                    background: linear-gradient(90deg,#2196f3,#64b5f6);}
+                  .mat-pill-red {
+                    display: inline-flex; align-items: center; justify-content: center;
+                    min-width: 54px; padding: 2px 8px; border-radius: 999px;
+                    font-size: 0.85rem; font-weight: 700; color: #fff;
+                    background: linear-gradient(90deg,#e53935,#ef5350);
                   }
+                  .mat-pill-green {
+                    display: inline-flex; align-items: center; justify-content: center;
+                    min-width: 54px; padding: 2px 8px; border-radius: 999px;
+                    font-size: 0.85rem; font-weight: 700; color: #fff;
+                    background: linear-gradient(90deg,#43a047,#66bb6a);}
                   .mat-pill-grey {
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    min-width: 54px;
-                    padding: 2px 8px;
-                    border-radius: 999px;
-                    font-size: 0.85rem;
-                    font-weight: 700;
-                    color: #424242;
-                    background: #eeeeee;
-                    border: 1px solid #e0e0e0;
+                    display: inline-flex; align-items: center; justify-content: center;
+                    min-width: 54px; padding: 2px 8px; border-radius: 999px;
+                    font-size: 0.85rem; font-weight: 700; color: #424242;
+                    background: #eeeeee; border: 1px solid #e0e0e0;
                   }
                 </style>
                 """,
                 unsafe_allow_html=True,
             )
-
-            # Formatting helpers
-            def format_3dec(v):
-                try:
-                    return f"{float(v):,.3f}".replace(",", ".")
-                except Exception:
-                    return str(v)
-
-            def format_int_or_dash(v):
-                try:
-                    return f"{int(round(float(v))):,}".replace(",", ".")
-                except Exception:
-                    return "–"
-
             # Build HTML for all cards
             cards_html_parts = [
                 '<div class="mat-strip-container"><div class="mat-cards-row">'
             ]
-
             for _, r in agg_view.iterrows():
                 prod = str(r["Product"])
                 avg_daily = r["Avg_Day_Demand"]
                 ss_units = r["Safety_Stock"]
-                days_cov = r["Avg_SS_Days_Coverage"]
+                ss_cov = r["SS_Coverage_Days"]
                 local_fc = r["Local_Forecast_Month"]
-
-                avg_daily_txt = format_3dec(avg_daily)
-                ss_txt = format_3dec(ss_units)
-                cov_txt = format_int_or_dash(days_cov)
-                fc_txt = format_3dec(local_fc)
-
+                avg_daily_txt = fmt_2d(avg_daily)
+                ss_txt = fmt_int(ss_units)
+                cov_txt = fmt_int(ss_cov)
+                fc_txt = fmt_int(local_fc)
+                pill_cov_cls = 'mat-pill-red' if ss_cov < alarm_threshold else 'mat-pill-green'
                 card_html = (
                     '<div class="mat-card">'
                     '<div style="display:flex;align-items:center;">'
@@ -3770,13 +3731,13 @@ with tab8:
                     f'<div class="mat-card-col-value">{avg_daily_txt}</div>'
                     "</div>"
                     '<div>'
-                    '<div class="mat-card-col-header">Calculated Safety Stock</div>'
+                    '<div class="mat-card-col-header">Safety Stock</div>'
                     f'<div class="mat-card-col-value">{ss_txt}</div>'
                     "</div>"
                     '<div>'
                     '<div class="mat-card-col-header">SS Coverage (days)</div>'
                     '<div class="mat-card-col-value">'
-                    f'<span class="mat-pill-blue">{cov_txt}</span>'
+                    f'<span class="{pill_cov_cls}">{cov_txt}</span>'
                     "</div>"
                     "</div>"
                     '<div>'
@@ -3788,16 +3749,13 @@ with tab8:
                     "</div>"
                 )
                 cards_html_parts.append(card_html)
-
             cards_html_parts.append("</div></div>")
             final_html = "".join(cards_html_parts)
-
             st.markdown(final_html, unsafe_allow_html=True)
 
-            # ----------- WORDCLOUD of SS by material, key drivers -----------
+            # ----------- WORDCLOUD -----------
             st.markdown("---")
             st.subheader("🔎 Wordcloud of Safety Stock drivers by material")
-            # Create the word-to-weight dict
             wc_dict = dict(zip(agg_view["Product"], agg_view["Safety_Stock"]))
             if wc_dict:
                 wordcloud = WordCloud(width=800, height=400, background_color="white", colormap='Blues').generate_from_frequencies(wc_dict)
