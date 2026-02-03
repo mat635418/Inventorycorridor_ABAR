@@ -2618,7 +2618,12 @@ with tab4:
                     "Net Dem [unit]": _fmt_int,
                 }
                 header_style = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
-                styled = eff_top_std.style.format(tbl_fmt).set_properties(**header_style, axis=1)
+                # Highlight SS column with light red background
+                ss_highlight = {'background-color': '#ffcccc'}
+                styled = (eff_top_std.style
+                         .format(tbl_fmt)
+                         .set_properties(**header_style, axis=1)
+                         .set_properties(**ss_highlight, subset=['SS [unit]']))
                 st.dataframe(styled, use_container_width=True)
             else:
                 st.write("No non-zero nodes for this selection.")
