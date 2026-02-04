@@ -984,8 +984,22 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive: bool = Tru
     for month in months:
         df_month = df_forecast[df_forecast["Period"] == month]
         for prod in products:
-            p_stats = df_stats[df_stats["Product"] == prod].set_index("Location").to_dict("index")
-            p_fore = df_month[df_month["Product"] == prod].set_index("Location").to_dict("index")
+            # Handle potential duplicate Location entries by aggregating
+            p_stats_filtered = df_stats[df_stats["Product"] == prod]
+            if not p_stats_filtered.empty and p_stats_filtered["Location"].duplicated().any():
+                # Group by Location and aggregate if duplicates exist
+                p_stats_filtered = p_stats_filtered.groupby("Location").first().reset_index()
+            p_stats = p_stats_filtered.set_index("Location").to_dict("index")
+            
+            # Handle potential duplicate Location entries by aggregating Forecast values
+            p_fore_filtered = df_month[df_month["Product"] == prod]
+            if not p_fore_filtered.empty and p_fore_filtered["Location"].duplicated().any():
+                # Sum Forecast values for duplicate locations
+                numeric_cols = p_fore_filtered.select_dtypes(include=[np.number]).columns.tolist()
+                agg_dict = {col: 'sum' if col in numeric_cols else 'first' for col in p_fore_filtered.columns if col != 'Location'}
+                p_fore_filtered = p_fore_filtered.groupby("Location", as_index=False).agg(agg_dict)
+            p_fore = p_fore_filtered.set_index("Location").to_dict("index")
+            
             p_lt = routes_by_product.get(prod, pd.DataFrame(columns=df_lt.columns))
 
             nodes = set(df_month[df_month["Product"] == prod]["Location"])
