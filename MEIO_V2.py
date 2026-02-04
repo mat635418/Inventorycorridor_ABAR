@@ -1131,15 +1131,32 @@ def run_pipeline(
     zero_if_no_net_fcst: bool = True,
     apply_cap: bool = True,
     cap_range=(0, 200),
+    hop1_sl: float = None,
+    hop2_sl: float = None,
+    hop3_sl: float = None,
 ):
-    # Calculate hop-based SL values based on the end-node service_level parameter
-    # Maintain the same ratios as the original hardcoded values (99%, 95%, 90%, 85%)
-    # Original ratios: hop1/hop0=0.9596, hop2/hop0=0.9091, hop3/hop0=0.8586
+    # Calculate hop-based SL values
+    # If hop SLs are provided, use them; otherwise use the original ratios
+    if hop1_sl is None:
+        hop1_sl = service_level * 0.9596
+    else:
+        hop1_sl = hop1_sl / 100.0  # Convert from percentage
+    
+    if hop2_sl is None:
+        hop2_sl = service_level * 0.9091
+    else:
+        hop2_sl = hop2_sl / 100.0  # Convert from percentage
+    
+    if hop3_sl is None:
+        hop3_sl = service_level * 0.8586
+    else:
+        hop3_sl = hop3_sl / 100.0  # Convert from percentage
+    
     hop_to_sl = {
         0: service_level,
-        1: service_level * 0.9596,
-        2: service_level * 0.9091,
-        3: service_level * 0.8586
+        1: hop1_sl,
+        2: hop2_sl,
+        3: hop3_sl
     }
 
     def sl_for_hop(h: int) -> float:
@@ -1579,6 +1596,9 @@ if s_file and d_file and lt_file:
         zero_if_no_net_fcst=zero_if_no_net_fcst,
         apply_cap=apply_cap,
         cap_range=cap_range,
+        hop1_sl=hop1_sl_global,
+        hop2_sl=hop2_sl_global,
+        hop3_sl=hop3_sl_global,
     )
 
     hist = df_s[["Product", "Location", "Period", "Consumption", "Forecast"]].copy()
@@ -2055,6 +2075,9 @@ with tab2:
                     zero_if_no_net_fcst=zero_if_no_net_fcst,
                     apply_cap=apply_cap,
                     cap_range=cap_range,
+                    hop1_sl=hop1_sl_global,
+                    hop2_sl=hop2_sl_global,
+                    hop3_sl=hop3_sl_global,
                 )
                 old_results = results[
                     (results["Product"] == scenario_product) &
