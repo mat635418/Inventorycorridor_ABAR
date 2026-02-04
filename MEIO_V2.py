@@ -2184,6 +2184,7 @@ with tab2:
         # -------- MAP CODE UNCHANGED, always after scenario box --------
         label_data = (
             results[results["Period"] == chosen_period]
+            .drop_duplicates(subset=["Product", "Location"], keep="first")
             .set_index(["Product", "Location"])
             .to_dict("index")
         )

@@ -394,8 +394,8 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive: bool = Tru
     for month in months:
         df_month = df_forecast[df_forecast["Period"] == month]
         for prod in products:
-            p_stats = df_stats[df_stats["Product"] == prod].set_index("Location").to_dict("index")
-            p_fore = df_month[df_month["Product"] == prod].set_index("Location").to_dict("index")
+            p_stats = df_stats[df_stats["Product"] == prod].drop_duplicates(subset=["Location"], keep="first").set_index("Location").to_dict("index")
+            p_fore = df_month[df_month["Product"] == prod].drop_duplicates(subset=["Location"], keep="first").set_index("Location").to_dict("index")
             p_lt = routes_by_product.get(prod, pd.DataFrame(columns=df_lt.columns))
 
             nodes = set(df_month[df_month["Product"] == prod]["Location"])
@@ -1253,6 +1253,7 @@ if s_file and d_file and lt_file:
 
             label_data = (
                 results[results["Period"] == chosen_period]
+                .drop_duplicates(subset=["Product", "Location"], keep="first")
                 .set_index(["Product", "Location"])
                 .to_dict("index")
             )
