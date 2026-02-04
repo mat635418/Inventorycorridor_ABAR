@@ -984,8 +984,30 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive: bool = Tru
     for month in months:
         df_month = df_forecast[df_forecast["Period"] == month]
         for prod in products:
-            p_stats = df_stats[df_stats["Product"] == prod].set_index("Location").to_dict("index")
-            p_fore = df_month[df_month["Product"] == prod].set_index("Location").to_dict("index")
+            # Handle potential duplicate Location entries by aggregating
+            p_stats_filtered = df_stats[df_stats["Product"] == prod]
+            if p_stats_filtered["Location"].duplicated().any():
+                # Group by Location and keep first occurrence for stats
+                # This handles rare cases where stats have duplicate locations
+                p_stats_filtered = p_stats_filtered.groupby("Location").first().reset_index()
+            p_stats = p_stats_filtered.set_index("Location").to_dict("index")
+            
+            # Handle potential duplicate Location entries by aggregating Forecast values
+            p_fore_filtered = df_month[df_month["Product"] == prod]
+            if p_fore_filtered["Location"].duplicated().any():
+                # Sum Forecast values for duplicate locations (e.g., from date ambiguity)
+                # Build aggregation dict: sum for Forecast and numeric columns, first for others
+                agg_dict = {}
+                for col in p_fore_filtered.columns:
+                    if col in ['Product', 'Period', 'PurchasingGroupName']:
+                        agg_dict[col] = 'first'  # Keep first value for categorical/identifier columns
+                    elif col == 'Forecast' or pd.api.types.is_numeric_dtype(p_fore_filtered[col]):
+                        agg_dict[col] = 'sum'  # Sum numeric values
+                    else:
+                        agg_dict[col] = 'first'  # Default: keep first for unknown columns
+                p_fore_filtered = p_fore_filtered.groupby("Location", as_index=False).agg(agg_dict)
+            p_fore = p_fore_filtered.set_index("Location").to_dict("index")
+            
             p_lt = routes_by_product.get(prod, pd.DataFrame(columns=df_lt.columns))
 
             nodes = set(df_month[df_month["Product"] == prod]["Location"])
