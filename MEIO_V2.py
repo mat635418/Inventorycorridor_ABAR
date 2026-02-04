@@ -1683,10 +1683,11 @@ if s_file and d_file and lt_file:
     if "global_period" not in st.session_state:
         st.session_state.global_period = default_period
 
-    def render_global_filters(material_enabled=True, location_enabled=True, period_enabled=True):
+    def render_global_filters(material_enabled=True, location_enabled=True, period_enabled=True, tab_id=""):
         """
         Render global filter controls that apply across tabs.
         Greyed out filters show but are disabled when not relevant.
+        tab_id: unique identifier for the tab to avoid duplicate widget keys
         """
         st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
         
@@ -1698,7 +1699,7 @@ if s_file and d_file and lt_file:
                 "MATERIAL", 
                 mat_opts, 
                 index=mat_index, 
-                key=f"global_mat_{id(mat_opts)}",
+                key=f"global_mat_{tab_id}_{id(mat_opts)}",
                 help="Select material to analyze"
             )
             if new_mat != st.session_state.global_material:
@@ -1714,7 +1715,7 @@ if s_file and d_file and lt_file:
                 "MATERIAL", 
                 [st.session_state.global_material], 
                 disabled=True,
-                key=f"global_mat_disabled_{id(all_products)}",
+                key=f"global_mat_disabled_{tab_id}_{id(all_products)}",
                 help="Material filter not applicable for this tab"
             )
         
@@ -1730,7 +1731,7 @@ if s_file and d_file and lt_file:
                 "LOCATION", 
                 loc_opts, 
                 index=loc_index, 
-                key=f"global_loc_{id(loc_opts)}",
+                key=f"global_loc_{tab_id}_{id(loc_opts)}",
                 help="Select location to analyze"
             )
             if new_loc != st.session_state.global_location:
@@ -1740,7 +1741,7 @@ if s_file and d_file and lt_file:
                 "LOCATION", 
                 [st.session_state.global_location] if st.session_state.global_location else ["(no location)"], 
                 disabled=True,
-                key=f"global_loc_disabled_{id(all_products)}",
+                key=f"global_loc_disabled_{tab_id}_{id(all_products)}",
                 help="Location filter not applicable for this tab"
             )
         
@@ -1753,7 +1754,7 @@ if s_file and d_file and lt_file:
                     "PERIOD", 
                     period_labels, 
                     index=per_index, 
-                    key=f"global_per_{id(period_labels)}",
+                    key=f"global_per_{tab_id}_{id(period_labels)}",
                     help="Select time period to analyze"
                 )
                 st.session_state.global_period = period_label_map.get(new_per_label, st.session_state.global_period)
@@ -1763,7 +1764,7 @@ if s_file and d_file and lt_file:
                 "PERIOD", 
                 [cur_label], 
                 disabled=True,
-                key=f"global_per_disabled_{id(period_labels)}",
+                key=f"global_per_disabled_{tab_id}_{id(period_labels)}",
                 help="Period filter not applicable for this tab"
             )
 
@@ -1788,7 +1789,7 @@ if s_file and d_file and lt_file:
         with col_badge:
             render_logo_above_parameters(scale=1.5)
             # Use global filters - all three are relevant for this tab
-            render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False)
+            render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False, tab_id="tab1")
             
             # Use global filter values
             sku = st.session_state.global_material
@@ -1982,7 +1983,7 @@ with tab2:
     with col_badge:
         render_logo_above_parameters(scale=1.5)
         # Use global filters - Material and Period are relevant (not Location)
-        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True)
+        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True, tab_id="tab2")
         
         # Use global filter values
         sku = st.session_state.global_material
@@ -2532,7 +2533,7 @@ with tab3:
         st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
 
         # Show global filters (all greyed out since this tab uses multiselect)
-        render_global_filters(material_enabled=False, location_enabled=False, period_enabled=False)
+        render_global_filters(material_enabled=False, location_enabled=False, period_enabled=False, tab_id="tab3")
         
         st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
         st.markdown("**Multi-select filters for this tab:**", unsafe_allow_html=True)
@@ -2768,7 +2769,7 @@ with tab4:
     with col_badge:
         render_logo_above_parameters(scale=1.5)
         # Use global filters - Material and Period are relevant (not Location)
-        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True)
+        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True, tab_id="tab4")
         
         # Use global filter values
         sku = st.session_state.global_material
@@ -2935,7 +2936,7 @@ with tab5:
     with col_badge:
         render_logo_above_parameters(scale=1.5)
         # Use global filters - Material and Location are relevant (not Period)
-        render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False)
+        render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False, tab_id="tab5")
         
         # Use global filter values
         h_sku = st.session_state.global_material
@@ -3048,7 +3049,7 @@ with tab6:
     with col_badge:
         render_logo_above_parameters(scale=1.5)
         # Use global filters - Material and Location are relevant (not Period)
-        render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False)
+        render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False, tab_id="tab6")
         
         # Use global filter values
         calc_sku = st.session_state.global_material
@@ -3558,7 +3559,7 @@ with tab7:
     with col_badge:
         render_logo_above_parameters(scale=1.5)
         # Use global filters - Material and Period are relevant (not Location)
-        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True)
+        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True, tab_id="tab7")
         
         # Use global filter values
         selected_product = st.session_state.global_material
@@ -3836,7 +3837,7 @@ with tab8:
     with col_badge:
         render_logo_above_parameters(scale=1.5)
         # Use global filters - only Period is relevant (not Material or Location)
-        render_global_filters(material_enabled=False, location_enabled=False, period_enabled=True)
+        render_global_filters(material_enabled=False, location_enabled=False, period_enabled=True, tab_id="tab8")
         
         # Use global filter value
         sel_period_tab8 = st.session_state.global_period
