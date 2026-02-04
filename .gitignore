@@ -18,3 +18,7 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated network visualization files
+net.html
+lib/
