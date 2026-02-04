@@ -1410,6 +1410,36 @@ with st.sidebar.expander("⚙️ Service Level Configuration", expanded=True):
         help="Target probability of not stocking out for end-nodes (hop 0). Upstream nodes get fixed SLs by hop-distance.",
     ) / 100
     z = norm.ppf(service_level)
+    
+    # Hop Service Level sliders for scenario simulations
+    st.markdown("**Hop Service Levels (for Scenarios):**")
+    hop1_sl_global = st.slider(
+        "Hop1 SL (%)",
+        min_value=50.0,
+        max_value=99.9,
+        value=95.0,
+        step=0.1,
+        help="Service Level for Hop 1 nodes in scenario simulations",
+        key="hop1_sl_global"
+    )
+    hop2_sl_global = st.slider(
+        "Hop2 SL (%)",
+        min_value=50.0,
+        max_value=99.9,
+        value=90.0,
+        step=0.1,
+        help="Service Level for Hop 2 nodes in scenario simulations",
+        key="hop2_sl_global"
+    )
+    hop3_sl_global = st.slider(
+        "Hop3 SL (%)",
+        min_value=50.0,
+        max_value=99.9,
+        value=85.0,
+        step=0.1,
+        help="Service Level for Hop 3 nodes in scenario simulations",
+        key="hop3_sl_global"
+    )
 
 with st.sidebar.expander("⚙️ Safety Stock Rules", expanded=True):
     zero_if_no_net_fcst = st.checkbox(
@@ -2931,34 +2961,17 @@ with tab6:
             key="sim_costperkilo"
         )
         
-        # Global hop SL sliders for scenario simulation
-        st.markdown("**Hop Service Levels for Scenarios:**")
-        hop1_sl_global = st.slider(
-            "Hop1 SL (%)",
+        # Service Level slider for end-nodes in scenario simulation
+        st.markdown("**Service Level for End-Nodes:**")
+        st.info("This slider affects only the **end-nodes Service Level**. Service Levels for other hop tiers (Hop1, Hop2, Hop3) are controlled by the sliders in the sidebar and will be automatically recalculated and visualized.")
+        endnode_sl_tab6 = st.slider(
+            "End-Node SL (%)",
             min_value=50.0,
             max_value=99.9,
-            value=95.0,
+            value=service_level * 100,
             step=0.1,
-            help="Service Level for Hop 1 nodes in scenario simulations",
-            key="hop1_sl_global"
-        )
-        hop2_sl_global = st.slider(
-            "Hop2 SL (%)",
-            min_value=50.0,
-            max_value=99.9,
-            value=90.0,
-            step=0.1,
-            help="Service Level for Hop 2 nodes in scenario simulations",
-            key="hop2_sl_global"
-        )
-        hop3_sl_global = st.slider(
-            "Hop3 SL (%)",
-            min_value=50.0,
-            max_value=99.9,
-            value=85.0,
-            step=0.1,
-            help="Service Level for Hop 3 nodes in scenario simulations",
-            key="hop3_sl_global"
+            help="Service Level for end-nodes (Hop 0) in scenario simulations. Other hop SLs are set in the sidebar.",
+            key="endnode_sl_tab6"
         )
             
         row_export = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
@@ -3093,13 +3106,6 @@ with tab6:
             )
 
             with st.expander("Show detailed scenario controls", expanded=False):
-                st.markdown(
-                    f"""
-                    Use the sliders below to simulate alternative Lead Time (LT) assumptions for the selected node (Tier Hops = {hops}).
-                    Service Levels for scenarios are controlled by the global Hop SL sliders in the sidebar.
-                    """,
-                    unsafe_allow_html=True,
-                )
 
                 base_sl_node = float(row["Service_Level_Node"])
                 base_z_node = float(row["Z_node"])
@@ -3150,7 +3156,7 @@ with tab6:
                 # Use global hop SL sliders to determine SL based on node's hop tier
                 # Map hop tier to the appropriate global SL
                 hop_sl_map = {
-                    0: 99.0,  # End-nodes (Hop 0)
+                    0: endnode_sl_tab6,  # End-nodes (Hop 0) - from Tab6 slider
                     1: hop1_sl_global,
                     2: hop2_sl_global,
                     3: hop3_sl_global,
