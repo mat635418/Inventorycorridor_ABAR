@@ -1131,15 +1131,32 @@ def run_pipeline(
     zero_if_no_net_fcst: bool = True,
     apply_cap: bool = True,
     cap_range=(0, 200),
+    hop1_sl: float = None,
+    hop2_sl: float = None,
+    hop3_sl: float = None,
 ):
-    # Calculate hop-based SL values based on the end-node service_level parameter
-    # Maintain the same ratios as the original hardcoded values (99%, 95%, 90%, 85%)
-    # Original ratios: hop1/hop0=0.9596, hop2/hop0=0.9091, hop3/hop0=0.8586
+    # Calculate hop-based SL values
+    # If hop SLs are provided, use them; otherwise use the original ratios
+    if hop1_sl is None:
+        hop1_sl = service_level * 0.9596
+    else:
+        hop1_sl = hop1_sl / 100.0  # Convert from percentage
+    
+    if hop2_sl is None:
+        hop2_sl = service_level * 0.9091
+    else:
+        hop2_sl = hop2_sl / 100.0  # Convert from percentage
+    
+    if hop3_sl is None:
+        hop3_sl = service_level * 0.8586
+    else:
+        hop3_sl = hop3_sl / 100.0  # Convert from percentage
+    
     hop_to_sl = {
         0: service_level,
-        1: service_level * 0.9596,
-        2: service_level * 0.9091,
-        3: service_level * 0.8586
+        1: hop1_sl,
+        2: hop2_sl,
+        3: hop3_sl
     }
 
     def sl_for_hop(h: int) -> float:
@@ -1579,6 +1596,9 @@ if s_file and d_file and lt_file:
         zero_if_no_net_fcst=zero_if_no_net_fcst,
         apply_cap=apply_cap,
         cap_range=cap_range,
+        hop1_sl=hop1_sl_global,
+        hop2_sl=hop2_sl_global,
+        hop3_sl=hop3_sl_global,
     )
 
     hist = df_s[["Product", "Location", "Period", "Consumption", "Forecast"]].copy()
@@ -2055,6 +2075,9 @@ with tab2:
                     zero_if_no_net_fcst=zero_if_no_net_fcst,
                     apply_cap=apply_cap,
                     cap_range=cap_range,
+                    hop1_sl=hop1_sl_global,
+                    hop2_sl=hop2_sl_global,
+                    hop3_sl=hop3_sl_global,
                 )
                 old_results = results[
                     (results["Product"] == scenario_product) &
@@ -2961,18 +2984,89 @@ with tab6:
             key="sim_costperkilo"
         )
         
-        # Service Level slider for end-nodes in scenario simulation
-        st.markdown("**Service Level for End-Nodes:**")
-        st.info("This slider affects only the **end-nodes Service Level**. Service Levels for other hop tiers (Hop1, Hop2, Hop3) are controlled by the sliders in the sidebar and will be automatically recalculated and visualized.")
-        endnode_sl_tab6 = st.slider(
-            "End-Node SL (%)",
-            min_value=50.0,
-            max_value=99.9,
-            value=service_level * 100,
-            step=0.1,
-            help="Service Level for end-nodes (Hop 0) in scenario simulations. Other hop SLs are set in the sidebar.",
-            key="endnode_sl_tab6"
-        )
+        # Get node information to determine hop tier
+        row_df_temp = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
+        row_df_temp = row_df_temp[
+            (row_df_temp["Product"] == calc_sku)
+            & (row_df_temp["Location"] == calc_loc)
+        ]
+        
+        if not row_df_temp.empty:
+            row_temp = row_df_temp.iloc[0]
+            hops_temp = int(row_temp.get("Tier_Hops", 0))
+            node_sl_temp = float(row_temp.get("Service_Level_Node", service_level))
+            
+            # Calculate the tiering ratios
+            tier_ratios = {
+                0: 1.0,
+                1: 0.9596,
+                2: 0.9091,
+                3: 0.8586
+            }
+            
+            # Calculate the starting SL based on the node's hop tier
+            starting_sl_pct = node_sl_temp * 100
+            
+            # Service Level slider with automatic hop SL recalculation
+            st.markdown("**Service Level (Scenario Planning):**")
+            st.info(f"Starting from **{starting_sl_pct:.1f}%** based on Hop {hops_temp} tiering. Moving this slider will automatically recalculate all other Hop SLs proportionally.")
+            
+            # Primary SL slider - use a unique key based on location and hop tier
+            primary_sl_tab6 = st.slider(
+                f"Service Level for Hop {hops_temp} (%)",
+                min_value=50.0,
+                max_value=99.9,
+                value=starting_sl_pct,
+                step=0.1,
+                help=f"Primary Service Level for Hop {hops_temp} nodes. Other hop SLs will be automatically recalculated based on tiering ratios.",
+                key=f"primary_sl_tab6_{calc_loc}_{hops_temp}"
+            )
+            
+            # Calculate the adjustment ratio based on the slider movement
+            # Ensure we have a valid denominator to avoid division by zero
+            base_sl = node_sl_temp if node_sl_temp > 0 else service_level
+            if base_sl <= 0:
+                base_sl = 0.99  # Fallback to 99% if both are invalid
+            
+            adjustment_factor = (primary_sl_tab6 / 100) / base_sl
+            
+            # Calculate all hop SLs based on the primary slider and tiering ratios
+            # Using dictionary comprehension for cleaner code
+            calculated_hop_sls = {
+                hop: (service_level * tier_ratios[hop] * 100) * adjustment_factor
+                for hop in range(4)
+            }
+            
+            endnode_sl_tab6 = calculated_hop_sls[0]
+            hop1_sl_tab6 = calculated_hop_sls[1]
+            hop2_sl_tab6 = calculated_hop_sls[2]
+            hop3_sl_tab6 = calculated_hop_sls[3]
+            
+            # Display the recalculated hop SLs
+            st.markdown("**Automatically Calculated Hop SLs:**")
+            sl_display = f"""
+            - **Hop 0 (End-nodes):** {endnode_sl_tab6:.2f}%
+            - **Hop 1:** {hop1_sl_tab6:.2f}%
+            - **Hop 2:** {hop2_sl_tab6:.2f}%
+            - **Hop 3:** {hop3_sl_tab6:.2f}%
+            """
+            st.markdown(sl_display)
+        else:
+            # Fallback if no row data is available
+            st.markdown("**Service Level for End-Nodes:**")
+            st.info("This slider affects only the **end-nodes Service Level**. Service Levels for other hop tiers (Hop1, Hop2, Hop3) are controlled by the sliders in the sidebar and will be automatically recalculated and visualized.")
+            endnode_sl_tab6 = st.slider(
+                "End-Node SL (%)",
+                min_value=50.0,
+                max_value=99.9,
+                value=service_level * 100,
+                step=0.1,
+                help="Service Level for end-nodes (Hop 0) in scenario simulations. Other hop SLs are set in the sidebar.",
+                key="endnode_sl_tab6"
+            )
+            hop1_sl_tab6 = hop1_sl_global
+            hop2_sl_tab6 = hop2_sl_global
+            hop3_sl_tab6 = hop3_sl_global
             
         row_export = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
         row_export = row_export[
@@ -3153,13 +3247,13 @@ with tab6:
                 )
                 scenarios = []
                 
-                # Use global hop SL sliders to determine SL based on node's hop tier
-                # Map hop tier to the appropriate global SL
+                # Use tab6 hop SL sliders to determine SL based on node's hop tier
+                # Map hop tier to the appropriate SL from Tab6 (recalculated based on primary slider)
                 hop_sl_map = {
-                    0: endnode_sl_tab6,  # End-nodes (Hop 0) - from Tab6 slider
-                    1: hop1_sl_global,
-                    2: hop2_sl_global,
-                    3: hop3_sl_global,
+                    0: endnode_sl_tab6,  # End-nodes (Hop 0) - from Tab6 calculations
+                    1: hop1_sl_tab6,     # Hop 1 - from Tab6 calculations
+                    2: hop2_sl_tab6,     # Hop 2 - from Tab6 calculations
+                    3: hop3_sl_tab6,     # Hop 3 - from Tab6 calculations
                 }
                 
                 for s in range(n_scen):
@@ -3171,7 +3265,7 @@ with tab6:
                             f"""
                             <div style="font-size:0.85rem; margin-bottom:8px;">
                               <strong>Service Level for this node:</strong> {sc_sl:.2f}% (Hop {hops})<br/>
-                              <em>Service Levels are set using the global Hop SL sliders in the sidebar.</em>
+                              <em>Service Levels are automatically calculated from the primary SL slider in the sidebar based on tiering ratios.</em>
                             </div>
                             """,
                             unsafe_allow_html=True,
