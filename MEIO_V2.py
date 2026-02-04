@@ -2525,10 +2525,18 @@ with tab3:
         # header styles for wrapping
         header_props = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
 
+        # Add grand total row at the bottom
+        if not nice.empty and 'SS [unit]' in nice.columns:
+            total_ss = display_df['Safety_Stock'].sum() if pd.api.types.is_numeric_dtype(display_df['Safety_Stock']) else 0
+            # Create a total row with empty values except for SS column
+            total_row = pd.Series({col: '' for col in nice.columns})
+            total_row['SS [unit]'] = 'Total'
+            nice = pd.concat([nice, pd.DataFrame([total_row])], ignore_index=True)
+        
         pandas_fmt = {
             "Fcst [unit]": _fmt_int,
             "Avg/day [unit]": _fmt_2dec,
-            "SS [unit]": _fmt_int,
+            "SS [unit]": lambda val: f"<b>{val}</b>" if val == 'Total' else _fmt_int(val),
             "SS Cov [days]": _fmt_int,
             "Net Dem [unit]": _fmt_int,
             "Local Dem [unit]": _fmt_int,
@@ -2555,23 +2563,21 @@ with tab3:
                 return col.map(get_status_background_color)
             return [''] * len(col)
         
+        # Function to make the Total row bold
+        def make_total_bold(row):
+            if 'SS [unit]' in row.index and row['SS [unit]'] == 'Total':
+                return ['font-weight: bold'] * len(row)
+            return [''] * len(row)
+        
         styled = (
             nice.style
-            .format(pandas_fmt)
+            .format(pandas_fmt, escape="html")
             .set_properties(**header_props, axis=1)
             .set_properties(**ss_highlight, subset=['SS [unit]'])
             .apply(get_status_column_styles, axis=0)
+            .apply(make_total_bold, axis=1)
         )
         st.dataframe(styled, use_container_width=True)
-        
-        # Add total row for SS column (just the number, no text)
-        if not nice.empty and 'SS [unit]' in nice.columns:
-            total_ss = nice['SS [unit]'].sum() if pd.api.types.is_numeric_dtype(display_df['Safety_Stock']) else 0
-            st.markdown(
-                f"<div style='text-align:right; font-weight:bold; margin-top:10px;'>"
-                f"{_fmt_int(total_ss)}</div>",
-                unsafe_allow_html=True
-            )
 
 # TAB 4 -----------------------------------------------------------------
 with tab4:
@@ -2670,8 +2676,17 @@ with tab4:
                     "Forecast":"Fcst [unit]", "Agg_Future_Demand":"Net Dem [unit]"
                 }
                 eff_top_std = eff_top[display_cols].rename(columns=compact_labels)
+                
+                # Add grand total row at the bottom
+                if not eff_top_std.empty and 'SS [unit]' in eff_top_std.columns:
+                    total_ss_top = eff_top['Safety_Stock'].sum() if pd.api.types.is_numeric_dtype(eff_top['Safety_Stock']) else 0
+                    # Create a total row with empty values except for SS column
+                    total_row = pd.Series({col: '' for col in eff_top_std.columns})
+                    total_row['SS [unit]'] = 'Total'
+                    eff_top_std = pd.concat([eff_top_std, pd.DataFrame([total_row])], ignore_index=True)
+                
                 tbl_fmt = {
-                    "SS [unit]": _fmt_int,
+                    "SS [unit]": lambda val: f"<b>{val}</b>" if val == 'Total' else _fmt_int(val),
                     "SS Cov [days]": _fmt_int,
                     "Fcst [unit]": _fmt_int,
                     "Net Dem [unit]": _fmt_int,
@@ -2679,19 +2694,19 @@ with tab4:
                 header_style = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
                 # Add light red highlighting to SS column (PR #5)
                 ss_highlight = {'background-color': '#ffcccc'}
-                styled = (eff_top_std.style
-                         .format(tbl_fmt)
-                         .set_properties(**header_style, axis=1)
-                         .set_properties(**ss_highlight, subset=['SS [unit]']))
-                st.dataframe(styled, use_container_width=True)
                 
-                # Add total row for SS column (just the number, no text)
-                total_ss_top = eff_top_std['SS [unit]'].sum() if 'SS [unit]' in eff_top_std.columns else 0
-                st.markdown(
-                    f"<div style='text-align:right; font-weight:bold; margin-top:10px;'>"
-                    f"{_fmt_int(total_ss_top)}</div>",
-                    unsafe_allow_html=True
-                )
+                # Function to make the Total row bold
+                def make_total_bold(row):
+                    if 'SS [unit]' in row.index and row['SS [unit]'] == 'Total':
+                        return ['font-weight: bold'] * len(row)
+                    return [''] * len(row)
+                
+                styled = (eff_top_std.style
+                         .format(tbl_fmt, escape="html")
+                         .set_properties(**header_style, axis=1)
+                         .set_properties(**ss_highlight, subset=['SS [unit]'])
+                         .apply(make_total_bold, axis=1))
+                st.dataframe(styled, use_container_width=True)
             else:
                 st.write("No non-zero nodes for this selection.")
 
@@ -2952,45 +2967,46 @@ with tab6:
             
             # Display all values in a single row using smaller flex items
             summary_html = f"""
-            <div style="display:flex;flex-wrap:nowrap;gap:6px;margin-top:8px;overflow-x:auto;" tabindex="0">
-              <div style="flex:1;min-width:110px;background:#e8f0ff;border-radius:6px;padding:6px;">
-                <div style="font-size:9px;color:#0b3d91;font-weight:600;">Node SL</div>
-                <div style="font-size:13px;font-weight:800;color:#0b3d91;">{node_sl*100:.2f}%</div>
-                <div style="font-size:8px;color:#444;margin-top:2px;">(h={hops})</div>
+            <div style="display:flex;flex-wrap:nowrap;gap:8px;margin-top:10px;overflow-x:auto;" tabindex="0">
+              <div style="flex:1;min-width:120px;background:#e8f0ff;border-radius:8px;padding:10px;">
+                <div style="font-size:11px;color:#0b3d91;font-weight:600;">Node Service Level</div>
+                <div style="font-size:18px;font-weight:800;color:#0b3d91;">{node_sl*100:.2f}%</div>
+                <div style="font-size:10px;color:#444;margin-top:3px;">(hops={hops})</div>
               </div>
-              <div style="flex:1;min-width:100px;background:#fff3e0;border-radius:6px;padding:6px;min-height:60px;">
-                <div style="font-size:9px;color:#a64d00;font-weight:600;">Z-Score</div>
-                <div style="font-size:13px;font-weight:800;color:#a64d00;">{node_z:.4f}</div>
+              <div style="flex:1;min-width:110px;background:#fff3e0;border-radius:8px;padding:10px;min-height:70px;">
+                <div style="font-size:11px;color:#a64d00;font-weight:600;">Z-Score</div>
+                <div style="font-size:18px;font-weight:800;color:#a64d00;">{node_z:.4f}</div>
+                <div style="font-size:10px;color:#444;margin-top:3px;">(std devs)</div>
               </div>
-              <div style="flex:1;min-width:110px;background:#e8f8f0;border-radius:6px;padding:6px;">
-                <div style="font-size:9px;color:#00695c;font-weight:600;">Net Demand</div>
-                <div style="font-size:13px;font-weight:800;color:#00695c;">{euro_format(row['Agg_Future_Demand'], True)}</div>
-                <div style="font-size:8px;color:#444;margin-top:2px;">(mo)</div>
+              <div style="flex:1;min-width:120px;background:#e8f8f0;border-radius:8px;padding:10px;">
+                <div style="font-size:11px;color:#00695c;font-weight:600;">Net Demand</div>
+                <div style="font-size:18px;font-weight:800;color:#00695c;">{euro_format(row['Agg_Future_Demand'], True)}</div>
+                <div style="font-size:10px;color:#444;margin-top:3px;">(units/month)</div>
               </div>
-              <div style="flex:1;min-width:110px;background:#fbeff2;border-radius:6px;padding:6px;">
-                <div style="font-size:9px;color:#880e4f;font-weight:600;">Net StdDev</div>
-                <div style="font-size:13px;font-weight:800;color:#880e4f;">{euro_format(row['Agg_Std_Hist'], True)}</div>
-                <div style="font-size:8px;color:#444;margin-top:2px;">(mo)</div>
+              <div style="flex:1;min-width:120px;background:#fbeff2;border-radius:8px;padding:10px;">
+                <div style="font-size:11px;color:#880e4f;font-weight:600;">Net StdDev</div>
+                <div style="font-size:18px;font-weight:800;color:#880e4f;">{euro_format(row['Agg_Std_Hist'], True)}</div>
+                <div style="font-size:10px;color:#444;margin-top:3px;">(units/month)</div>
               </div>
-              <div style="flex:1;min-width:90px;background:#f0f4c3;border-radius:6px;padding:6px;">
-                <div style="font-size:9px;color:#827717;font-weight:600;">Avg LT</div>
-                <div style="font-size:13px;font-weight:800;color:#827717;">{row['LT_Mean']}</div>
-                <div style="font-size:8px;color:#444;margin-top:2px;">(d)</div>
+              <div style="flex:1;min-width:110px;background:#f0f4c3;border-radius:8px;padding:10px;">
+                <div style="font-size:11px;color:#827717;font-weight:600;">Avg Lead Time</div>
+                <div style="font-size:18px;font-weight:800;color:#827717;">{row['LT_Mean']}</div>
+                <div style="font-size:10px;color:#444;margin-top:3px;">(days)</div>
               </div>
-              <div style="flex:1;min-width:90px;background:#e1f5fe;border-radius:6px;padding:6px;">
-                <div style="font-size:9px;color:#01579b;font-weight:600;">LT StdDev</div>
-                <div style="font-size:13px;font-weight:800;color:#01579b;">{row['LT_Std']}</div>
-                <div style="font-size:8px;color:#444;margin-top:2px;">(d)</div>
+              <div style="flex:1;min-width:110px;background:#e1f5fe;border-radius:8px;padding:10px;">
+                <div style="font-size:11px;color:#01579b;font-weight:600;">LT StdDev</div>
+                <div style="font-size:18px;font-weight:800;color:#01579b;">{row['LT_Std']}</div>
+                <div style="font-size:10px;color:#444;margin-top:3px;">(days)</div>
               </div>
-              <div style="flex:1;min-width:100px;background:#ffffff;border-radius:6px;padding:6px;border:1px solid #ddd;">
-                <div style="font-size:9px;color:#333;font-weight:600;">Daily Dem</div>
-                <div style="font-size:13px;font-weight:800;color:#333;">{avg_daily_txt}</div>
-                <div style="font-size:8px;color:#444;margin-top:2px;">(u/d)</div>
+              <div style="flex:1;min-width:110px;background:#ffffff;border-radius:8px;padding:10px;border:1px solid #ddd;">
+                <div style="font-size:11px;color:#333;font-weight:600;">Daily Demand</div>
+                <div style="font-size:18px;font-weight:800;color:#333;">{avg_daily_txt}</div>
+                <div style="font-size:10px;color:#444;margin-top:3px;">(units/day)</div>
               </div>
-              <div style="flex:1;min-width:100px;background:#ffffff;border-radius:6px;padding:6px;border:1px solid #ddd;">
-                <div style="font-size:9px;color:#333;font-weight:600;">SS Cover</div>
-                <div style="font-size:13px;font-weight:800;color:#333;">{days_cov_txt}</div>
-                <div style="font-size:8px;color:#444;margin-top:2px;">(d)</div>
+              <div style="flex:1;min-width:110px;background:#ffffff;border-radius:8px;padding:10px;border:1px solid #ddd;">
+                <div style="font-size:11px;color:#333;font-weight:600;">SS Coverage</div>
+                <div style="font-size:18px;font-weight:800;color:#333;">{days_cov_txt}</div>
+                <div style="font-size:10px;color:#444;margin-top:3px;">(days)</div>
               </div>
             </div>
             """
