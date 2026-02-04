@@ -2530,13 +2530,13 @@ with tab3:
             total_ss = display_df['Safety_Stock'].sum() if pd.api.types.is_numeric_dtype(display_df['Safety_Stock']) else 0
             # Create a total row with empty values except for SS column
             total_row = pd.Series({col: '' for col in nice.columns})
-            total_row['SS [unit]'] = 'Total'
+            total_row['SS [unit]'] = total_ss
             nice = pd.concat([nice, pd.DataFrame([total_row])], ignore_index=True)
         
         pandas_fmt = {
             "Fcst [unit]": _fmt_int,
             "Avg/day [unit]": _fmt_2dec,
-            "SS [unit]": lambda val: f"<b>{val}</b>" if val == 'Total' else _fmt_int(val),
+            "SS [unit]": lambda val: f"<b>{_fmt_int(val)}</b>" if val != '' and val is not None else '',
             "SS Cov [days]": _fmt_int,
             "Net Dem [unit]": _fmt_int,
             "Local Dem [unit]": _fmt_int,
@@ -2565,7 +2565,8 @@ with tab3:
         
         # Function to make the Total row bold
         def make_total_bold(row):
-            if 'SS [unit]' in row.index and row['SS [unit]'] == 'Total':
+            # The total row has empty Product column (first column after renaming)
+            if 'Product' in row.index and row['Product'] == '':
                 return ['font-weight: bold'] * len(row)
             return [''] * len(row)
         
@@ -2682,11 +2683,18 @@ with tab4:
                     total_ss_top = eff_top['Safety_Stock'].sum() if pd.api.types.is_numeric_dtype(eff_top['Safety_Stock']) else 0
                     # Create a total row with empty values except for SS column
                     total_row = pd.Series({col: '' for col in eff_top_std.columns})
-                    total_row['SS [unit]'] = 'Total'
+                    total_row['SS [unit]'] = total_ss_top
                     eff_top_std = pd.concat([eff_top_std, pd.DataFrame([total_row])], ignore_index=True)
                 
+                # Formatting function
+                def _fmt_int(val):
+                    try:
+                        return f"{int(round(val)):,}".replace(",", ".")
+                    except:
+                        return ""
+                
                 tbl_fmt = {
-                    "SS [unit]": lambda val: f"<b>{val}</b>" if val == 'Total' else _fmt_int(val),
+                    "SS [unit]": lambda val: f"<b>{_fmt_int(val)}</b>" if val != '' and val is not None else '',
                     "SS Cov [days]": _fmt_int,
                     "Fcst [unit]": _fmt_int,
                     "Net Dem [unit]": _fmt_int,
@@ -2697,7 +2705,8 @@ with tab4:
                 
                 # Function to make the Total row bold
                 def make_total_bold(row):
-                    if 'SS [unit]' in row.index and row['SS [unit]'] == 'Total':
+                    # The total row has empty Node column (first column)
+                    if 'Node' in row.index and row['Node'] == '':
                         return ['font-weight: bold'] * len(row)
                     return [''] * len(row)
                 
