@@ -1068,7 +1068,15 @@ def run_pipeline(
     apply_cap: bool = True,
     cap_range=(0, 200),
 ):
-    hop_to_sl = {0: 0.99, 1: 0.95, 2: 0.90, 3: 0.85}
+    # Calculate hop-based SL values based on the end-node service_level parameter
+    # Maintain the same ratios as the original hardcoded values (99%, 95%, 90%, 85%)
+    # Original ratios: hop1/hop0=0.9596, hop2/hop0=0.9091, hop3/hop0=0.8586
+    hop_to_sl = {
+        0: service_level,
+        1: service_level * 0.9596,
+        2: service_level * 0.9091,
+        3: service_level * 0.8586
+    }
 
     def sl_for_hop(h: int) -> float:
         return hop_to_sl.get(h, hop_to_sl[3])
@@ -2513,6 +2521,15 @@ with tab3:
             .apply(get_status_column_styles, axis=0)
         )
         st.dataframe(styled, use_container_width=True)
+        
+        # Add grand total row for SS column
+        if not nice.empty and 'SS [unit]' in nice.columns:
+            total_ss = nice['SS [unit]'].sum() if pd.api.types.is_numeric_dtype(display_df['Safety_Stock']) else 0
+            st.markdown(
+                f"<div style='text-align:right; font-weight:bold; margin-top:10px;'>"
+                f"Grand Total SS: {_fmt_int(total_ss)}</div>",
+                unsafe_allow_html=True
+            )
 
 # TAB 4 -----------------------------------------------------------------
 with tab4:
@@ -2625,6 +2642,14 @@ with tab4:
                          .set_properties(**header_style, axis=1)
                          .set_properties(**ss_highlight, subset=['SS [unit]']))
                 st.dataframe(styled, use_container_width=True)
+                
+                # Add grand total row for SS column
+                total_ss_top = eff_top_std['SS [unit]'].sum() if 'SS [unit]' in eff_top_std.columns else 0
+                st.markdown(
+                    f"<div style='text-align:right; font-weight:bold; margin-top:10px;'>"
+                    f"Grand Total SS: {_fmt_int(total_ss_top)}</div>",
+                    unsafe_allow_html=True
+                )
             else:
                 st.write("No non-zero nodes for this selection.")
 
@@ -2873,17 +2898,42 @@ with tab6:
             node_z = float(row.get("Z_node", norm.ppf(node_sl)))
             hops = int(row.get("Tier_Hops", 0))
             
-            # Create a row layout with hop logic picture on left and calculation values on right
+            # Create a row layout with hop logic table on left and calculation values on right
             st.markdown("---")
-            col_hop_image, col_calc_values = st.columns([1, 1])
+            col_hop_table, col_calc_values = st.columns([1, 1])
             
-            with col_hop_image:
+            with col_hop_table:
                 st.markdown("**Applied Hop Logic → Service Level mapping:**")
-                hop_image_path = "HOP_SLjpg.jpg"
-                if os.path.exists(hop_image_path):
-                    st.image(hop_image_path)
-                else:
-                    st.info("Network hop illustration not found on the server (expected at 'HOP_SLjpg.jpg'). Please add this image file next to MEIO_V2.py.")
+                
+                # Calculate SL values for each hop based on current service_level from sidebar
+                # Using the same ratios as in run_pipeline
+                hop_sl_values = {
+                    0: service_level * 100,  # Convert to percentage
+                    1: service_level * 0.9596 * 100,
+                    2: service_level * 0.9091 * 100,
+                    3: service_level * 0.8586 * 100
+                }
+                
+                # Create dataframe for the SL tiering table
+                sl_tier_data = []
+                for hop in range(4):
+                    sl_tier_data.append({
+                        'Hop': hop,
+                        'Service Level (%)': hop_sl_values[hop]
+                    })
+                sl_tier_df = pd.DataFrame(sl_tier_data)
+                
+                # Apply highlighting to the row matching current node's hop level
+                def highlight_current_hop(row):
+                    if row['Hop'] == hops:
+                        return ['background-color: #fffacd'] * len(row)
+                    return [''] * len(row)
+                
+                sl_tier_styled = sl_tier_df.style.apply(highlight_current_hop, axis=1).format({
+                    'Service Level (%)': '{:.2f}'
+                })
+                
+                st.dataframe(sl_tier_styled, use_container_width=True, hide_index=True)
             
             with col_calc_values:
                 avg_daily = row.get("D_day", np.nan)
