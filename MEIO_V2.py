@@ -2590,8 +2590,8 @@ with tab3:
         
         # Function to make the Total row bold
         def make_total_bold(row):
-            # The total row has empty Product column (first column after renaming)
-            if 'Product' in row.index and row['Product'] == '':
+            # The total row has empty Material column (after renaming Product to Material)
+            if 'Material' in row.index and row['Material'] == '':
                 return ['font-weight: bold'] * len(row)
             return [''] * len(row)
         
@@ -2930,6 +2930,36 @@ with tab6:
             help="USD cost per kilo for scenario simulation",
             key="sim_costperkilo"
         )
+        
+        # Global hop SL sliders for scenario simulation
+        st.markdown("**Hop Service Levels for Scenarios:**")
+        hop1_sl_global = st.slider(
+            "Hop1 SL (%)",
+            min_value=50.0,
+            max_value=99.9,
+            value=95.0,
+            step=0.1,
+            help="Service Level for Hop 1 nodes in scenario simulations",
+            key="hop1_sl_global"
+        )
+        hop2_sl_global = st.slider(
+            "Hop2 SL (%)",
+            min_value=50.0,
+            max_value=99.9,
+            value=90.0,
+            step=0.1,
+            help="Service Level for Hop 2 nodes in scenario simulations",
+            key="hop2_sl_global"
+        )
+        hop3_sl_global = st.slider(
+            "Hop3 SL (%)",
+            min_value=50.0,
+            max_value=99.9,
+            value=85.0,
+            step=0.1,
+            help="Service Level for Hop 3 nodes in scenario simulations",
+            key="hop3_sl_global"
+        )
             
         row_export = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
         row_export = row_export[
@@ -2981,9 +3011,6 @@ with tab6:
             st.warning("Selection not found in results.")
         else:
             row = row_df.iloc[0]
-            base_hop_sl = {0: 99.0, 1: 95.0, 2: 90.0, 3: 85.0}
-            base_end_sl_pct = base_hop_sl[0]
-            hop_ratios = {h: base_hop_sl[h] / base_end_sl_pct for h in base_hop_sl}
             node_sl = float(row.get("Service_Level_Node", service_level))
             node_z = float(row.get("Z_node", norm.ppf(node_sl)))
             hops = int(row.get("Tier_Hops", 0))
@@ -3066,23 +3093,13 @@ with tab6:
             )
 
             with st.expander("Show detailed scenario controls", expanded=False):
-                is_end_node = (hops == 0)
-                if is_end_node:
-                    st.markdown(
-                        """
-                        Use the sliders below to set an **end-node** Service Level (SL) for each scenario.
-                        Hop 1–3 SLs are recomputed automatically based on the base-grid ratios.
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(
-                        f"""
-                        Selected node is **not an end-node** (Tier Hops = {hops}).
-                        Use the sliders below to independently set Service Levels for each hop (Hop 0 through Hop 3).
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                st.markdown(
+                    f"""
+                    Use the sliders below to simulate alternative Lead Time (LT) assumptions for the selected node (Tier Hops = {hops}).
+                    Service Levels for scenarios are controlled by the global Hop SL sliders in the sidebar.
+                    """,
+                    unsafe_allow_html=True,
+                )
 
                 base_sl_node = float(row["Service_Level_Node"])
                 base_z_node = float(row["Z_node"])
@@ -3129,104 +3146,31 @@ with tab6:
                     key="n_scen",
                 )
                 scenarios = []
-                # Calculate the gap based on current hop tier
-                # Hop 0 (99%) → Hop 1 (95%): 4% gap
-                # Hop 1+ (95% → 90%, 90% → 85%): 5% gap
-                sl_gap = 5.0  # Default gap for hops 1-3
-                if hops == 0:
-                    sl_gap = 4.0  # Gap from 99% to 95%
+                
+                # Use global hop SL sliders to determine SL based on node's hop tier
+                # Map hop tier to the appropriate global SL
+                hop_sl_map = {
+                    0: 99.0,  # End-nodes (Hop 0)
+                    1: hop1_sl_global,
+                    2: hop2_sl_global,
+                    3: hop3_sl_global,
+                }
                 
                 for s in range(n_scen):
                     with st.expander(f"Scenario {s+1} inputs", expanded=False):
-                        if is_end_node:
-                            # For end-nodes: Single slider that cascades to other hops
-                            if s == 0:
-                                sc_sl_default = float(base_sl_node * 100.0)
-                            else:
-                                sc_sl_default = max(50.0, min(99.9, float(base_sl_node * 100.0) - sl_gap * s))
-                            sc_sl = st.slider(
-                                f"Scenario {s+1} end-node SL (%)",
-                                50.0,
-                                99.9,
-                                sc_sl_default,
-                                help="End-node Service Level used for this scenario. Hop 1–3 SLs are recomputed automatically.",
-                                key=f"sc_sl_{s}",
-                            )
-                            hop0 = sc_sl
-                            hop1 = max(0.0, min(99.9, hop0 * hop_ratios[1]))
-                            hop2 = max(0.0, min(99.9, hop0 * hop_ratios[2]))
-                            hop3 = max(0.0, min(99.9, hop0 * hop_ratios[3]))
-
-                            st.markdown(
-                                f"""
-                                <div style="font-size:0.85rem; margin-top:4px;">
-                                  <strong>Derived hop SLs used in this scenario:</strong><br/>
-                                  Hop 0 (end-node): <strong>{hop0:.2f}%</strong><br/>
-                                  Hop 1: <strong>{hop1:.2f}%</strong> &nbsp;&nbsp; Hop 2: <strong>{hop2:.2f}%</strong> &nbsp;&nbsp; Hop 3: <strong>{hop3:.2f}%</strong>
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
-                            )
-                        else:
-                            # For non-end-nodes: Independent sliders for each hop
-                            st.markdown(
-                                """
-                                <div style="font-size:0.85rem; margin-bottom:8px;">
-                                  <strong>Set Service Level for each hop independently:</strong>
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
-                            )
-                            # Use base hop SL values as defaults
-                            hop0_default = base_hop_sl[0] if s == 0 else max(50.0, base_hop_sl[0] - sl_gap * s)
-                            hop1_default = base_hop_sl[1] if s == 0 else max(50.0, base_hop_sl[1] - sl_gap * s)
-                            hop2_default = base_hop_sl[2] if s == 0 else max(50.0, base_hop_sl[2] - sl_gap * s)
-                            hop3_default = base_hop_sl[3] if s == 0 else max(50.0, base_hop_sl[3] - sl_gap * s)
-                            
-                            hop0 = st.slider(
-                                f"Scenario {s+1} Hop 0 SL (%)",
-                                50.0,
-                                99.9,
-                                hop0_default,
-                                help="Service Level for Hop 0 (end-nodes)",
-                                key=f"sc_hop0_{s}",
-                            )
-                            hop1 = st.slider(
-                                f"Scenario {s+1} Hop 1 SL (%)",
-                                50.0,
-                                99.9,
-                                hop1_default,
-                                help="Service Level for Hop 1",
-                                key=f"sc_hop1_{s}",
-                            )
-                            hop2 = st.slider(
-                                f"Scenario {s+1} Hop 2 SL (%)",
-                                50.0,
-                                99.9,
-                                hop2_default,
-                                help="Service Level for Hop 2",
-                                key=f"sc_hop2_{s}",
-                            )
-                            hop3 = st.slider(
-                                f"Scenario {s+1} Hop 3 SL (%)",
-                                50.0,
-                                99.9,
-                                hop3_default,
-                                help="Service Level for Hop 3",
-                                key=f"sc_hop3_{s}",
-                            )
-                            # For non-end-nodes, use the SL corresponding to the selected node's hop
-                            sc_sl = {0: hop0, 1: hop1, 2: hop2, 3: hop3}.get(hops, hop0)
-
-                            st.markdown(
-                                f"""
-                                <div style="font-size:0.85rem; margin-top:8px;">
-                                  <strong>Selected node hop SL:</strong> <strong>{sc_sl:.2f}%</strong> (Hop {hops})
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
-                            )
-
+                        # Determine the Service Level based on the node's hop tier
+                        sc_sl = hop_sl_map.get(hops, base_sl_node * 100.0)
+                        
+                        st.markdown(
+                            f"""
+                            <div style="font-size:0.85rem; margin-bottom:8px;">
+                              <strong>Service Level for this node:</strong> {sc_sl:.2f}% (Hop {hops})<br/>
+                              <em>Service Levels are set using the global Hop SL sliders in the sidebar.</em>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        
                         sc_lt_default = float(row["LT_Mean"])
                         sc_lt = st.slider(
                             f"Scenario {s+1} Avg Lead Time (Days)",
@@ -3249,10 +3193,6 @@ with tab6:
                                 "SL_pct": sc_sl,
                                 "LT_mean": sc_lt,
                                 "LT_std": sc_lt_std,
-                                "Hop0": hop0,
-                                "Hop1": hop1,
-                                "Hop2": hop2,
-                                "Hop3": hop3,
                             }
                         )
 
@@ -3284,10 +3224,7 @@ with tab6:
                 scen_rows.append(
                     {
                         "Scenario": f"S{idx+1}",
-                        "Hop0_SL_%": sc["Hop0"],
-                        "Hop1_SL_%": sc["Hop1"],
-                        "Hop2_SL_%": sc["Hop2"],
-                        "Hop3_SL_%": sc["Hop3"],
+                        "Service_Level_%": sc["SL_pct"],
                         "LT_mean_days": sc["LT_mean"],
                         "LT_std_days": sc["LT_std"],
                         "Simulated_SS": sc_ss,
@@ -3297,10 +3234,7 @@ with tab6:
             base_ss_policy_usd = base_ss_policy * cost_per_kilo_tab6
             base_calibrated_row = {
                 "Scenario": "Base-calibrated",
-                "Hop0_SL_%": base_hop_sl[0],
-                "Hop1_SL_%": base_hop_sl[1],
-                "Hop2_SL_%": base_hop_sl[2],
-                "Hop3_SL_%": base_hop_sl[3],
+                "Service_Level_%": base_sl_node * 100.0,
                 "LT_mean_days": base_LT_mean,
                 "LT_std_days": base_LT_std,
                 "Simulated_SS": base_ss_policy,
@@ -3308,10 +3242,7 @@ with tab6:
             }
             impl_row = {
                 "Scenario": "Implemented",
-                "Hop0_SL_%": np.nan,
-                "Hop1_SL_%": np.nan,
-                "Hop2_SL_%": np.nan,
-                "Hop3_SL_%": np.nan,
+                "Service_Level_%": np.nan,
                 "LT_mean_days": np.nan,
                 "LT_std_days": np.nan,
                 "Simulated_SS": float(row["Safety_Stock"]),
@@ -3338,10 +3269,7 @@ with tab6:
 
             # Rename columns to shorter versions to reduce table width
             display_comp_renamed = display_comp.rename(columns={
-                "Hop0_SL_%": "H0 SL%",
-                "Hop1_SL_%": "H1 SL%",
-                "Hop2_SL_%": "H2 SL%",
-                "Hop3_SL_%": "H3 SL%",
+                "Service_Level_%": "SL%",
                 "LT_mean_days": "LT μ",
                 "LT_std_days": "LT σ",
                 "Simulated_SS": "SS (units)",
@@ -3359,10 +3287,7 @@ with tab6:
                 display_comp_renamed
                 .style
                 .format({
-                    "End SL%": "{:.2f}",
-                    "H1 SL%": "{:.2f}",
-                    "H2 SL%": "{:.2f}",
-                    "H3 SL%": "{:.2f}",
+                    "SL%": "{:.2f}",
                     "LT μ": "{:.2f}",
                     "LT σ": "{:.2f}",
                     "SS (units)": "{:,.0f}",
