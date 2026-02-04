@@ -2182,8 +2182,11 @@ with tab2:
         )
 
         # -------- MAP CODE UNCHANGED, always after scenario box --------
+        # Prepare label data for network nodes
+        # Drop duplicates to ensure unique index for to_dict("index")
         label_data = (
             results[results["Period"] == chosen_period]
+            .drop_duplicates(subset=["Product", "Location"], keep="first")
             .set_index(["Product", "Location"])
             .to_dict("index")
         )
