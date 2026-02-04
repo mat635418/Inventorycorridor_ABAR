@@ -2536,7 +2536,7 @@ with tab3:
         pandas_fmt = {
             "Fcst [unit]": _fmt_int,
             "Avg/day [unit]": _fmt_2dec,
-            "SS [unit]": lambda val: f"<b>{_fmt_int(val)}</b>" if val != '' and val is not None else '',
+            "SS [unit]": lambda val: _fmt_int(val) if val != '' and val is not None else '',
             "SS Cov [days]": _fmt_int,
             "Net Dem [unit]": _fmt_int,
             "Local Dem [unit]": _fmt_int,
@@ -2694,7 +2694,7 @@ with tab4:
                         return ""
                 
                 tbl_fmt = {
-                    "SS [unit]": lambda val: f"<b>{_fmt_int(val)}</b>" if val != '' and val is not None else '',
+                    "SS [unit]": lambda val: _fmt_int(val) if val != '' and val is not None else '',
                     "SS Cov [days]": _fmt_int,
                     "Fcst [unit]": _fmt_int,
                     "Net Dem [unit]": _fmt_int,
