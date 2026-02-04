@@ -2258,10 +2258,11 @@ with tab2:
         if not sku_lt.empty:
             froms = set(sku_lt["From_Location"].dropna().unique().tolist())
             tos = set(sku_lt["To_Location"].dropna().unique().tolist())
-            route_nodes = (froms.union(tos)).intersection(active_nodes_for_sku)
-            all_nodes = route_nodes.union(hubs.intersection(active_nodes_for_sku))
+            # Include all nodes from lead time table AND all active nodes with calculated SS
+            route_nodes = froms.union(tos)
+            all_nodes = route_nodes.union(hubs).union(active_nodes_for_sku)
         else:
-            all_nodes = hubs.intersection(active_nodes_for_sku)
+            all_nodes = hubs.union(active_nodes_for_sku)
         if not all_nodes:
             all_nodes = hubs
         demand_lookup = {}
