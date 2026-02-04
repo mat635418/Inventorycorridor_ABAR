@@ -1674,99 +1674,8 @@ if s_file and d_file and lt_file:
         )
 
     # =============================================================================
-    # GLOBAL FILTERS - Initialize session state for cross-tab filtering
+    # Removed global filters - now using tab-dependent filtering
     # =============================================================================
-    if "global_material" not in st.session_state:
-        st.session_state.global_material = default_product
-    if "global_location" not in st.session_state:
-        st.session_state.global_location = default_location_for(default_product)
-    if "global_period" not in st.session_state:
-        st.session_state.global_period = default_period
-
-    def render_global_filters(material_enabled=True, location_enabled=True, period_enabled=True, tab_id=""):
-        """
-        Render global filter controls that apply across tabs.
-        Greyed out filters show but are disabled when not relevant.
-        tab_id: unique identifier for the tab to avoid duplicate widget keys
-        """
-        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
-        
-        # Material filter
-        if material_enabled:
-            mat_opts = all_products
-            mat_index = mat_opts.index(st.session_state.global_material) if st.session_state.global_material in mat_opts else 0
-            new_mat = st.selectbox(
-                "MATERIAL", 
-                mat_opts, 
-                index=mat_index, 
-                key=f"global_mat_{tab_id}_{id(mat_opts)}",
-                help="Select material to analyze"
-            )
-            if new_mat != st.session_state.global_material:
-                st.session_state.global_material = new_mat
-                # Update location to be valid for new material
-                locs = active_nodes(results, product=new_mat) or sorted(
-                    results[results["Product"] == new_mat]["Location"].unique().tolist()
-                )
-                if locs and st.session_state.global_location not in locs:
-                    st.session_state.global_location = locs[0]
-        else:
-            st.selectbox(
-                "MATERIAL", 
-                [st.session_state.global_material], 
-                disabled=True,
-                key=f"global_mat_disabled_{tab_id}_{id(all_products)}",
-                help="Material filter not applicable for this tab"
-            )
-        
-        # Location filter
-        if location_enabled:
-            loc_opts = active_nodes(results, product=st.session_state.global_material) or sorted(
-                results[results["Product"] == st.session_state.global_material]["Location"].unique().tolist()
-            )
-            if not loc_opts:
-                loc_opts = ["(no location)"]
-            loc_index = loc_opts.index(st.session_state.global_location) if st.session_state.global_location in loc_opts else 0
-            new_loc = st.selectbox(
-                "LOCATION", 
-                loc_opts, 
-                index=loc_index, 
-                key=f"global_loc_{tab_id}_{id(loc_opts)}",
-                help="Select location to analyze"
-            )
-            if new_loc != st.session_state.global_location:
-                st.session_state.global_location = new_loc
-        else:
-            st.selectbox(
-                "LOCATION", 
-                [st.session_state.global_location] if st.session_state.global_location else ["(no location)"], 
-                disabled=True,
-                key=f"global_loc_disabled_{tab_id}_{id(all_products)}",
-                help="Location filter not applicable for this tab"
-            )
-        
-        # Period filter
-        if period_enabled:
-            if period_labels:
-                cur_label = period_label(st.session_state.global_period) if st.session_state.global_period else period_labels[0]
-                per_index = period_labels.index(cur_label) if cur_label in period_labels else 0
-                new_per_label = st.selectbox(
-                    "PERIOD", 
-                    period_labels, 
-                    index=per_index, 
-                    key=f"global_per_{tab_id}_{id(period_labels)}",
-                    help="Select time period to analyze"
-                )
-                st.session_state.global_period = period_label_map.get(new_per_label, st.session_state.global_period)
-        else:
-            cur_label = period_label(st.session_state.global_period) if st.session_state.global_period else "N/A"
-            st.selectbox(
-                "PERIOD", 
-                [cur_label], 
-                disabled=True,
-                key=f"global_per_disabled_{tab_id}_{id(period_labels)}",
-                help="Period filter not applicable for this tab"
-            )
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         [
@@ -1788,12 +1697,34 @@ if s_file and d_file and lt_file:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             render_logo_above_parameters(scale=1.5)
-            # Use global filters - all three are relevant for this tab
-            render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False, tab_id="tab1")
             
-            # Use global filter values
-            sku = st.session_state.global_material
-            loc = st.session_state.global_location
+            st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+            
+            # Tab-specific filters for Tab 1
+            mat_opts = all_products
+            mat_index = mat_opts.index(default_product) if default_product in mat_opts else 0
+            sku = st.selectbox(
+                "MATERIAL", 
+                mat_opts, 
+                index=mat_index, 
+                key="tab1_material",
+                help="Select material to analyze"
+            )
+            
+            loc_opts = active_nodes(results, product=sku) or sorted(
+                results[results["Product"] == sku]["Location"].unique().tolist()
+            )
+            if not loc_opts:
+                loc_opts = ["(no location)"]
+            loc_default = default_location_for(sku)
+            loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
+            loc = st.selectbox(
+                "LOCATION", 
+                loc_opts, 
+                index=loc_index, 
+                key="tab1_location",
+                help="Select location to analyze"
+            )
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1982,12 +1913,34 @@ with tab2:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-        # Use global filters - Material and Period are relevant (not Location)
-        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True, tab_id="tab2")
         
-        # Use global filter values
-        sku = st.session_state.global_material
-        chosen_period = st.session_state.global_period
+        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+        
+        # Tab-specific filters for Tab 2 (Network Topology)
+        mat_opts = all_products
+        mat_index = mat_opts.index(default_product) if default_product in mat_opts else 0
+        sku = st.selectbox(
+            "MATERIAL", 
+            mat_opts, 
+            index=mat_index, 
+            key="tab2_material",
+            help="Select material to analyze"
+        )
+        
+        # Period filter
+        if period_labels:
+            per_default = period_label(default_period) if default_period else period_labels[0]
+            per_index = period_labels.index(per_default) if per_default in period_labels else 0
+            per_label = st.selectbox(
+                "PERIOD", 
+                period_labels, 
+                index=per_index, 
+                key="tab2_period",
+                help="Select time period to analyze"
+            )
+            chosen_period = period_label_map.get(per_label, default_period)
+        else:
+            chosen_period = default_period
 
         # Add cost per kilo slider below PERIOD filter (PR #3)
         cost_per_kilo = st.slider(
@@ -2532,22 +2485,18 @@ with tab3:
         render_logo_above_parameters(scale=1.5)
         st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
 
-        # Use global filters - enable all three for Tab 3
-        render_global_filters(material_enabled=True, location_enabled=True, period_enabled=True, tab_id="tab3")
-        
-        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
         st.markdown("**Multi-select filters for this tab:**", unsafe_allow_html=True)
 
         prod_choices = active_materials(results) or sorted(results["Product"].unique())
         loc_choices = active_nodes(results) or sorted(results["Location"].unique())
         period_choices_labels = period_labels
 
-        # Use global filter values as defaults for multiselect
-        default_prod_list = [st.session_state.global_material] if st.session_state.global_material in prod_choices else []
-        default_loc_list = [st.session_state.global_location] if st.session_state.global_location in loc_choices else []
+        # Use default values for multiselect (no global state)
+        default_prod_list = [default_product] if default_product in prod_choices else []
+        default_loc_list = [default_location_for(default_product)] if default_location_for(default_product) in loc_choices else []
         default_period_list = []
-        if st.session_state.global_period:
-            cur_label = period_label(st.session_state.global_period)
+        if default_period:
+            cur_label = period_label(default_period)
             if cur_label in period_choices_labels:
                 default_period_list = [cur_label]
 
@@ -2565,14 +2514,6 @@ with tab3:
             key="full_f_period",
         )
         f_period = [period_label_map[lbl] for lbl in f_period_labels] if f_period_labels else []
-        
-        # Sync multiselect selections back to global state
-        if f_prod:
-            st.session_state.global_material = f_prod[0]
-        if f_loc:
-            st.session_state.global_location = f_loc[0]
-        if f_period:
-            st.session_state.global_period = f_period[0]
         
         # Add threshold slider (new requirement)
         st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
@@ -2774,12 +2715,34 @@ with tab4:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-        # Use global filters - Material and Period are relevant (not Location)
-        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True, tab_id="tab4")
         
-        # Use global filter values
-        sku = st.session_state.global_material
-        eff_period = st.session_state.global_period
+        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+        
+        # Tab-specific filters for Tab 4 (Efficiency Analysis)
+        mat_opts = all_products
+        mat_index = mat_opts.index(default_product) if default_product in mat_opts else 0
+        sku = st.selectbox(
+            "MATERIAL", 
+            mat_opts, 
+            index=mat_index, 
+            key="tab4_material",
+            help="Select material to analyze"
+        )
+        
+        # Period filter
+        if period_labels:
+            per_default = period_label(default_period) if default_period else period_labels[0]
+            per_index = period_labels.index(per_default) if per_default in period_labels else 0
+            per_label = st.selectbox(
+                "PERIOD", 
+                period_labels, 
+                index=per_index, 
+                key="tab4_period",
+                help="Select time period to analyze"
+            )
+            eff_period = period_label_map.get(per_label, default_period)
+        else:
+            eff_period = default_period
         
         # Add threshold slider (new requirement)
         st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
@@ -2941,12 +2904,34 @@ with tab5:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-        # Use global filters - Material and Location are relevant (not Period)
-        render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False, tab_id="tab5")
         
-        # Use global filter values
-        h_sku = st.session_state.global_material
-        h_loc = st.session_state.global_location
+        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+        
+        # Tab-specific filters for Tab 5 (Forecast Accuracy)
+        mat_opts = all_products
+        mat_index = mat_opts.index(default_product) if default_product in mat_opts else 0
+        h_sku = st.selectbox(
+            "MATERIAL", 
+            mat_opts, 
+            index=mat_index, 
+            key="tab5_material",
+            help="Select material to analyze"
+        )
+        
+        loc_opts = active_nodes(results, product=h_sku) or sorted(
+            results[results["Product"] == h_sku]["Location"].unique().tolist()
+        )
+        if not loc_opts:
+            loc_opts = ["(no location)"]
+        loc_default = default_location_for(h_sku)
+        loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
+        h_loc = st.selectbox(
+            "LOCATION", 
+            loc_opts, 
+            index=loc_index, 
+            key="tab5_location",
+            help="Select location to analyze"
+        )
 
         st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -3054,12 +3039,34 @@ with tab6:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-        # Use global filters - Material and Location are relevant (not Period)
-        render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False, tab_id="tab6")
         
-        # Use global filter values
-        calc_sku = st.session_state.global_material
-        calc_loc = st.session_state.global_location
+        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+        
+        # Tab-specific filters for Tab 6 (Calculation Trace & Sim)
+        mat_opts = all_products
+        mat_index = mat_opts.index(default_product) if default_product in mat_opts else 0
+        calc_sku = st.selectbox(
+            "MATERIAL", 
+            mat_opts, 
+            index=mat_index, 
+            key="tab6_material",
+            help="Select material to analyze"
+        )
+        
+        loc_opts = active_nodes(results, product=calc_sku) or sorted(
+            results[results["Product"] == calc_sku]["Location"].unique().tolist()
+        )
+        if not loc_opts:
+            loc_opts = ["(no location)"]
+        loc_default = default_location_for(calc_sku)
+        loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
+        calc_loc = st.selectbox(
+            "LOCATION", 
+            loc_opts, 
+            index=loc_index, 
+            key="tab6_location",
+            help="Select location to analyze"
+        )
 
         if period_labels:
             try:
@@ -3564,12 +3571,34 @@ with tab7:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-        # Use global filters - Material and Period are relevant (not Location)
-        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True, tab_id="tab7")
         
-        # Use global filter values
-        selected_product = st.session_state.global_material
-        mat_period = st.session_state.global_period
+        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+        
+        # Tab-specific filters for Tab 7 (By Material)
+        mat_opts = all_products
+        mat_index = mat_opts.index(default_product) if default_product in mat_opts else 0
+        selected_product = st.selectbox(
+            "MATERIAL", 
+            mat_opts, 
+            index=mat_index, 
+            key="tab7_material",
+            help="Select material to analyze"
+        )
+        
+        # Period filter
+        if period_labels:
+            per_default = period_label(default_period) if default_period else period_labels[0]
+            per_index = period_labels.index(per_default) if per_default in period_labels else 0
+            per_label = st.selectbox(
+                "PERIOD", 
+                period_labels, 
+                index=per_index, 
+                key="tab7_period",
+                help="Select time period to analyze"
+            )
+            mat_period = period_label_map.get(per_label, default_period)
+        else:
+            mat_period = default_period
 
         mat_period_export = get_active_snapshot(
             results,
@@ -3842,11 +3871,23 @@ with tab8:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-        # Use global filters - only Period is relevant (not Material or Location)
-        render_global_filters(material_enabled=False, location_enabled=False, period_enabled=True, tab_id="tab8")
         
-        # Use global filter value
-        sel_period_tab8 = st.session_state.global_period
+        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+        
+        # Tab-specific filter for Tab 8 (All Materials View) - only Period
+        if period_labels:
+            per_default = period_label(default_period) if default_period else period_labels[0]
+            per_index = period_labels.index(per_default) if per_default in period_labels else 0
+            per_label = st.selectbox(
+                "PERIOD", 
+                period_labels, 
+                index=per_index, 
+                key="tab8_period",
+                help="Select time period to analyze"
+            )
+            sel_period_tab8 = period_label_map.get(per_label, default_period)
+        else:
+            sel_period_tab8 = default_period
 
         # --- Choose alarm threshold for SS coverage in days ---
         alarm_threshold = st.slider(
