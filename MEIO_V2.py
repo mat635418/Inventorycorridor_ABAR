@@ -2255,13 +2255,8 @@ with tab2:
         active_nodes_for_sku = set(
             active_nodes(results, period=chosen_period, product=sku)
         )
-        if not sku_lt.empty:
-            froms = set(sku_lt["From_Location"].dropna().unique().tolist())
-            tos = set(sku_lt["To_Location"].dropna().unique().tolist())
-            route_nodes = (froms.union(tos)).intersection(active_nodes_for_sku)
-            all_nodes = route_nodes.union(hubs.intersection(active_nodes_for_sku))
-        else:
-            all_nodes = hubs.intersection(active_nodes_for_sku)
+        # Include all active nodes (not just route nodes) to show end nodes without suppliers
+        all_nodes = active_nodes_for_sku.copy()
         if not all_nodes:
             all_nodes = hubs
         demand_lookup = {}
