@@ -986,7 +986,7 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive: bool = Tru
         for prod in products:
             # Handle potential duplicate Location entries by aggregating
             p_stats_filtered = df_stats[df_stats["Product"] == prod]
-            if not p_stats_filtered.empty and p_stats_filtered["Location"].duplicated().any():
+            if p_stats_filtered["Location"].duplicated().any():
                 # Group by Location and keep first occurrence for stats
                 # This handles rare cases where stats have duplicate locations
                 p_stats_filtered = p_stats_filtered.groupby("Location").first().reset_index()
@@ -994,14 +994,12 @@ def aggregate_network_stats(df_forecast, df_stats, df_lt, transitive: bool = Tru
             
             # Handle potential duplicate Location entries by aggregating Forecast values
             p_fore_filtered = df_month[df_month["Product"] == prod]
-            if not p_fore_filtered.empty and p_fore_filtered["Location"].duplicated().any():
+            if p_fore_filtered["Location"].duplicated().any():
                 # Sum Forecast values for duplicate locations (e.g., from date ambiguity)
                 # Build aggregation dict: sum for Forecast and numeric columns, first for others
                 agg_dict = {}
                 for col in p_fore_filtered.columns:
-                    if col == 'Location':
-                        continue  # Location is the groupby key
-                    elif col in ['Product', 'Period', 'PurchasingGroupName']:
+                    if col in ['Product', 'Period', 'PurchasingGroupName']:
                         agg_dict[col] = 'first'  # Keep first value for categorical/identifier columns
                     elif col == 'Forecast' or pd.api.types.is_numeric_dtype(p_fore_filtered[col]):
                         agg_dict[col] = 'sum'  # Sum numeric values
