@@ -2319,7 +2319,7 @@ with tab2:
         active_nodes_for_sku = set(
             active_nodes(results, period=chosen_period, product=sku)
         )
-        # Include all active nodes (not just route nodes) to show end nodes without suppliers
+        # Include all active nodes to show end nodes with demand but no defined supplier routes
         all_nodes = active_nodes_for_sku.copy()
         if not all_nodes:
             all_nodes = hubs
@@ -2735,6 +2735,8 @@ with tab3:
                     if 'Material' in row.index and row['Material'] == '':
                         return styles
                     # Convert formatted string back to number if needed
+                    # Note: Assumes European number formatting (1.234,56)
+                    # where '.' is thousands separator and ',' is decimal separator
                     if isinstance(val, str):
                         val_clean = val.replace('.', '').replace(',', '.')
                         val = float(val_clean) if val_clean else 0
@@ -2744,7 +2746,8 @@ with tab3:
                             styles[idx] = 'background-color: #90ee90'  # light green
                         else:
                             styles[idx] = 'background-color: #ffcccc'  # light red
-                except:
+                except (ValueError, KeyError, TypeError):
+                    # Silently skip formatting errors - keep default styling
                     pass
             return styles
         
@@ -2893,6 +2896,8 @@ with tab4:
                             if 'Node' in row.index and row['Node'] == '':
                                 return styles
                             # Convert formatted string back to number if needed
+                            # Note: Assumes European number formatting (1.234,56)
+                            # where '.' is thousands separator and ',' is decimal separator
                             if isinstance(val, str):
                                 val_clean = val.replace('.', '').replace(',', '.')
                                 val = float(val_clean) if val_clean else 0
@@ -2902,7 +2907,8 @@ with tab4:
                                     styles[idx] = 'background-color: #90ee90'  # light green
                                 else:
                                     styles[idx] = 'background-color: #ffcccc'  # light red
-                        except:
+                        except (ValueError, KeyError, TypeError):
+                            # Silently skip formatting errors - keep default styling
                             pass
                     return styles
                 
