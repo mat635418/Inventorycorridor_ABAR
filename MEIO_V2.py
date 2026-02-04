@@ -2255,13 +2255,9 @@ with tab2:
         active_nodes_for_sku = set(
             active_nodes(results, period=chosen_period, product=sku)
         )
-        if not sku_lt.empty:
-            froms = set(sku_lt["From_Location"].dropna().unique().tolist())
-            tos = set(sku_lt["To_Location"].dropna().unique().tolist())
-            route_nodes = (froms.union(tos)).intersection(active_nodes_for_sku)
-            all_nodes = route_nodes.union(hubs.intersection(active_nodes_for_sku))
-        else:
-            all_nodes = hubs.intersection(active_nodes_for_sku)
+        # Include hubs and all active nodes (those with SS/Forecast/Demand calculations)
+        # This ensures nodes like FRA1 appear even if not in routing table
+        all_nodes = hubs.union(active_nodes_for_sku)
         if not all_nodes:
             all_nodes = hubs
         demand_lookup = {}
