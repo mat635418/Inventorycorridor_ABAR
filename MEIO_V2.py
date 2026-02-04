@@ -2952,16 +2952,15 @@ with tab6:
             
             # Display all values in a single row using smaller flex items
             summary_html = f"""
-            <div style="display:flex;flex-wrap:nowrap;gap:6px;margin-top:8px;overflow-x:auto;">
+            <div style="display:flex;flex-wrap:nowrap;gap:6px;margin-top:8px;overflow-x:auto;" tabindex="0">
               <div style="flex:1;min-width:110px;background:#e8f0ff;border-radius:6px;padding:6px;">
                 <div style="font-size:9px;color:#0b3d91;font-weight:600;">Node SL</div>
                 <div style="font-size:13px;font-weight:800;color:#0b3d91;">{node_sl*100:.2f}%</div>
                 <div style="font-size:8px;color:#444;margin-top:2px;">(h={hops})</div>
               </div>
-              <div style="flex:1;min-width:100px;background:#fff3e0;border-radius:6px;padding:6px;">
+              <div style="flex:1;min-width:100px;background:#fff3e0;border-radius:6px;padding:6px;min-height:60px;">
                 <div style="font-size:9px;color:#a64d00;font-weight:600;">Z-Score</div>
                 <div style="font-size:13px;font-weight:800;color:#a64d00;">{node_z:.4f}</div>
-                <div style="font-size:8px;color:#444;margin-top:2px;">&nbsp;</div>
               </div>
               <div style="flex:1;min-width:110px;background:#e8f8f0;border-radius:6px;padding:6px;">
                 <div style="font-size:9px;color:#00695c;font-weight:600;">Net Demand</div>
