@@ -1673,6 +1673,100 @@ if s_file and d_file and lt_file:
             n_active_nodes=n_active_nodes,
         )
 
+    # =============================================================================
+    # GLOBAL FILTERS - Initialize session state for cross-tab filtering
+    # =============================================================================
+    if "global_material" not in st.session_state:
+        st.session_state.global_material = default_product
+    if "global_location" not in st.session_state:
+        st.session_state.global_location = default_location_for(default_product)
+    if "global_period" not in st.session_state:
+        st.session_state.global_period = default_period
+
+    def render_global_filters(material_enabled=True, location_enabled=True, period_enabled=True):
+        """
+        Render global filter controls that apply across tabs.
+        Greyed out filters show but are disabled when not relevant.
+        """
+        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+        
+        # Material filter
+        if material_enabled:
+            mat_opts = all_products
+            mat_index = mat_opts.index(st.session_state.global_material) if st.session_state.global_material in mat_opts else 0
+            new_mat = st.selectbox(
+                "MATERIAL", 
+                mat_opts, 
+                index=mat_index, 
+                key=f"global_mat_{id(mat_opts)}",
+                help="Select material to analyze"
+            )
+            if new_mat != st.session_state.global_material:
+                st.session_state.global_material = new_mat
+                # Update location to be valid for new material
+                locs = active_nodes(results, product=new_mat) or sorted(
+                    results[results["Product"] == new_mat]["Location"].unique().tolist()
+                )
+                if locs and st.session_state.global_location not in locs:
+                    st.session_state.global_location = locs[0]
+        else:
+            st.selectbox(
+                "MATERIAL", 
+                [st.session_state.global_material], 
+                disabled=True,
+                key=f"global_mat_disabled_{id(all_products)}",
+                help="Material filter not applicable for this tab"
+            )
+        
+        # Location filter
+        if location_enabled:
+            loc_opts = active_nodes(results, product=st.session_state.global_material) or sorted(
+                results[results["Product"] == st.session_state.global_material]["Location"].unique().tolist()
+            )
+            if not loc_opts:
+                loc_opts = ["(no location)"]
+            loc_index = loc_opts.index(st.session_state.global_location) if st.session_state.global_location in loc_opts else 0
+            new_loc = st.selectbox(
+                "LOCATION", 
+                loc_opts, 
+                index=loc_index, 
+                key=f"global_loc_{id(loc_opts)}",
+                help="Select location to analyze"
+            )
+            if new_loc != st.session_state.global_location:
+                st.session_state.global_location = new_loc
+        else:
+            st.selectbox(
+                "LOCATION", 
+                [st.session_state.global_location] if st.session_state.global_location else ["(no location)"], 
+                disabled=True,
+                key=f"global_loc_disabled_{id(all_products)}",
+                help="Location filter not applicable for this tab"
+            )
+        
+        # Period filter
+        if period_enabled:
+            if period_labels:
+                cur_label = period_label(st.session_state.global_period) if st.session_state.global_period else period_labels[0]
+                per_index = period_labels.index(cur_label) if cur_label in period_labels else 0
+                new_per_label = st.selectbox(
+                    "PERIOD", 
+                    period_labels, 
+                    index=per_index, 
+                    key=f"global_per_{id(period_labels)}",
+                    help="Select time period to analyze"
+                )
+                st.session_state.global_period = period_label_map.get(new_per_label, st.session_state.global_period)
+        else:
+            cur_label = period_label(st.session_state.global_period) if st.session_state.global_period else "N/A"
+            st.selectbox(
+                "PERIOD", 
+                [cur_label], 
+                disabled=True,
+                key=f"global_per_disabled_{id(period_labels)}",
+                help="Period filter not applicable for this tab"
+            )
+
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         [
             "📈 Inventory Corridor",
@@ -1693,28 +1787,12 @@ if s_file and d_file and lt_file:
         col_main, col_badge = st.columns([17, 3])
         with col_badge:
             render_logo_above_parameters(scale=1.5)
-
-            sku_default = default_product
-            sku_index = all_products.index(sku_default) if sku_default in all_products else 0
-            sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="tab1_sku")
-
-            loc_opts = active_nodes(results, period=CURRENT_MONTH_TS, product=sku)
-            if not loc_opts:
-                loc_opts = active_nodes(results, product=sku)
-            if not loc_opts:
-                loc_opts = sorted(
-                    results[results["Product"] == sku]["Location"].unique().tolist()
-                )
-            if not loc_opts:
-                loc_opts = ["(no location)"]
-
-            loc_default = (
-                DEFAULT_LOCATION_CHOICE
-                if DEFAULT_LOCATION_CHOICE in loc_opts
-                else (loc_opts[0] if loc_opts else "(no location)")
-            )
-            loc_index = loc_opts.index(loc_default) if loc_default in loc_opts else 0
-            loc = st.selectbox("LOCATION", loc_opts, index=loc_index, key="tab1_loc")
+            # Use global filters - all three are relevant for this tab
+            render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False)
+            
+            # Use global filter values
+            sku = st.session_state.global_material
+            loc = st.session_state.global_location
 
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1903,26 +1981,12 @@ with tab2:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-
-        sku_default = default_product
-        sku_index = all_products.index(sku_default) if all_products else 0
-        sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="network_sku")
-
-        if period_labels:
-            try:
-                default_label = period_label(default_period) if default_period is not None else period_labels[-1]
-                period_index = period_labels.index(default_label) if default_label in period_labels else len(period_labels) - 1
-            except Exception:
-                period_index = len(period_labels) - 1
-            chosen_label = st.selectbox(
-                "PERIOD",
-                period_labels,
-                index=period_index,
-                key="network_period",
-            )
-            chosen_period = period_label_map.get(chosen_label, default_period)
-        else:
-            chosen_period = CURRENT_MONTH_TS
+        # Use global filters - Material and Period are relevant (not Location)
+        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True)
+        
+        # Use global filter values
+        sku = st.session_state.global_material
+        chosen_period = st.session_state.global_period
 
         # Add cost per kilo slider below PERIOD filter (PR #3)
         cost_per_kilo = st.slider(
@@ -2467,6 +2531,12 @@ with tab3:
         render_logo_above_parameters(scale=1.5)
         st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
 
+        # Show global filters (all greyed out since this tab uses multiselect)
+        render_global_filters(material_enabled=False, location_enabled=False, period_enabled=False)
+        
+        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+        st.markdown("**Multi-select filters for this tab:**", unsafe_allow_html=True)
+
         prod_choices = active_materials(results) or sorted(results["Product"].unique())
         loc_choices = active_nodes(results) or sorted(results["Location"].unique())
         period_choices_labels = period_labels
@@ -2483,19 +2553,31 @@ with tab3:
                     default_period_list = [dp_label]
 
         f_prod = st.multiselect(
-            "MATERIAL",
+            "MATERIAL (multi)",
             prod_choices,
             default=default_prod_list,
             key="full_f_prod",
         )
-        f_loc = st.multiselect("LOCATION", loc_choices, default=[], key="full_f_loc")
+        f_loc = st.multiselect("LOCATION (multi)", loc_choices, default=[], key="full_f_loc")
         f_period_labels = st.multiselect(
-            "PERIOD",
+            "PERIOD (multi)",
             period_choices_labels,
             default=default_period_list,
             key="full_f_period",
         )
         f_period = [period_label_map[lbl] for lbl in f_period_labels] if f_period_labels else []
+        
+        # Add threshold slider (new requirement)
+        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+        ss_cov_threshold = st.slider(
+            "SS Coverage Threshold (days)",
+            min_value=0,
+            max_value=90,
+            value=30,
+            step=1,
+            help="Color cells green if above threshold, red otherwise",
+            key="tab3_ss_cov_threshold"
+        )
 
         with st.container():
             st.markdown('<div class="export-csv-btn">', unsafe_allow_html=True)
@@ -2643,12 +2725,36 @@ with tab3:
                 return ['font-weight: bold'] * len(row)
             return [''] * len(row)
         
+        # Function to color SS Coverage cells based on threshold
+        def color_ss_coverage(row):
+            styles = [''] * len(row)
+            if 'SS Cov [days]' in row.index:
+                try:
+                    val = row['SS Cov [days]']
+                    # Don't color the total row (empty Material column)
+                    if 'Material' in row.index and row['Material'] == '':
+                        return styles
+                    # Convert formatted string back to number if needed
+                    if isinstance(val, str):
+                        val_clean = val.replace('.', '').replace(',', '.')
+                        val = float(val_clean) if val_clean else 0
+                    if pd.notna(val) and val != '':
+                        idx = row.index.get_loc('SS Cov [days]')
+                        if float(val) >= ss_cov_threshold:
+                            styles[idx] = 'background-color: #90ee90'  # light green
+                        else:
+                            styles[idx] = 'background-color: #ffcccc'  # light red
+                except:
+                    pass
+            return styles
+        
         styled = (
             nice.style
             .format(pandas_fmt, escape="html")
             .set_properties(**header_props, axis=1)
             .set_properties(**ss_highlight, subset=['SS [unit]'])
             .apply(get_status_column_styles, axis=0)
+            .apply(color_ss_coverage, axis=1)
             .apply(make_total_bold, axis=1)
         )
         st.dataframe(styled, use_container_width=True)
@@ -2658,30 +2764,24 @@ with tab4:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-
-        sku_default = default_product
-        sku_index = all_products.index(sku_default) if all_products else 0
-        sku = st.selectbox("MATERIAL", all_products, index=sku_index, key="eff_sku")
-
-        if period_labels:
-            try:
-                default_label = period_label(default_period) if default_period is not None else period_labels[-1]
-                period_index = (
-                    period_labels.index(default_label)
-                    if default_label in period_labels
-                    else len(period_labels) - 1
-                )
-            except Exception:
-                period_index = len(period_labels) - 1
-            chosen_label = st.selectbox(
-                "PERIOD",
-                period_labels,
-                index=period_index,
-                key="eff_period",
-            )
-            eff_period = period_label_map.get(chosen_label, default_period)
-        else:
-            eff_period = CURRENT_MONTH_TS
+        # Use global filters - Material and Period are relevant (not Location)
+        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True)
+        
+        # Use global filter values
+        sku = st.session_state.global_material
+        eff_period = st.session_state.global_period
+        
+        # Add threshold slider (new requirement)
+        st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
+        ss_cov_threshold_tab4 = st.slider(
+            "SS Coverage Threshold (days)",
+            min_value=0,
+            max_value=90,
+            value=30,
+            step=1,
+            help="Color cells green if above threshold, red otherwise",
+            key="tab4_ss_cov_threshold"
+        )
 
         snapshot_period = eff_period if eff_period in all_periods else (all_periods[-1] if all_periods else None)
         if snapshot_period is None:
@@ -2783,10 +2883,34 @@ with tab4:
                         return ['font-weight: bold'] * len(row)
                     return [''] * len(row)
                 
+                # Function to color SS Coverage cells based on threshold
+                def color_ss_coverage_tab4(row):
+                    styles = [''] * len(row)
+                    if 'SS Cov [days]' in row.index:
+                        try:
+                            val = row['SS Cov [days]']
+                            # Don't color the total row (empty Node column)
+                            if 'Node' in row.index and row['Node'] == '':
+                                return styles
+                            # Convert formatted string back to number if needed
+                            if isinstance(val, str):
+                                val_clean = val.replace('.', '').replace(',', '.')
+                                val = float(val_clean) if val_clean else 0
+                            if pd.notna(val) and val != '':
+                                idx = row.index.get_loc('SS Cov [days]')
+                                if float(val) >= ss_cov_threshold_tab4:
+                                    styles[idx] = 'background-color: #90ee90'  # light green
+                                else:
+                                    styles[idx] = 'background-color: #ffcccc'  # light red
+                        except:
+                            pass
+                    return styles
+                
                 styled = (eff_top_std.style
                          .format(tbl_fmt, escape="html")
                          .set_properties(**header_style, axis=1)
                          .set_properties(**ss_highlight, subset=['SS [unit]'])
+                         .apply(color_ss_coverage_tab4, axis=1)
                          .apply(make_total_bold, axis=1))
                 st.dataframe(styled, use_container_width=True)
             else:
@@ -2804,25 +2928,12 @@ with tab5:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-
-        h_sku_default = default_product
-        h_sku_index = all_products.index(h_sku_default) if all_products else 0
-        h_sku = st.selectbox("MATERIAL", all_products, index=h_sku_index, key="h1")
-
-        h_loc_opts = active_nodes(results, product=h_sku)
-        if not h_loc_opts:
-            h_loc_opts = sorted(
-                results[results["Product"] == h_sku]["Location"].unique().tolist()
-            )
-        if not h_loc_opts:
-            h_loc_opts = ["(no location)"]
-        h_loc_default = (
-            DEFAULT_LOCATION_CHOICE
-            if DEFAULT_LOCATION_CHOICE in h_loc_opts
-            else (h_loc_opts[0] if h_loc_opts else "(no location)")
-        )
-        h_loc_index = h_loc_opts.index(h_loc_default) if h_loc_default in h_loc_opts else 0
-        h_loc = st.selectbox("LOCATION", h_loc_opts, index=h_loc_index, key="h2")
+        # Use global filters - Material and Location are relevant (not Period)
+        render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False)
+        
+        # Use global filter values
+        h_sku = st.session_state.global_material
+        h_loc = st.session_state.global_location
 
         st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -2930,23 +3041,12 @@ with tab6:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-
-        calc_sku_default = default_product
-        calc_sku_index = all_products.index(calc_sku_default) if all_products else 0
-        calc_sku = st.selectbox("MATERIAL", all_products, index=calc_sku_index, key="c_sku")
-
-        avail_locs = active_nodes(results, product=calc_sku)
-        if not avail_locs:
-            avail_locs = sorted(results[results["Product"] == calc_sku]["Location"].unique().tolist())
-        if not avail_locs:
-            avail_locs = ["(no location)"]
-        calc_loc_default = (
-            DEFAULT_LOCATION_CHOICE
-            if DEFAULT_LOCATION_CHOICE in avail_locs
-            else (avail_locs[0] if avail_locs else "(no location)")
-        )
-        calc_loc_index = avail_locs.index(calc_loc_default) if calc_loc_default in avail_locs else 0
-        calc_loc = st.selectbox("LOCATION", avail_locs, index=calc_loc_index, key="c_loc")
+        # Use global filters - Material and Location are relevant (not Period)
+        render_global_filters(material_enabled=True, location_enabled=True, period_enabled=False)
+        
+        # Use global filter values
+        calc_sku = st.session_state.global_material
+        calc_loc = st.session_state.global_location
 
         if period_labels:
             try:
@@ -3451,39 +3551,16 @@ with tab7:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-
-        sel_prod_default = default_product
-        sel_prod_index = all_products.index(sel_prod_default) if all_products else 0
-        selected_product = st.selectbox(
-            "MATERIAL",
-            all_products,
-            index=sel_prod_index,
-            key="mat_sel",
-        )
-
-        if period_labels:
-            try:
-                sel_label = period_label(default_period) if default_period is not None else period_labels[-1]
-                sel_period_index = (
-                    period_labels.index(sel_label)
-                    if sel_label in period_labels
-                    else len(period_labels) - 1
-                )
-            except Exception:
-                sel_period_index = len(period_labels) - 1
-            chosen_label = st.selectbox(
-                "PERIOD",
-                period_labels,
-                index=sel_period_index,
-                key="mat_period",
-            )
-            selected_period = period_label_map.get(chosen_label, default_period)
-        else:
-            selected_period = CURRENT_MONTH_TS
+        # Use global filters - Material and Period are relevant (not Location)
+        render_global_filters(material_enabled=True, location_enabled=False, period_enabled=True)
+        
+        # Use global filter values
+        selected_product = st.session_state.global_material
+        mat_period = st.session_state.global_period
 
         mat_period_export = get_active_snapshot(
             results,
-            selected_period if selected_period is not None else default_period,
+            mat_period if mat_period is not None else default_period,
         )
         mat_period_export = mat_period_export[
             (mat_period_export["Product"] == selected_product)
@@ -3494,7 +3571,7 @@ with tab7:
             st.download_button(
                 "💾 Export CSV",
                 data=mat_period_export.to_csv(index=False),
-                file_name=f"material_view_{selected_product}_{period_label(selected_period)}.csv",
+                file_name=f"material_view_{selected_product}_{period_label(mat_period)}.csv",
                 mime="text/csv",
                 key="mat_export_btn",
             )
@@ -3505,14 +3582,14 @@ with tab7:
         render_selection_line(
             "Selected:",
             product=selected_product,
-            period_text=period_label(selected_period),
+            period_text=period_label(mat_period),
         )
         st.subheader("📦 View by Material (+ SS attribution)")
         render_tab7_explainer()
 
         mat_period_df = get_active_snapshot(
             results,
-            selected_period if selected_period is not None else default_period,
+            mat_period if mat_period is not None else default_period,
         )
         mat_period_df = mat_period_df[
             (mat_period_df["Product"] == selected_product)
@@ -3752,33 +3829,11 @@ with tab8:
     col_main, col_badge = st.columns([17, 3])
     with col_badge:
         render_logo_above_parameters(scale=1.5)
-
-        # --- Period selector as before ---
-        if period_labels:
-            try:
-                sel_label = (
-                    period_label(default_period)
-                    if default_period is not None
-                    else period_labels[-1]
-                )
-                sel_period_index = (
-                    period_labels.index(sel_label)
-                    if sel_label in period_labels
-                    else len(period_labels) - 1
-                )
-            except Exception:
-                sel_period_index = len(period_labels) - 1
-            chosen_label_all = st.selectbox(
-                "PERIOD",
-                period_labels,
-                index=sel_period_index,
-                key="allmat_period",
-            )
-            selected_period_all = period_label_map.get(
-                chosen_label_all, default_period
-            )
-        else:
-            selected_period_all = CURRENT_MONTH_TS
+        # Use global filters - only Period is relevant (not Material or Location)
+        render_global_filters(material_enabled=False, location_enabled=False, period_enabled=True)
+        
+        # Use global filter value
+        sel_period_tab8 = st.session_state.global_period
 
         # --- Choose alarm threshold for SS coverage in days ---
         alarm_threshold = st.slider(
@@ -3790,7 +3845,7 @@ with tab8:
         # --- Aggregate data exactly as before ---
         snapshot_all = get_active_snapshot(
             results,
-            selected_period_all if selected_period_all is not None else default_period,
+            sel_period_tab8 if sel_period_tab8 is not None else default_period,
         )
 
         agg_all = snapshot_all.groupby("Product", as_index=False).agg(
@@ -3846,7 +3901,7 @@ with tab8:
             st.download_button(
                 "💾 Export CSV",
                 data=agg_all.to_csv(index=False),
-                file_name=f"all_materials_{period_label(selected_period_all)}.csv",
+                file_name=f"all_materials_{period_label(sel_period_tab8)}.csv",
                 mime="text/csv",
                 key="allmat_export_btn",
             )
@@ -3855,7 +3910,7 @@ with tab8:
 
     with col_main:
         render_selection_line(
-            "Selected:", period_text=period_label(selected_period_all)
+            "Selected:", period_text=period_label(sel_period_tab8)
         )
         st.subheader("📊 All Materials View")
 
