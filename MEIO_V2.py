@@ -3023,14 +3023,24 @@ with tab6:
             )
             
             # Calculate the adjustment ratio based on the slider movement
-            base_ratio = tier_ratios[hops_temp]
-            adjustment_factor = (primary_sl_tab6 / 100) / (node_sl_temp if node_sl_temp > 0 else service_level)
+            # Ensure we have a valid denominator to avoid division by zero
+            base_sl = node_sl_temp if node_sl_temp > 0 else service_level
+            if base_sl <= 0:
+                base_sl = 0.99  # Fallback to 99% if both are invalid
+            
+            adjustment_factor = (primary_sl_tab6 / 100) / base_sl
             
             # Calculate all hop SLs based on the primary slider and tiering ratios
-            endnode_sl_tab6 = (service_level * 100) * adjustment_factor
-            hop1_sl_tab6 = (service_level * tier_ratios[1] * 100) * adjustment_factor
-            hop2_sl_tab6 = (service_level * tier_ratios[2] * 100) * adjustment_factor
-            hop3_sl_tab6 = (service_level * tier_ratios[3] * 100) * adjustment_factor
+            # Using dictionary comprehension for cleaner code
+            calculated_hop_sls = {
+                hop: (service_level * tier_ratios[hop] * 100) * adjustment_factor
+                for hop in range(4)
+            }
+            
+            endnode_sl_tab6 = calculated_hop_sls[0]
+            hop1_sl_tab6 = calculated_hop_sls[1]
+            hop2_sl_tab6 = calculated_hop_sls[2]
+            hop3_sl_tab6 = calculated_hop_sls[3]
             
             # Display the recalculated hop SLs
             st.markdown("**Automatically Calculated Hop SLs:**")
