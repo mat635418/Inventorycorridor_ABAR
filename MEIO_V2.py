@@ -578,7 +578,7 @@ def render_tab7_explainer():
         )
 
 
-def render_ss_formula_explainer():
+def render_ss_formula_explainer(hops=None, service_level=None):
     """Explain the core SS formula in the scenario tab."""
     with st.expander("📐 Safety Stock formula used in scenarios", expanded=False):
         st.markdown(
@@ -608,9 +608,51 @@ def render_ss_formula_explainer():
               so tiny variances do not result in zero $SS$.
             - Scenario $SS$ is **policy-consistent** with the main engine:
               we apply zero-if-no-demand, capping and B616 overrides.
-            """,
-            unsafe_allow_html=True,
+            """
         )
+        
+        # If hop information is provided, display the Applied Hop Logic table
+        if hops is not None and service_level is not None:
+            st.markdown("---")
+            st.markdown("**Applied Hop Logic → Service Level mapping:**")
+            
+            # Calculate SL values for each hop based on current service_level from sidebar
+            hop_sl_values = {
+                0: service_level * 100,  # Convert to percentage
+                1: service_level * 0.9596 * 100,
+                2: service_level * 0.9091 * 100,
+                3: service_level * 0.8586 * 100
+            }
+            
+            # Node type descriptions
+            node_type_descriptions = {
+                0: "End-node",
+                1: "Internal+External Demand",
+                2: "Level-1 Hub (e.g. LUEX)",
+                3: "Level-2 Hub (e.g. BEEX)"
+            }
+            
+            # Create dataframe for the SL tiering table
+            sl_tier_data = []
+            for hop in range(4):
+                sl_tier_data.append({
+                    'Hop': hop,
+                    'Service Level (%)': hop_sl_values[hop],
+                    'Node Type': node_type_descriptions[hop]
+                })
+            sl_tier_df = pd.DataFrame(sl_tier_data)
+            
+            # Apply highlighting to the row matching current node's hop level
+            def highlight_current_hop(row):
+                if row['Hop'] == hops:
+                    return ['background-color: #fffacd'] * len(row)
+                return [''] * len(row)
+            
+            sl_tier_styled = sl_tier_df.style.apply(highlight_current_hop, axis=1).format({
+                'Service Level (%)': '{:.2f}'
+            })
+            
+            st.dataframe(sl_tier_styled, use_container_width=True, hide_index=True)
 
 
 def clean_numeric(series: pd.Series) -> pd.Series:
@@ -2522,12 +2564,12 @@ with tab3:
         )
         st.dataframe(styled, use_container_width=True)
         
-        # Add grand total row for SS column
+        # Add total row for SS column (just the number, no text)
         if not nice.empty and 'SS [unit]' in nice.columns:
             total_ss = nice['SS [unit]'].sum() if pd.api.types.is_numeric_dtype(display_df['Safety_Stock']) else 0
             st.markdown(
                 f"<div style='text-align:right; font-weight:bold; margin-top:10px;'>"
-                f"Grand Total SS: {_fmt_int(total_ss)}</div>",
+                f"{_fmt_int(total_ss)}</div>",
                 unsafe_allow_html=True
             )
 
@@ -2643,11 +2685,11 @@ with tab4:
                          .set_properties(**ss_highlight, subset=['SS [unit]']))
                 st.dataframe(styled, use_container_width=True)
                 
-                # Add grand total row for SS column
+                # Add total row for SS column (just the number, no text)
                 total_ss_top = eff_top_std['SS [unit]'].sum() if 'SS [unit]' in eff_top_std.columns else 0
                 st.markdown(
                     f"<div style='text-align:right; font-weight:bold; margin-top:10px;'>"
-                    f"Grand Total SS: {_fmt_int(total_ss_top)}</div>",
+                    f"{_fmt_int(total_ss_top)}</div>",
                     unsafe_allow_html=True
                 )
             else:
@@ -2878,8 +2920,7 @@ with tab6:
             period_text=period_label(calc_period),
         )
         st.subheader("🧮 Transparent Calculation Engine & Scenario Simulation")
-        render_ss_formula_explainer()
-
+        
         z_current = norm.ppf(service_level)
 
         row_df = get_active_snapshot(results, calc_period if calc_period is not None else default_period)
@@ -2898,95 +2939,63 @@ with tab6:
             node_z = float(row.get("Z_node", norm.ppf(node_sl)))
             hops = int(row.get("Tier_Hops", 0))
             
-            # Create a row layout with hop logic table on left and calculation values on right
+            # Render the formula explainer with hop logic table embedded
+            render_ss_formula_explainer(hops=hops, service_level=service_level)
+            
+            # Display calculation values in a single row
             st.markdown("---")
-            col_hop_table, col_calc_values = st.columns([1, 1])
+            st.markdown("**Values used for the calculation:**")
+            avg_daily = row.get("D_day", np.nan)
+            days_cov = row.get("Days_Covered_by_SS", np.nan)
+            avg_daily_txt = f"{avg_daily:.2f}" if pd.notna(avg_daily) else "N/A"
+            days_cov_txt = f"{days_cov:.1f}" if pd.notna(days_cov) else "N/A"
             
-            with col_hop_table:
-                st.markdown("**Applied Hop Logic → Service Level mapping:**")
-                
-                # Calculate SL values for each hop based on current service_level from sidebar
-                # Using the same ratios as in run_pipeline
-                hop_sl_values = {
-                    0: service_level * 100,  # Convert to percentage
-                    1: service_level * 0.9596 * 100,
-                    2: service_level * 0.9091 * 100,
-                    3: service_level * 0.8586 * 100
-                }
-                
-                # Create dataframe for the SL tiering table
-                sl_tier_data = []
-                for hop in range(4):
-                    sl_tier_data.append({
-                        'Hop': hop,
-                        'Service Level (%)': hop_sl_values[hop]
-                    })
-                sl_tier_df = pd.DataFrame(sl_tier_data)
-                
-                # Apply highlighting to the row matching current node's hop level
-                def highlight_current_hop(row):
-                    if row['Hop'] == hops:
-                        return ['background-color: #fffacd'] * len(row)
-                    return [''] * len(row)
-                
-                sl_tier_styled = sl_tier_df.style.apply(highlight_current_hop, axis=1).format({
-                    'Service Level (%)': '{:.2f}'
-                })
-                
-                st.dataframe(sl_tier_styled, use_container_width=True, hide_index=True)
-            
-            with col_calc_values:
-                avg_daily = row.get("D_day", np.nan)
-                days_cov = row.get("Days_Covered_by_SS", np.nan)
-                avg_daily_txt = f"{avg_daily:.2f}" if pd.notna(avg_daily) else "N/A"
-                days_cov_txt = f"{days_cov:.1f}" if pd.notna(days_cov) else "N/A"
-                
-                st.markdown("**Values used for the calculation:**")
-                summary_html = f"""
-                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
-                  <div style="flex:0 0 48%;background:#e8f0ff;border-radius:6px;padding:8px;">
-                    <div style="font-size:10px;color:#0b3d91;font-weight:600;">Applied Node SL</div>
-                    <div style="font-size:15px;font-weight:800;color:#0b3d91;">{node_sl*100:.2f}%</div>
-                    <div style="font-size:9px;color:#444;margin-top:4px;">(hops = {hops})</div>
-                  </div>
-                  <div style="flex:0 0 48%;background:#fff3e0;border-radius:6px;padding:8px;">
-                    <div style="font-size:10px;color:#a64d00;font-weight:600;">Applied Z</div>
-                    <div style="font-size:15px;font-weight:800;color:#a64d00;">{node_z:.4f}</div>
-                    <div style="font-size:9px;color:#444;margin-top:4px;">(SL {node_sl*100:.2f}%)</div>
-                  </div>
-                  <div style="flex:0 0 48%;background:#e8f8f0;border-radius:6px;padding:8px;">
-                    <div style="font-size:10px;color:#00695c;font-weight:600;">Network Demand</div>
-                    <div style="font-size:15px;font-weight:800;color:#00695c;">{euro_format(row['Agg_Future_Demand'], True)}</div>
-                    <div style="font-size:9px;color:#444;margin-top:4px;">(monthly)</div>
-                  </div>
-                  <div style="flex:0 0 48%;background:#fbeff2;border-radius:6px;padding:8px;">
-                    <div style="font-size:10px;color:#880e4f;font-weight:600;">Network Std Dev</div>
-                    <div style="font-size:15px;font-weight:800;color:#880e4f;">{euro_format(row['Agg_Std_Hist'], True)}</div>
-                    <div style="font-size:9px;color:#444;margin-top:4px;">(monthly)</div>
-                  </div>
-                  <div style="flex:0 0 48%;background:#f0f4c3;border-radius:6px;padding:8px;">
-                    <div style="font-size:10px;color:#827717;font-weight:600;">Avg LT</div>
-                    <div style="font-size:15px;font-weight:800;color:#827717;">{row['LT_Mean']}</div>
-                    <div style="font-size:9px;color:#444;margin-top:4px;">(days)</div>
-                  </div>
-                  <div style="flex:0 0 48%;background:#e1f5fe;border-radius:6px;padding:8px;">
-                    <div style="font-size:10px;color:#01579b;font-weight:600;">LT Std Dev</div>
-                    <div style="font-size:15px;font-weight:800;color:#01579b;">{row['LT_Std']}</div>
-                    <div style="font-size:9px;color:#444;margin-top:4px;">(days)</div>
-                  </div>
-                  <div style="flex:0 0 48%;background:#ffffff;border-radius:6px;padding:8px;border:1px solid #ddd;">
-                    <div style="font-size:10px;color:#333;font-weight:600;">Avg Daily Demand</div>
-                    <div style="font-size:14px;font-weight:800;color:#333;">{avg_daily_txt}</div>
-                    <div style="font-size:9px;color:#444;margin-top:4px;">(units/day)</div>
-                  </div>
-                  <div style="flex:0 0 48%;background:#ffffff;border-radius:6px;padding:8px;border:1px solid #ddd;">
-                    <div style="font-size:10px;color:#333;font-weight:600;">Days Covered by SS</div>
-                    <div style="font-size:14px;font-weight:800;color:#333;">{days_cov_txt}</div>
-                    <div style="font-size:9px;color:#444;margin-top:4px;">(days)</div>
-                  </div>
-                </div>
-                """
-                st.markdown(summary_html, unsafe_allow_html=True)
+            # Display all values in a single row using smaller flex items
+            summary_html = f"""
+            <div style="display:flex;flex-wrap:nowrap;gap:6px;margin-top:8px;overflow-x:auto;">
+              <div style="flex:1;min-width:110px;background:#e8f0ff;border-radius:6px;padding:6px;">
+                <div style="font-size:9px;color:#0b3d91;font-weight:600;">Node SL</div>
+                <div style="font-size:13px;font-weight:800;color:#0b3d91;">{node_sl*100:.2f}%</div>
+                <div style="font-size:8px;color:#444;margin-top:2px;">(h={hops})</div>
+              </div>
+              <div style="flex:1;min-width:100px;background:#fff3e0;border-radius:6px;padding:6px;">
+                <div style="font-size:9px;color:#a64d00;font-weight:600;">Z-Score</div>
+                <div style="font-size:13px;font-weight:800;color:#a64d00;">{node_z:.4f}</div>
+                <div style="font-size:8px;color:#444;margin-top:2px;">&nbsp;</div>
+              </div>
+              <div style="flex:1;min-width:110px;background:#e8f8f0;border-radius:6px;padding:6px;">
+                <div style="font-size:9px;color:#00695c;font-weight:600;">Net Demand</div>
+                <div style="font-size:13px;font-weight:800;color:#00695c;">{euro_format(row['Agg_Future_Demand'], True)}</div>
+                <div style="font-size:8px;color:#444;margin-top:2px;">(mo)</div>
+              </div>
+              <div style="flex:1;min-width:110px;background:#fbeff2;border-radius:6px;padding:6px;">
+                <div style="font-size:9px;color:#880e4f;font-weight:600;">Net StdDev</div>
+                <div style="font-size:13px;font-weight:800;color:#880e4f;">{euro_format(row['Agg_Std_Hist'], True)}</div>
+                <div style="font-size:8px;color:#444;margin-top:2px;">(mo)</div>
+              </div>
+              <div style="flex:1;min-width:90px;background:#f0f4c3;border-radius:6px;padding:6px;">
+                <div style="font-size:9px;color:#827717;font-weight:600;">Avg LT</div>
+                <div style="font-size:13px;font-weight:800;color:#827717;">{row['LT_Mean']}</div>
+                <div style="font-size:8px;color:#444;margin-top:2px;">(d)</div>
+              </div>
+              <div style="flex:1;min-width:90px;background:#e1f5fe;border-radius:6px;padding:6px;">
+                <div style="font-size:9px;color:#01579b;font-weight:600;">LT StdDev</div>
+                <div style="font-size:13px;font-weight:800;color:#01579b;">{row['LT_Std']}</div>
+                <div style="font-size:8px;color:#444;margin-top:2px;">(d)</div>
+              </div>
+              <div style="flex:1;min-width:100px;background:#ffffff;border-radius:6px;padding:6px;border:1px solid #ddd;">
+                <div style="font-size:9px;color:#333;font-weight:600;">Daily Dem</div>
+                <div style="font-size:13px;font-weight:800;color:#333;">{avg_daily_txt}</div>
+                <div style="font-size:8px;color:#444;margin-top:2px;">(u/d)</div>
+              </div>
+              <div style="flex:1;min-width:100px;background:#ffffff;border-radius:6px;padding:6px;border:1px solid #ddd;">
+                <div style="font-size:9px;color:#333;font-weight:600;">SS Cover</div>
+                <div style="font-size:13px;font-weight:800;color:#333;">{days_cov_txt}</div>
+                <div style="font-size:8px;color:#444;margin-top:2px;">(d)</div>
+              </div>
+            </div>
+            """
+            st.markdown(summary_html, unsafe_allow_html=True)
 
             st.markdown("---")
             st.markdown(
