@@ -2532,8 +2532,8 @@ with tab3:
         render_logo_above_parameters(scale=1.5)
         st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
 
-        # Show global filters (all greyed out since this tab uses multiselect)
-        render_global_filters(material_enabled=False, location_enabled=False, period_enabled=False, tab_id="tab3")
+        # Use global filters - enable all three for Tab 3
+        render_global_filters(material_enabled=True, location_enabled=True, period_enabled=True, tab_id="tab3")
         
         st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
         st.markdown("**Multi-select filters for this tab:**", unsafe_allow_html=True)
@@ -2542,16 +2542,14 @@ with tab3:
         loc_choices = active_nodes(results) or sorted(results["Location"].unique())
         period_choices_labels = period_labels
 
-        default_prod_list = [default_product] if default_product in prod_choices else []
+        # Use global filter values as defaults for multiselect
+        default_prod_list = [st.session_state.global_material] if st.session_state.global_material in prod_choices else []
+        default_loc_list = [st.session_state.global_location] if st.session_state.global_location in loc_choices else []
         default_period_list = []
-        cur_label = period_label(CURRENT_MONTH_TS)
-        if cur_label in period_choices_labels:
-            default_period_list = [cur_label]
-        else:
-            if default_period is not None:
-                dp_label = period_label(default_period)
-                if dp_label in period_choices_labels:
-                    default_period_list = [dp_label]
+        if st.session_state.global_period:
+            cur_label = period_label(st.session_state.global_period)
+            if cur_label in period_choices_labels:
+                default_period_list = [cur_label]
 
         f_prod = st.multiselect(
             "MATERIAL (multi)",
@@ -2559,7 +2557,7 @@ with tab3:
             default=default_prod_list,
             key="full_f_prod",
         )
-        f_loc = st.multiselect("LOCATION (multi)", loc_choices, default=[], key="full_f_loc")
+        f_loc = st.multiselect("LOCATION (multi)", loc_choices, default=default_loc_list, key="full_f_loc")
         f_period_labels = st.multiselect(
             "PERIOD (multi)",
             period_choices_labels,
@@ -2567,6 +2565,14 @@ with tab3:
             key="full_f_period",
         )
         f_period = [period_label_map[lbl] for lbl in f_period_labels] if f_period_labels else []
+        
+        # Sync multiselect selections back to global state
+        if f_prod:
+            st.session_state.global_material = f_prod[0]
+        if f_loc:
+            st.session_state.global_location = f_loc[0]
+        if f_period:
+            st.session_state.global_period = f_period[0]
         
         # Add threshold slider (new requirement)
         st.markdown("<div style='padding:6px 0;'></div>", unsafe_allow_html=True)
@@ -2698,8 +2704,8 @@ with tab3:
             "Local Dem [unit]": _fmt_int,
             "NW Dem [unit]": _fmt_int,
         }
-        # Add light red highlighting to SS column (PR #4)
-        ss_highlight = {'background-color': '#ffcccc'}
+        # Add very light blue highlighting to SS column
+        ss_highlight = {'background-color': '#e3f2fd'}
         
         # Define status values and their corresponding background colors
         STATUS_COLORS = {
@@ -2877,8 +2883,8 @@ with tab4:
                     "Net Dem [unit]": _fmt_int,
                 }
                 header_style = {'white-space': 'normal', 'word-break': 'break-word', 'font-size': '0.85em'}
-                # Add light red highlighting to SS column (PR #5)
-                ss_highlight = {'background-color': '#ffcccc'}
+                # Add very light blue highlighting to SS column
+                ss_highlight = {'background-color': '#e3f2fd'}
                 
                 # Function to make the Total row bold
                 def make_total_bold(row):
