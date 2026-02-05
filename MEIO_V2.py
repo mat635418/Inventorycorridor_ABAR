@@ -3236,6 +3236,7 @@ with tab6:
                         
                         # Get hop SL values from session state (set by sliders in scenario 1)
                         # Use default values as fallback
+                        # Note: hop0_sl_tab6_value from session state is only used when hops==0 in hop_sl_map
                         hop0_sl_tab6_value = st.session_state.get("hop0_sl_tab6", hop0_sl_tab6)
                         hop1_sl_tab6 = st.session_state.get("hop1_sl_tab6", 95.0)
                         hop2_sl_tab6 = st.session_state.get("hop2_sl_tab6", 90.0)
