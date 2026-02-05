@@ -3189,7 +3189,19 @@ with tab6:
                             st.markdown("### 📥 Scenario Input")
                             st.markdown("Configure the hop service levels for scenario planning:")
                             
-                            st.markdown(f"**Hop 0 (End-nodes) SL:** {hop0_sl_tab6:.1f}% _(from Service Level slider in sidebar)_")
+                            # Show slider for Hop 0 if the node is Hop 0, otherwise show text
+                            if hops == 0:
+                                hop0_sl_tab6 = st.slider(
+                                    "Hop 0 (End-nodes) SL (%)",
+                                    min_value=50.0,
+                                    max_value=99.9,
+                                    value=hop0_sl_tab6,
+                                    step=0.1,
+                                    help="Service Level for Hop 0 (End-nodes) in scenario simulations",
+                                    key="hop0_sl_tab6"
+                                )
+                            else:
+                                st.markdown(f"**Hop 0 (End-nodes) SL:** {hop0_sl_tab6:.1f}% _(from Service Level slider in sidebar)_")
                             
                             # Hop 1, 2, 3 sliders
                             hop1_sl_tab6 = st.slider(
@@ -3224,6 +3236,7 @@ with tab6:
                         
                         # Get hop SL values from session state (set by sliders in scenario 1)
                         # Use default values as fallback
+                        hop0_sl_tab6_final = st.session_state.get("hop0_sl_tab6", hop0_sl_tab6)
                         hop1_sl_tab6 = st.session_state.get("hop1_sl_tab6", 95.0)
                         hop2_sl_tab6 = st.session_state.get("hop2_sl_tab6", 90.0)
                         hop3_sl_tab6 = st.session_state.get("hop3_sl_tab6", 85.0)
@@ -3231,7 +3244,7 @@ with tab6:
                         # Use tab6 hop SL sliders to determine SL based on node's hop tier
                         # Map hop tier to the appropriate SL from Tab6
                         hop_sl_map = {
-                            0: endnode_sl_tab6,  # End-nodes (Hop 0) - from Tab6 calculations
+                            0: hop0_sl_tab6_final,  # End-nodes (Hop 0) - from Tab6 slider if node is Hop 0, otherwise from sidebar
                             1: hop1_sl_tab6,     # Hop 1 - from Tab6 calculations
                             2: hop2_sl_tab6,     # Hop 2 - from Tab6 calculations
                             3: hop3_sl_tab6,     # Hop 3 - from Tab6 calculations
