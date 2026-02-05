@@ -656,8 +656,8 @@ def render_ss_formula_explainer(hops=None, service_level=None):
                 {'selector': 'th', 'props': [('text-align', 'left')]}
             ])
             
-            # Display table with 1/3 width and more space for Node Type column
-            col1, col2, col3 = st.columns([1, 2, 3])
+            # Display table with 30% bigger width (column widths: 1.3x, 1.85x, 2.85x for ~30% increase to first column)
+            col1, col2, col3 = st.columns([1.3, 1.85, 2.85])
             with col1:
                 st.dataframe(sl_tier_styled, hide_index=True)
 
@@ -2771,10 +2771,29 @@ with tab4:
                         return ['font-weight: bold'] * len(row)
                     return [''] * len(row)
                 
+                # Define status values and their corresponding background colors (same as tab3)
+                STATUS_COLORS_TAB4 = {
+                    'Capped (High)': '#fffacd',      # light yellow
+                    'Capped (Low)': '#fffacd',       # light yellow
+                    'Optimal (Statistical)': '#90ee90'  # light green
+                }
+                
+                # Function to get background color style for Status column values
+                def get_status_background_color_tab4(val):
+                    val_str = str(val)
+                    return f'background-color: {STATUS_COLORS_TAB4[val_str]}' if val_str in STATUS_COLORS_TAB4 else ''
+                
+                # Function to generate styles for Status column
+                def get_status_column_styles_tab4(col):
+                    if col.name == 'Status':
+                        return col.map(get_status_background_color_tab4)
+                    return [''] * len(col)
+                
                 styled = (eff_top_std.style
                          .format(tbl_fmt, escape="html")
                          .set_properties(**header_style, axis=1)
                          .set_properties(**ss_highlight, subset=['SS [unit]'])
+                         .apply(get_status_column_styles_tab4, axis=0)
                          .apply(make_total_bold, axis=1))
                 st.dataframe(styled, use_container_width=True)
             else:
@@ -2875,6 +2894,158 @@ with tab5:
                 k2.metric("Bias (%)", "N/A")
             avg_acc = hdf["Accuracy_%"].mean() if not hdf["Accuracy_%"].isna().all() else np.nan
             k3.metric("Avg Accuracy (%)", f"{avg_acc:.1f}" if not np.isnan(avg_acc) else "N/A")
+
+            # Add visualizations for WAPE, BIAS, and Avg Accuracy
+            st.markdown("---")
+            st.markdown("### 📊 Forecast Accuracy Visualizations")
+            
+            viz_col1, viz_col2, viz_col3 = st.columns(3)
+            
+            with viz_col1:
+                st.markdown("**WAPE – Distance from Truth**")
+                # WAPE Gauge/Speedometer
+                if denom_consumption > 0:
+                    # Define zones: Excellent (≤10%), Acceptable (10-20%), Critical (>20%)
+                    wape_zones = {
+                        'excellent': 10,
+                        'acceptable': 20
+                    }
+                    
+                    # Create gauge chart
+                    fig_wape = go.Figure(go.Indicator(
+                        mode = "gauge+number",
+                        value = wape_val,
+                        domain = {'x': [0, 1], 'y': [0, 1]},
+                        title = {'text': "WAPE %", 'font': {'size': 14}},
+                        number = {'suffix': "%", 'font': {'size': 24}},
+                        gauge = {
+                            'axis': {'range': [None, 40], 'tickwidth': 1, 'tickcolor': "darkblue"},
+                            'bar': {'color': "darkblue", 'thickness': 0.25},
+                            'bgcolor': "white",
+                            'borderwidth': 2,
+                            'bordercolor': "gray",
+                            'steps': [
+                                {'range': [0, wape_zones['excellent']], 'color': '#90ee90'},  # Green - Excellent
+                                {'range': [wape_zones['excellent'], wape_zones['acceptable']], 'color': '#fffacd'},  # Yellow - Acceptable
+                                {'range': [wape_zones['acceptable'], 40], 'color': '#ffcccb'}  # Red - Critical
+                            ],
+                            'threshold': {
+                                'line': {'color': "red", 'width': 4},
+                                'thickness': 0.75,
+                                'value': wape_val
+                            }
+                        }
+                    ))
+                    fig_wape.update_layout(
+                        height=250,
+                        margin=dict(l=10, r=10, t=40, b=10),
+                        font={'size': 10}
+                    )
+                    st.plotly_chart(fig_wape, use_container_width=True)
+                    st.markdown(
+                        f"<div style='text-align: center; font-size: 0.75em;'>"
+                        f"🟢 Excellent (≤{wape_zones['excellent']}%) | "
+                        f"🟡 Acceptable (>{wape_zones['excellent']}-{wape_zones['acceptable']}%) | "
+                        f"🔴 Critical (>{wape_zones['acceptable']}%)"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.info("No data available for WAPE visualization")
+            
+            with viz_col2:
+                st.markdown("**BIAS – Direction Matters**")
+                # BIAS zero-centered bar chart
+                if denom_consumption > 0:
+                    # Create horizontal bar chart centered at zero
+                    fig_bias = go.Figure()
+                    
+                    # Determine color based on bias direction
+                    bar_color = '#ffcccb' if bias_val < 0 else '#90ee90'  # Red for under-forecast, Green for over-forecast
+                    
+                    fig_bias.add_trace(go.Bar(
+                        x=[bias_val],
+                        y=['Bias'],
+                        orientation='h',
+                        marker=dict(color=bar_color),
+                        text=[f"{bias_val:.1f}%"],
+                        textposition='outside',
+                        hovertemplate='Bias: %{x:.1f}%<extra></extra>'
+                    ))
+                    
+                    # Add vertical line at zero
+                    fig_bias.add_shape(
+                        type="line",
+                        x0=0, y0=-0.5, x1=0, y1=0.5,
+                        line=dict(color="black", width=2)
+                    )
+                    
+                    # Set x-axis range to be symmetric around zero
+                    max_abs_bias = max(abs(bias_val), 20)  # At least ±20%
+                    fig_bias.update_layout(
+                        xaxis=dict(
+                            range=[-max_abs_bias, max_abs_bias],
+                            title="Bias %",
+                            zeroline=True,
+                            zerolinewidth=2,
+                            zerolinecolor='black'
+                        ),
+                        yaxis=dict(showticklabels=False),
+                        height=250,
+                        margin=dict(l=10, r=10, t=40, b=40),
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig_bias, use_container_width=True)
+                    st.markdown(
+                        "<div style='text-align: center; font-size: 0.75em;'>"
+                        "🔴 Under-forecast (left) | 🟢 Over-forecast (right)"
+                        "</div>",
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.info("No data available for BIAS visualization")
+            
+            with viz_col3:
+                st.markdown("**Avg Accuracy – Overall Grade**")
+                # Big KPI tile with letter grade
+                if not np.isnan(avg_acc):
+                    # Determine letter grade
+                    if avg_acc >= 95:
+                        grade = 'A'
+                        grade_color = '#90ee90'
+                    elif avg_acc >= 90:
+                        grade = 'B'
+                        grade_color = '#b2ebf2'
+                    elif avg_acc >= 85:
+                        grade = 'C'
+                        grade_color = '#fffacd'
+                    else:
+                        grade = 'D'
+                        grade_color = '#ffcccb'
+                    
+                    # Create styled KPI tile
+                    kpi_html = f"""
+                    <div style='background-color: {grade_color}; border-radius: 10px; padding: 20px; text-align: center; 
+                                border: 2px solid #666; margin-top: 10px; height: 200px; display: flex; 
+                                flex-direction: column; justify-content: center; align-items: center;'>
+                        <div style='font-size: 3em; font-weight: bold; color: #333; margin-bottom: 10px;'>
+                            {avg_acc:.1f}%
+                        </div>
+                        <div style='font-size: 2.5em; font-weight: bold; color: #555;'>
+                            Grade: {grade}
+                        </div>
+                    </div>
+                    """
+                    st.markdown(kpi_html, unsafe_allow_html=True)
+                    st.markdown(
+                        "<div style='text-align: center; font-size: 0.75em; margin-top: 10px;'>"
+                        "A (≥95%) | B (90-<95%) | C (85-<90%) | D (<85%)"
+                        "</div>",
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.info("No data available for Accuracy visualization")
 
             fig_hist = go.Figure(
                 [
