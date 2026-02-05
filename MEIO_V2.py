@@ -3202,7 +3202,7 @@ with tab6:
                     node_sl_temp = float(row_temp.get("Service_Level_Node", service_level))
                     
                     # Define default tier ratios (from service_level)
-                    # These represent the relative ratios between hops
+                    # These represent the default SL for each hop
                     default_hop_sls = {
                         0: service_level * 1.0,       # Hop 0: 99%
                         1: service_level * 0.9596,    # Hop 1: 95%
@@ -3210,12 +3210,25 @@ with tab6:
                         3: service_level * 0.8586     # Hop 3: 85%
                     }
                     
+                    # For scenario planning, use a fixed 5% spacing between hops
+                    # This is based on the requirement: Hop1=90% → Hop0=95%, Hop2=85%, Hop3=80%
+                    hop_spacing_pct = 5.0
+                    
+                    # Calculate the differences between the active hop and all other hops
+                    # Using fixed spacing of 5% between consecutive hops
+                    hop_differences = {}
+                    for hop in range(4):
+                        # Distance from active hop (in number of hops)
+                        hop_distance = hop - hops_temp
+                        # Each hop is 5% apart, lower hops have higher SL
+                        hop_differences[hop] = -hop_distance * hop_spacing_pct
+                    
                     # Calculate the starting SL percentage for the selected node's hop
                     starting_sl_pct = node_sl_temp * 100
                     
                     # Service Level slider section
                     st.markdown("**Service Level (Scenario Planning):**")
-                    st.info(f"🎯 This node is at **Hop {hops_temp}** with SL **{starting_sl_pct:.1f}%**. Only the Hop {hops_temp} slider is active. Other hop SLs will auto-adjust proportionally to maintain the same ratios.")
+                    st.info(f"🎯 This node is at **Hop {hops_temp}** with SL **{starting_sl_pct:.1f}%**. Only the Hop {hops_temp} slider is active. Other hop SLs will auto-adjust with a fixed 5% spacing between hop levels.")
                     
                     # Create a container for all hop sliders
                     st.markdown("---")
@@ -3237,17 +3250,14 @@ with tab6:
                                 max_value=99.9,
                                 value=starting_sl_pct,
                                 step=0.1,
-                                help=f"Active Service Level for {hop_label}. Adjust this to recalculate all other hop SLs proportionally.",
+                                help=f"Active Service Level for {hop_label}. Adjust this to recalculate all other hop SLs with 5% spacing.",
                                 key=f"active_sl_hop{hop}_tab6_{calc_loc}"
                             )
                         else:
-                            # This is an inactive hop - calculate proportionally and show as disabled
-                            # Calculate the ratio: active_hop_new / active_hop_default
+                            # This is an inactive hop - calculate by maintaining 5% spacing
                             active_sl = hop_sl_values.get(hops_temp, starting_sl_pct)
-                            adjustment_ratio = active_sl / (default_hop_sls[hops_temp] * 100)
-                            
-                            # Apply the same ratio to this hop
-                            calculated_sl = default_sl_pct * adjustment_ratio
+                            # Apply the 5% spacing from the active hop
+                            calculated_sl = active_sl + hop_differences[hop]
                             hop_sl_values[hop] = calculated_sl
                             
                             # Show as read-only display with grayed-out styling
@@ -3268,7 +3278,7 @@ with tab6:
                                         {calculated_sl:.2f}%
                                     </div>
                                     <div style="font-size: 0.75rem; color: #666; margin-top: 4px;">
-                                        Automatically adjusted based on Hop {hops_temp} slider
+                                        Auto-adjusted: Hop {hops_temp} {hop_differences[hop]:+.1f}% (5% spacing between hops)
                                     </div>
                                 </div>
                                 """,
