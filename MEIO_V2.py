@@ -3001,6 +3001,17 @@ with tab6:
             )
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        
+        # Cost per kilo slider
+        cost_per_kilo_tab6 = st.slider(
+            "Cost per kilo (USD)",
+            min_value=0.0,
+            max_value=20.0,
+            value=2.0,
+            step=0.10,
+            help="USD cost per kilo for scenario simulation",
+            key="sim_costperkilo"
+        )
 
     with col_main:
         st.markdown(
@@ -3116,55 +3127,8 @@ with tab6:
 
             with st.expander("Show detailed scenario controls", expanded=False):
                 
-                # ===== SCENARIO INPUT SECTION =====
-                st.markdown("### 📥 Scenario Input")
-                st.markdown("Configure the hop service levels for scenario planning:")
-                
                 # Hop 0 uses the service_level from the sidebar (top left corner slider)
                 hop0_sl_tab6 = service_level * 100  # Convert to percentage
-                st.markdown(f"**Hop 0 (End-nodes) SL:** {hop0_sl_tab6:.1f}% _(from Service Level slider in sidebar)_")
-                
-                # Hop 1, 2, 3 sliders
-                hop1_sl_tab6 = st.slider(
-                    "Hop 1 SL (%)",
-                    min_value=50.0,
-                    max_value=99.9,
-                    value=95.0,
-                    step=0.1,
-                    help="Service Level for Hop 1 nodes in scenario simulations",
-                    key="hop1_sl_tab6"
-                )
-                hop2_sl_tab6 = st.slider(
-                    "Hop 2 SL (%)",
-                    min_value=50.0,
-                    max_value=99.9,
-                    value=90.0,
-                    step=0.1,
-                    help="Service Level for Hop 2 nodes in scenario simulations",
-                    key="hop2_sl_tab6"
-                )
-                hop3_sl_tab6 = st.slider(
-                    "Hop 3 SL (%)",
-                    min_value=50.0,
-                    max_value=99.9,
-                    value=85.0,
-                    step=0.1,
-                    help="Service Level for Hop 3 nodes in scenario simulations",
-                    key="hop3_sl_tab6"
-                )
-                
-                st.markdown("---")
-
-                # Use a slider for cost per kilo
-                cost_per_kilo_tab6 = st.slider(
-                    "Cost per kilo (USD)",
-                    min_value=0.0,
-                    max_value=20.0,
-                    value=2.0,
-                    step=0.10,
-                    help="USD cost per kilo for scenario simulation",
-                    key="sim_costperkilo"
-                )
                 
                 # Use hop service levels from the Scenario Input section above
                 endnode_sl_tab6 = hop0_sl_tab6  # Hop 0 uses service_level from sidebar
@@ -3213,19 +3177,66 @@ with tab6:
                     index=default_index,
                     key="n_scen",
                 )
+                
+                # Hop service level configuration - placed in Scenario 1 inputs expander
+                # But we need to define these before the scenario loop
                 scenarios = []
                 
-                # Use tab6 hop SL sliders to determine SL based on node's hop tier
-                # Map hop tier to the appropriate SL from Tab6 (recalculated based on primary slider)
-                hop_sl_map = {
-                    0: endnode_sl_tab6,  # End-nodes (Hop 0) - from Tab6 calculations
-                    1: hop1_sl_tab6,     # Hop 1 - from Tab6 calculations
-                    2: hop2_sl_tab6,     # Hop 2 - from Tab6 calculations
-                    3: hop3_sl_tab6,     # Hop 3 - from Tab6 calculations
-                }
-                
+                # We'll render hop sliders first, but inside Scenario 1 expander
                 for s in range(n_scen):
                     with st.expander(f"Scenario {s+1} inputs", expanded=False):
+                        # Add hop service level configuration to the first scenario
+                        if s == 0:
+                            st.markdown("### 📥 Scenario Input")
+                            st.markdown("Configure the hop service levels for scenario planning:")
+                            
+                            st.markdown(f"**Hop 0 (End-nodes) SL:** {hop0_sl_tab6:.1f}% _(from Service Level slider in sidebar)_")
+                            
+                            # Hop 1, 2, 3 sliders
+                            hop1_sl_tab6 = st.slider(
+                                "Hop 1 SL (%)",
+                                min_value=50.0,
+                                max_value=99.9,
+                                value=95.0,
+                                step=0.1,
+                                help="Service Level for Hop 1 nodes in scenario simulations",
+                                key="hop1_sl_tab6"
+                            )
+                            hop2_sl_tab6 = st.slider(
+                                "Hop 2 SL (%)",
+                                min_value=50.0,
+                                max_value=99.9,
+                                value=90.0,
+                                step=0.1,
+                                help="Service Level for Hop 2 nodes in scenario simulations",
+                                key="hop2_sl_tab6"
+                            )
+                            hop3_sl_tab6 = st.slider(
+                                "Hop 3 SL (%)",
+                                min_value=50.0,
+                                max_value=99.9,
+                                value=85.0,
+                                step=0.1,
+                                help="Service Level for Hop 3 nodes in scenario simulations",
+                                key="hop3_sl_tab6"
+                            )
+                            
+                            st.markdown("---")
+                        else:
+                            # For scenarios 2 and 3, use the values from session state (set by Scenario 1)
+                            hop1_sl_tab6 = st.session_state.get("hop1_sl_tab6", 95.0)
+                            hop2_sl_tab6 = st.session_state.get("hop2_sl_tab6", 90.0)
+                            hop3_sl_tab6 = st.session_state.get("hop3_sl_tab6", 85.0)
+                        
+                        # Use tab6 hop SL sliders to determine SL based on node's hop tier
+                        # Map hop tier to the appropriate SL from Tab6 (recalculated based on primary slider)
+                        hop_sl_map = {
+                            0: endnode_sl_tab6,  # End-nodes (Hop 0) - from Tab6 calculations
+                            1: hop1_sl_tab6,     # Hop 1 - from Tab6 calculations
+                            2: hop2_sl_tab6,     # Hop 2 - from Tab6 calculations
+                            3: hop3_sl_tab6,     # Hop 3 - from Tab6 calculations
+                        }
+                        
                         # Determine the Service Level based on the node's hop tier
                         sc_sl = hop_sl_map.get(hops, base_sl_node * 100.0)
                         
