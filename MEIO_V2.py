@@ -2803,6 +2803,78 @@ with tab4:
                 st.table(eff["Adjustment_Status"].value_counts())
             else:
                 st.write("No non-zero nodes for this selection.")
+        
+        # Policy Rules Recap Box
+        st.markdown("---")
+        st.markdown("### 📋 Policy Rules Explanation")
+        
+        # Get current policy settings for display
+        zero_rule_status = "✅ Enabled" if zero_if_no_net_fcst else "❌ Disabled"
+        cap_rule_status = "✅ Enabled" if apply_cap else "❌ Disabled"
+        cap_lower, cap_upper = cap_range if apply_cap else (0, 0)
+        
+        policy_recap_html = f"""
+        <div style="
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+            border: 2px solid #1976d2;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        ">
+            <div style="font-size: 1.1rem; font-weight: 700; color: #0b3d91; margin-bottom: 15px;">
+                📖 Safety Stock Policy Rules Summary
+            </div>
+            
+            <div style="background: white; border-radius: 8px; padding: 15px; margin-bottom: 12px;">
+                <div style="font-size: 0.95rem; font-weight: 600; color: #1565c0; margin-bottom: 8px;">
+                    1️⃣ Zero-If-No-Demand Rule: {zero_rule_status}
+                </div>
+                <div style="font-size: 0.85rem; color: #424242; line-height: 1.5;">
+                    When enabled, nodes with zero or negative aggregated network demand 
+                    (<code>Agg_Future_Demand ≤ 0</code>) will have their Safety Stock forced to zero.
+                    This prevents holding inventory for items with no expected demand.
+                </div>
+            </div>
+            
+            <div style="background: white; border-radius: 8px; padding: 15px; margin-bottom: 12px;">
+                <div style="font-size: 0.95rem; font-weight: 600; color: #1565c0; margin-bottom: 8px;">
+                    2️⃣ Safety Stock Capping Rule: {cap_rule_status}
+                </div>
+                <div style="font-size: 0.85rem; color: #424242; line-height: 1.5;">
+                    When enabled, Safety Stock is constrained within <strong>{cap_lower}% - {cap_upper}%</strong> 
+                    of the aggregated network demand. This prevents extreme SS values that are 
+                    disproportionate to demand levels.
+                    <ul style="margin: 8px 0 0 20px; padding: 0;">
+                        <li><strong>Capped (Low):</strong> SS below {cap_lower}% of demand is raised to the minimum</li>
+                        <li><strong>Capped (High):</strong> SS above {cap_upper}% of demand is reduced to the maximum</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div style="background: white; border-radius: 8px; padding: 15px;">
+                <div style="font-size: 0.95rem; font-weight: 600; color: #1565c0; margin-bottom: 8px;">
+                    3️⃣ Minimum Floor Rule: ✅ Always Applied
+                </div>
+                <div style="font-size: 0.85rem; color: #424242; line-height: 1.5;">
+                    A minimum safety stock floor is always applied to prevent unrealistically low values:
+                    <br/>
+                    <code>SS_floor = Daily_Demand × Lead_Time_Mean × 0.01</code>
+                    <br/>
+                    The final statistical SS is always at least this floor value, ensuring basic coverage.
+                </div>
+            </div>
+            
+            <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.7); border-radius: 6px; border-left: 4px solid #ff9800;">
+                <div style="font-size: 0.8rem; color: #424242; line-height: 1.4;">
+                    <strong>Note:</strong> These rules are applied in sequence after the statistical SS calculation. 
+                    The <em>Adjustment_Status</em> column in the Status Breakdown above shows which rule was applied to each node.
+                </div>
+            </div>
+        </div>
+        """
+        
+        st.markdown(policy_recap_html, unsafe_allow_html=True)
 
 # TAB 5 -----------------------------------------------------------------
 with tab5:
@@ -3129,61 +3201,121 @@ with tab6:
                     hops_temp = int(row_temp.get("Tier_Hops", 0))
                     node_sl_temp = float(row_temp.get("Service_Level_Node", service_level))
                     
-                    # Calculate the tiering ratios
-                    tier_ratios = {
-                        0: 1.0,
-                        1: 0.9596,
-                        2: 0.9091,
-                        3: 0.8586
+                    # Define default tier ratios (from service_level)
+                    # These represent the default SL for each hop
+                    default_hop_sls = {
+                        0: service_level * 1.0,       # Hop 0: 99%
+                        1: service_level * 0.9596,    # Hop 1: 95%
+                        2: service_level * 0.9091,    # Hop 2: 90%
+                        3: service_level * 0.8586     # Hop 3: 85%
                     }
                     
-                    # Calculate the starting SL based on the node's hop tier
+                    # For scenario planning, use a fixed 5% spacing between hops
+                    # This is based on the requirement: Hop1=90% → Hop0=95%, Hop2=85%, Hop3=80%
+                    hop_spacing_pct = 5.0
+                    
+                    # Calculate the differences between the active hop and all other hops
+                    # Using fixed spacing of 5% between consecutive hops
+                    hop_differences = {}
+                    for hop in range(4):
+                        # Distance from active hop (in number of hops)
+                        hop_distance = hop - hops_temp
+                        # Each hop is 5% apart, lower hops have higher SL
+                        hop_differences[hop] = -hop_distance * hop_spacing_pct
+                    
+                    # Calculate the starting SL percentage for the selected node's hop
                     starting_sl_pct = node_sl_temp * 100
                     
-                    # Service Level slider with automatic hop SL recalculation
+                    # Service Level slider section
                     st.markdown("**Service Level (Scenario Planning):**")
-                    st.info(f"Starting from **{starting_sl_pct:.1f}%** based on Hop {hops_temp} tiering. Moving this slider will automatically recalculate all other Hop SLs proportionally.")
+                    st.info(f"🎯 This node is at **Hop {hops_temp}** with SL **{starting_sl_pct:.1f}%**. Only the Hop {hops_temp} slider is active. Other hop SLs will auto-adjust with a fixed 5% spacing between hop levels.")
                     
-                    # Primary SL slider - use a unique key based on location and hop tier
-                    primary_sl_tab6 = st.slider(
-                        f"Service Level for Hop {hops_temp} (%)",
-                        min_value=50.0,
-                        max_value=99.9,
-                        value=starting_sl_pct,
-                        step=0.1,
-                        help=f"Primary Service Level for Hop {hops_temp} nodes. Other hop SLs will be automatically recalculated based on tiering ratios.",
-                        key=f"primary_sl_tab6_{calc_loc}_{hops_temp}"
-                    )
+                    # Create a container for all hop sliders
+                    st.markdown("---")
+                    st.markdown("**Hop Service Levels:**")
                     
-                    # Calculate the adjustment ratio based on the slider movement
-                    # Ensure we have a valid denominator to avoid division by zero
-                    base_sl = node_sl_temp if node_sl_temp > 0 else service_level
-                    if base_sl <= 0:
-                        base_sl = 0.99  # Fallback to 99% if both are invalid
+                    # Store the adjusted SL values for each hop
+                    hop_sl_values = {}
                     
-                    adjustment_factor = (primary_sl_tab6 / 100) / base_sl
+                    # For each hop (0-3), either show an active slider or a disabled display
+                    for hop in range(4):
+                        hop_label = "End-nodes (Hop 0)" if hop == 0 else f"Hop {hop}"
+                        default_sl_pct = default_hop_sls[hop] * 100
+                        
+                        if hop == hops_temp:
+                            # This is the active hop - show the slider
+                            hop_sl_values[hop] = st.slider(
+                                f"🔓 {hop_label} SL (%) — ACTIVE",
+                                min_value=50.0,
+                                max_value=99.9,
+                                value=starting_sl_pct,
+                                step=0.1,
+                                help=f"Active Service Level for {hop_label}. Adjust this to recalculate all other hop SLs with 5% spacing.",
+                                key=f"active_sl_hop{hop}_tab6_{calc_loc}"
+                            )
+                        else:
+                            # This is an inactive hop - calculate by maintaining 5% spacing
+                            active_sl = hop_sl_values.get(hops_temp, starting_sl_pct)
+                            # Apply the 5% spacing from the active hop
+                            calculated_sl = active_sl + hop_differences[hop]
+                            hop_sl_values[hop] = calculated_sl
+                            
+                            # Show as read-only display with grayed-out styling
+                            st.markdown(
+                                f"""
+                                <div style="
+                                    opacity: 0.6;
+                                    padding: 10px;
+                                    border-radius: 5px;
+                                    background: #f0f0f0;
+                                    border: 1px dashed #999;
+                                    margin-bottom: 10px;
+                                ">
+                                    <div style="font-size: 0.875rem; color: #666; margin-bottom: 4px;">
+                                        🔒 {hop_label} SL (%) — AUTO-CALCULATED
+                                    </div>
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: #333;">
+                                        {calculated_sl:.2f}%
+                                    </div>
+                                    <div style="font-size: 0.75rem; color: #666; margin-top: 4px;">
+                                        Auto-adjusted: Hop {hops_temp} {hop_differences[hop]:+.1f}% (5% spacing between hops)
+                                    </div>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
                     
-                    # Calculate all hop SLs based on the primary slider and tiering ratios
-                    # Using dictionary comprehension for cleaner code
-                    calculated_hop_sls = {
-                        hop: (service_level * tier_ratios[hop] * 100) * adjustment_factor
-                        for hop in range(4)
-                    }
+                    # Assign the calculated values
+                    endnode_sl_tab6 = hop_sl_values[0]
+                    hop1_sl_tab6 = hop_sl_values[1]
+                    hop2_sl_tab6 = hop_sl_values[2]
+                    hop3_sl_tab6 = hop_sl_values[3]
                     
-                    endnode_sl_tab6 = calculated_hop_sls[0]
-                    hop1_sl_tab6 = calculated_hop_sls[1]
-                    hop2_sl_tab6 = calculated_hop_sls[2]
-                    hop3_sl_tab6 = calculated_hop_sls[3]
-                    
-                    # Display the recalculated hop SLs
-                    st.markdown("**Automatically Calculated Hop SLs:**")
-                    sl_display = f"""
-                    - **Hop 0 (End-nodes):** {endnode_sl_tab6:.2f}%
-                    - **Hop 1:** {hop1_sl_tab6:.2f}%
-                    - **Hop 2:** {hop2_sl_tab6:.2f}%
-                    - **Hop 3:** {hop3_sl_tab6:.2f}%
+                    # Show a summary of the recalculated values
+                    st.markdown("---")
+                    st.markdown("**📊 Summary of Hop SLs for Scenario:**")
+                    summary_html = f"""
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 120px; padding: 12px; background: {'#b3e5fc' if hops_temp == 0 else '#f5f5f5'}; border-radius: 8px; border: {'3px solid #0277bd' if hops_temp == 0 else '1px solid #ddd'};">
+                            <div style="font-size: 0.75rem; color: #666;">Hop 0</div>
+                            <div style="font-size: 1.3rem; font-weight: 700; color: {'#01579b' if hops_temp == 0 else '#333'};">{endnode_sl_tab6:.2f}%</div>
+                        </div>
+                        <div style="flex: 1; min-width: 120px; padding: 12px; background: {'#b3e5fc' if hops_temp == 1 else '#f5f5f5'}; border-radius: 8px; border: {'3px solid #0277bd' if hops_temp == 1 else '1px solid #ddd'};">
+                            <div style="font-size: 0.75rem; color: #666;">Hop 1</div>
+                            <div style="font-size: 1.3rem; font-weight: 700; color: {'#01579b' if hops_temp == 1 else '#333'};">{hop1_sl_tab6:.2f}%</div>
+                        </div>
+                        <div style="flex: 1; min-width: 120px; padding: 12px; background: {'#b3e5fc' if hops_temp == 2 else '#f5f5f5'}; border-radius: 8px; border: {'3px solid #0277bd' if hops_temp == 2 else '1px solid #ddd'};">
+                            <div style="font-size: 0.75rem; color: #666;">Hop 2</div>
+                            <div style="font-size: 1.3rem; font-weight: 700; color: {'#01579b' if hops_temp == 2 else '#333'};">{hop2_sl_tab6:.2f}%</div>
+                        </div>
+                        <div style="flex: 1; min-width: 120px; padding: 12px; background: {'#b3e5fc' if hops_temp == 3 else '#f5f5f5'}; border-radius: 8px; border: {'3px solid #0277bd' if hops_temp == 3 else '1px solid #ddd'};">
+                            <div style="font-size: 0.75rem; color: #666;">Hop 3</div>
+                            <div style="font-size: 1.3rem; font-weight: 700; color: {'#01579b' if hops_temp == 3 else '#333'};">{hop3_sl_tab6:.2f}%</div>
+                        </div>
+                    </div>
                     """
-                    st.markdown(sl_display)
+                    st.markdown(summary_html, unsafe_allow_html=True)
+                    
                 else:
                     # Fallback if no row data is available
                     st.markdown("**Service Level for End-Nodes:**")
@@ -3358,6 +3490,8 @@ with tab6:
             display_comp["Simulated_SS_USD"] = display_comp["Simulated_SS_USD"].astype(float)
 
             implemented_ss = float(row["Safety_Stock"])
+            implemented_ss_usd = implemented_ss * cost_per_kilo_tab6
+            
             def pct_vs_impl(v):
                 try:
                     if implemented_ss <= 0 or pd.isna(v):
@@ -3365,7 +3499,17 @@ with tab6:
                     return (float(v) / implemented_ss - 1.0) * 100.0
                 except Exception:
                     return np.nan
+            
+            def delta_usd_vs_impl(v):
+                try:
+                    if pd.isna(v):
+                        return np.nan
+                    return float(v) - implemented_ss_usd
+                except Exception:
+                    return np.nan
+            
             display_comp["% vs Implemented"] = display_comp["Simulated_SS"].apply(pct_vs_impl)
+            display_comp["Delta USD"] = display_comp["Simulated_SS_USD"].apply(delta_usd_vs_impl)
 
             # Rename columns to shorter versions to reduce table width
             display_comp_renamed = display_comp.rename(columns={
@@ -3374,7 +3518,8 @@ with tab6:
                 "LT_std_days": "LT σ",
                 "Simulated_SS": "SS (units)",
                 "Simulated_SS_USD": "SS (USD)",
-                "% vs Implemented": "% vs Impl"
+                "% vs Implemented": "% vs Impl",
+                "Delta USD": "Δ USD"
             })
 
             # ----------- Pretty pandas styling for DataFrame -----------
@@ -3383,6 +3528,13 @@ with tab6:
                     return ''
                 color = 'green' if val < 0 else 'red' if val > 0 else 'black'
                 return f'color: {color}; font-weight: bold;'
+            
+            def highlight_delta_usd(val):
+                if pd.isna(val):
+                    return ''
+                color = 'green' if val < 0 else 'red' if val > 0 else 'black'
+                return f'color: {color}; font-weight: bold;'
+            
             styled = (
                 display_comp_renamed
                 .style
@@ -3392,9 +3544,11 @@ with tab6:
                     "LT σ": "{:.2f}",
                     "SS (units)": "{:,.0f}",
                     "SS (USD)": "${:,.0f}",
-                    "% vs Impl": "{:+.2f}%"
+                    "% vs Impl": "{:+.2f}%",
+                    "Δ USD": "${:+,.0f}"
                 })
                 .applymap(highlight_pct, subset=['% vs Impl'])
+                .applymap(highlight_delta_usd, subset=['Δ USD'])
                 .set_properties(**{'background-color': '#f7fafd', 'font-size': '0.85rem'}, subset=pd.IndexSlice[:, :])
             )
             
