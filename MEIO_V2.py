@@ -56,7 +56,7 @@ st.markdown(
         ">
           V
         </span>
-        v2.25
+        v2.30
       </span>
       <span style="
           display:inline-flex;
@@ -2782,37 +2782,38 @@ with tab4:
         
         # Policy Rules Recap Box
         st.markdown("---")
-        st.markdown("### 📋 Policy Rules Explanation")
         
         # Get current policy settings for display
         zero_rule_status = "✅ Enabled" if zero_if_no_net_fcst else "❌ Disabled"
         cap_rule_status = "✅ Enabled" if apply_cap else "❌ Disabled"
         cap_lower, cap_upper = cap_range if apply_cap else (0, 0)
         
-        policy_recap_html = f"""<div style="background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%); border: 2px solid #1976d2; border-radius: 12px; padding: 20px; margin-top: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-    <div style="font-size: 1.1rem; font-weight: 700; color: #0b3d91; margin-bottom: 15px;">📖 Safety Stock Policy Rules Summary</div>
+        # Wrap in collapsible expander with reduced font size
+        with st.expander("#### 📋 Policy Rules Explanation", expanded=False):
+            policy_recap_html = f"""<div style="background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%); border: 2px solid #1976d2; border-radius: 12px; padding: 20px; margin-top: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); font-size: 0.9rem;">
+    <div style="font-size: 1.0rem; font-weight: 700; color: #0b3d91; margin-bottom: 15px;">📖 Safety Stock Policy Rules Summary</div>
     <div style="background: white; border-radius: 8px; padding: 15px; margin-bottom: 12px;">
-        <div style="font-size: 0.95rem; font-weight: 600; color: #1565c0; margin-bottom: 8px;">1️⃣ Zero-If-No-Demand Rule: {zero_rule_status}</div>
-        <div style="font-size: 0.85rem; color: #424242; line-height: 1.5;">When enabled, nodes with zero or negative aggregated network demand (Agg_Future_Demand ≤ 0) will have their Safety Stock forced to zero. This prevents holding inventory for items with no expected demand.</div>
+        <div style="font-size: 0.85rem; font-weight: 600; color: #1565c0; margin-bottom: 8px;">1️⃣ Zero-If-No-Demand Rule: {zero_rule_status}</div>
+        <div style="font-size: 0.75rem; color: #424242; line-height: 1.5;">When enabled, nodes with zero or negative aggregated network demand (Agg_Future_Demand ≤ 0) will have their Safety Stock forced to zero. This prevents holding inventory for items with no expected demand.</div>
     </div>
     <div style="background: white; border-radius: 8px; padding: 15px; margin-bottom: 12px;">
-        <div style="font-size: 0.95rem; font-weight: 600; color: #1565c0; margin-bottom: 8px;">2️⃣ Safety Stock Capping Rule: {cap_rule_status}</div>
-        <div style="font-size: 0.85rem; color: #424242; line-height: 1.5;">When enabled, Safety Stock is constrained within <strong>{cap_lower}% - {cap_upper}%</strong> of the aggregated network demand. This prevents extreme SS values that are disproportionate to demand levels.</div>
-        <ul style="margin: 8px 0 0 20px; padding: 0;">
+        <div style="font-size: 0.85rem; font-weight: 600; color: #1565c0; margin-bottom: 8px;">2️⃣ Safety Stock Capping Rule: {cap_rule_status}</div>
+        <div style="font-size: 0.75rem; color: #424242; line-height: 1.5;">When enabled, Safety Stock is constrained within <strong>{cap_lower}% - {cap_upper}%</strong> of the aggregated network demand. This prevents extreme SS values that are disproportionate to demand levels.</div>
+        <ul style="margin: 8px 0 0 20px; padding: 0; font-size: 0.75rem;">
             <li><strong>Capped (Low):</strong> SS below {cap_lower}% of demand is raised to the minimum</li>
             <li><strong>Capped (High):</strong> SS above {cap_upper}% of demand is reduced to the maximum</li>
         </ul>
     </div>
     <div style="background: white; border-radius: 8px; padding: 15px;">
-        <div style="font-size: 0.95rem; font-weight: 600; color: #1565c0; margin-bottom: 8px;">3️⃣ Minimum Floor Rule: ✅ Always Applied</div>
-        <div style="font-size: 0.85rem; color: #424242; line-height: 1.5;">A minimum safety stock floor is always applied to prevent unrealistically low values:<br/>SS_floor = Daily_Demand × Lead_Time_Mean × 0.01<br/>The final statistical SS is always at least this floor value, ensuring basic coverage.</div>
+        <div style="font-size: 0.85rem; font-weight: 600; color: #1565c0; margin-bottom: 8px;">3️⃣ Minimum Floor Rule: ✅ Always Applied</div>
+        <div style="font-size: 0.75rem; color: #424242; line-height: 1.5;">A minimum safety stock floor is always applied to prevent unrealistically low values:<br/>SS_floor = Daily_Demand × Lead_Time_Mean × 0.01<br/>The final statistical SS is always at least this floor value, ensuring basic coverage.</div>
     </div>
     <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.7); border-radius: 6px; border-left: 4px solid #ff9800;">
-        <div style="font-size: 0.8rem; color: #424242; line-height: 1.4;"><strong>Note:</strong> These rules are applied in sequence after the statistical SS calculation. The <em>Adjustment_Status</em> column in the Status Breakdown above shows which rule was applied to each node.</div>
+        <div style="font-size: 0.7rem; color: #424242; line-height: 1.4;"><strong>Note:</strong> These rules are applied in sequence after the statistical SS calculation. The <em>Adjustment_Status</em> column in the Status Breakdown above shows which rule was applied to each node.</div>
     </div>
 </div>"""
-        
-        st.markdown(policy_recap_html, unsafe_allow_html=True)
+            
+            st.markdown(policy_recap_html, unsafe_allow_html=True)
 
 # TAB 5 -----------------------------------------------------------------
 with tab5:
