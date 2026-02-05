@@ -656,7 +656,7 @@ def render_ss_formula_explainer(hops=None, service_level=None):
                 {'selector': 'th', 'props': [('text-align', 'left')]}
             ])
             
-            # Display table with 30% bigger width and more space for Node Type column
+            # Display table with 30% bigger width (column widths: 1.3x, 1.85x, 2.85x for ~30% increase to first column)
             col1, col2, col3 = st.columns([1.3, 1.85, 2.85])
             with col1:
                 st.dataframe(sl_tier_styled, hide_index=True)
@@ -2945,7 +2945,7 @@ with tab5:
                     st.markdown(
                         f"<div style='text-align: center; font-size: 0.75em;'>"
                         f"🟢 Excellent (≤{wape_zones['excellent']}%) | "
-                        f"🟡 Acceptable ({wape_zones['excellent']}-{wape_zones['acceptable']}%) | "
+                        f"🟡 Acceptable (>{wape_zones['excellent']}-{wape_zones['acceptable']}%) | "
                         f"🔴 Critical (>{wape_zones['acceptable']}%)"
                         f"</div>",
                         unsafe_allow_html=True
@@ -3040,7 +3040,7 @@ with tab5:
                     st.markdown(kpi_html, unsafe_allow_html=True)
                     st.markdown(
                         "<div style='text-align: center; font-size: 0.75em; margin-top: 10px;'>"
-                        "A (≥95%) | B (90-95%) | C (85-90%) | D (<85%)"
+                        "A (≥95%) | B (90-<95%) | C (85-<90%) | D (<85%)"
                         "</div>",
                         unsafe_allow_html=True
                     )
