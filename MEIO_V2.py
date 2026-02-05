@@ -3236,7 +3236,7 @@ with tab6:
                         
                         # Get hop SL values from session state (set by sliders in scenario 1)
                         # Use default values as fallback
-                        hop0_sl_tab6_final = st.session_state.get("hop0_sl_tab6", hop0_sl_tab6)
+                        hop0_sl_tab6_value = st.session_state.get("hop0_sl_tab6", hop0_sl_tab6)
                         hop1_sl_tab6 = st.session_state.get("hop1_sl_tab6", 95.0)
                         hop2_sl_tab6 = st.session_state.get("hop2_sl_tab6", 90.0)
                         hop3_sl_tab6 = st.session_state.get("hop3_sl_tab6", 85.0)
@@ -3244,7 +3244,7 @@ with tab6:
                         # Use tab6 hop SL sliders to determine SL based on node's hop tier
                         # Map hop tier to the appropriate SL from Tab6
                         hop_sl_map = {
-                            0: hop0_sl_tab6_final,  # End-nodes (Hop 0) - from Tab6 slider if node is Hop 0, otherwise from sidebar
+                            0: hop0_sl_tab6_value,  # End-nodes (Hop 0) - from slider if available (when viewing Hop 0 node), otherwise from sidebar
                             1: hop1_sl_tab6,     # Hop 1 - from Tab6 calculations
                             2: hop2_sl_tab6,     # Hop 2 - from Tab6 calculations
                             3: hop3_sl_tab6,     # Hop 3 - from Tab6 calculations
