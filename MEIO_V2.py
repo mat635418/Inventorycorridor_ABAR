@@ -3178,11 +3178,9 @@ with tab6:
                     key="n_scen",
                 )
                 
-                # Hop service level configuration - placed in Scenario 1 inputs expander
-                # But we need to define these before the scenario loop
                 scenarios = []
                 
-                # We'll render hop sliders first, but inside Scenario 1 expander
+                # Render scenario expanders
                 for s in range(n_scen):
                     with st.expander(f"Scenario {s+1} inputs", expanded=False):
                         # Add hop service level configuration to the first scenario
@@ -3222,14 +3220,15 @@ with tab6:
                             )
                             
                             st.markdown("---")
-                        else:
-                            # For scenarios 2 and 3, use the values from session state (set by Scenario 1)
-                            hop1_sl_tab6 = st.session_state.get("hop1_sl_tab6", 95.0)
-                            hop2_sl_tab6 = st.session_state.get("hop2_sl_tab6", 90.0)
-                            hop3_sl_tab6 = st.session_state.get("hop3_sl_tab6", 85.0)
+                        
+                        # Get hop SL values from session state (set by sliders in scenario 1)
+                        # Use default values as fallback
+                        hop1_sl_tab6 = st.session_state.get("hop1_sl_tab6", 95.0)
+                        hop2_sl_tab6 = st.session_state.get("hop2_sl_tab6", 90.0)
+                        hop3_sl_tab6 = st.session_state.get("hop3_sl_tab6", 85.0)
                         
                         # Use tab6 hop SL sliders to determine SL based on node's hop tier
-                        # Map hop tier to the appropriate SL from Tab6 (recalculated based on primary slider)
+                        # Map hop tier to the appropriate SL from Tab6
                         hop_sl_map = {
                             0: endnode_sl_tab6,  # End-nodes (Hop 0) - from Tab6 calculations
                             1: hop1_sl_tab6,     # Hop 1 - from Tab6 calculations
