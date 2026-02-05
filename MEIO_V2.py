@@ -3191,7 +3191,7 @@ with tab6:
                             
                             # Show slider for Hop 0 if the node is Hop 0, otherwise show text
                             if hops == 0:
-                                hop0_sl_tab6 = st.slider(
+                                st.slider(
                                     "Hop 0 (End-nodes) SL (%)",
                                     min_value=50.0,
                                     max_value=99.9,
