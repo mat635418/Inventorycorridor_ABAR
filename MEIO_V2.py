@@ -650,9 +650,16 @@ def render_ss_formula_explainer(hops=None, service_level=None):
             
             sl_tier_styled = sl_tier_df.style.apply(highlight_current_hop, axis=1).format({
                 'Service Level (%)': '{:.2f}'
-            })
+            }).set_properties(**{
+                'text-align': 'left'
+            }).set_table_styles([
+                {'selector': 'th', 'props': [('text-align', 'left')]}
+            ])
             
-            st.dataframe(sl_tier_styled, use_container_width=True, hide_index=True)
+            # Display table with 1/3 width and more space for Node Type column
+            col1, col2, col3 = st.columns([1, 2, 3])
+            with col1:
+                st.dataframe(sl_tier_styled, hide_index=True)
 
 
 def clean_numeric(series: pd.Series) -> pd.Series:
@@ -3189,7 +3196,13 @@ with tab6:
                             st.markdown("### 📥 Scenario Input")
                             st.markdown("Configure the hop service levels for scenario planning:")
                             
-                            # Show slider for Hop 0 if the node is Hop 0, otherwise show text
+                            # Show frozen message for upstream hops (hops < current level)
+                            if hops > 0:
+                                frozen_hops = list(range(0, hops))
+                                frozen_msg = ", ".join([f"Hop {h}" for h in frozen_hops])
+                                st.markdown(f"_**Frozen (upstream):** {frozen_msg}_")
+                            
+                            # Show slider for Hop 0 only if the node is Hop 0
                             if hops == 0:
                                 st.slider(
                                     "Hop 0 (End-nodes) SL (%)",
@@ -3200,37 +3213,42 @@ with tab6:
                                     help="Service Level for Hop 0 (End-nodes) in scenario simulations",
                                     key="hop0_sl_tab6"
                                 )
-                            else:
-                                st.markdown(f"**Hop 0 (End-nodes) SL:** {hop0_sl_tab6:.1f}% _(from Service Level slider in sidebar)_")
                             
-                            # Hop 1, 2, 3 sliders
-                            hop1_sl_tab6 = st.slider(
-                                "Hop 1 SL (%)",
-                                min_value=50.0,
-                                max_value=99.9,
-                                value=95.0,
-                                step=0.1,
-                                help="Service Level for Hop 1 nodes in scenario simulations",
-                                key="hop1_sl_tab6"
-                            )
-                            hop2_sl_tab6 = st.slider(
-                                "Hop 2 SL (%)",
-                                min_value=50.0,
-                                max_value=99.9,
-                                value=90.0,
-                                step=0.1,
-                                help="Service Level for Hop 2 nodes in scenario simulations",
-                                key="hop2_sl_tab6"
-                            )
-                            hop3_sl_tab6 = st.slider(
-                                "Hop 3 SL (%)",
-                                min_value=50.0,
-                                max_value=99.9,
-                                value=85.0,
-                                step=0.1,
-                                help="Service Level for Hop 3 nodes in scenario simulations",
-                                key="hop3_sl_tab6"
-                            )
+                            # Show Hop 1 slider only if current node is Hop 0 or Hop 1
+                            if hops <= 1:
+                                hop1_sl_tab6 = st.slider(
+                                    "Hop 1 SL (%)",
+                                    min_value=50.0,
+                                    max_value=99.9,
+                                    value=95.0,
+                                    step=0.1,
+                                    help="Service Level for Hop 1 nodes in scenario simulations",
+                                    key="hop1_sl_tab6"
+                                )
+                            
+                            # Show Hop 2 slider only if current node is Hop 0, 1, or 2
+                            if hops <= 2:
+                                hop2_sl_tab6 = st.slider(
+                                    "Hop 2 SL (%)",
+                                    min_value=50.0,
+                                    max_value=99.9,
+                                    value=90.0,
+                                    step=0.1,
+                                    help="Service Level for Hop 2 nodes in scenario simulations",
+                                    key="hop2_sl_tab6"
+                                )
+                            
+                            # Show Hop 3 slider only if current node is Hop 0, 1, 2, or 3
+                            if hops <= 3:
+                                hop3_sl_tab6 = st.slider(
+                                    "Hop 3 SL (%)",
+                                    min_value=50.0,
+                                    max_value=99.9,
+                                    value=85.0,
+                                    step=0.1,
+                                    help="Service Level for Hop 3 nodes in scenario simulations",
+                                    key="hop3_sl_tab6"
+                                )
                             
                             st.markdown("---")
                         
