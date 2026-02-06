@@ -1,0 +1,16 @@
+ID,Nome,Cognome,Eta,Retribuzione_Mensile_Lorda,Regione_Residenza,Anni_Contributi_Totali,Mesi_Contributi_Ultimi_4_Anni,Tipo_Contribuzione,Tipo_Lavoro,Mesi_Lavoro_Prima_19,Ha_Previdenza_Complementare,Montante_Previdenza_Complementare,Mesi_Disoccupazione
+1,Mario,Rossi,55,2500.00,Lombardia,30,48,dipendente_privato,standard,0,Si,50000.00,0
+2,Giuseppe,Bianchi,58,3200.00,Lazio,35,48,dipendente_privato,lavoro_notturno,12,Si,75000.00,0
+3,Anna,Verdi,52,2000.00,Campania,25,48,dipendente_privato,standard,0,No,0,0
+4,Francesco,Neri,60,2800.00,Veneto,38,48,dipendente_privato,catena_montaggio,18,Si,90000.00,0
+5,Maria,Gialli,54,2300.00,Sicilia,28,48,dipendente_privato,standard,0,Si,45000.00,0
+6,Luigi,Blu,56,2600.00,Piemonte,32,48,artigiano,standard,24,No,0,0
+7,Carla,Rosa,57,2900.00,Emilia-Romagna,33,48,dipendente_privato,conducente_mezzi_pesanti,0,Si,65000.00,0
+8,Paolo,Viola,59,3500.00,Toscana,40,48,autonomo,standard,0,Si,100000.00,0
+9,Laura,Arancione,53,2200.00,Puglia,27,48,dipendente_privato,standard,0,No,0,0
+10,Marco,Marrone,61,3000.00,Liguria,42,48,dipendente_privato,cave_tunnel,15,Si,85000.00,0
+11,Elena,Grigio,50,1900.00,Calabria,22,42,dipendente_privato,standard,0,No,0,0
+12,Andrea,Azzurro,62,3300.00,Trentino-Alto Adige,43,48,dipendente_privato,alte_temperature,20,Si,95000.00,0
+13,Silvia,Verde_Scuro,55,2400.00,Marche,29,48,agricolo,standard,0,No,0,0
+14,Roberto,Nero,58,2700.00,Umbria,34,48,dipendente_privato,lavoro_notturno,10,Si,70000.00,0
+15,Francesca,Bianco,56,2500.00,Sardegna,31,48,dipendente_privato,standard,0,Si,55000.00,0
