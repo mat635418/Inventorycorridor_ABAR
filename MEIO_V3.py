@@ -4148,7 +4148,14 @@ with tab8:
             Max_Corridor=("Max_Corridor", "sum"),
             Avg_Day_Demand=("Forecast", lambda x: x.sum() / days_per_month if days_per_month > 0 else 0),
             Nodes=("Location", "nunique"),
+            Current_Stock=("Current_Stock", "sum") if "Current_Stock" in snapshot_all.columns else None,
+            In_Transit=("In_Transit", "sum") if "In_Transit" in snapshot_all.columns else None,
+            Open_PO=("Open_PO", "sum") if "Open_PO" in snapshot_all.columns else None,
+            Future_Stock_Position=("Future_Stock_Position", "sum") if "Future_Stock_Position" in snapshot_all.columns else None,
         )
+        
+        # Remove None columns if stock data wasn't available
+        agg_all = agg_all.dropna(axis=1, how='all')
         if "Tier_Hops" in snapshot_all.columns:
             end_nodes = (
                 snapshot_all[snapshot_all["Tier_Hops"] == 0]
@@ -4277,6 +4284,13 @@ with tab8:
             cards_html_parts = [
                 '<div class="mat-strip-container"><div class="mat-cards-row">'
             ]
+            
+            # Determine if we have stock columns
+            has_stock = "Current_Stock" in agg_view.columns
+            
+            # Adjust grid columns based on whether we have stock data
+            grid_cols = "150px repeat(4, minmax(110px, 1fr))" if not has_stock else "150px repeat(6, minmax(90px, 1fr))"
+            
             for _, r in agg_view.iterrows():
                 prod = str(r["Product"])
                 avg_daily = r["Avg_Day_Demand"]
@@ -4288,8 +4302,9 @@ with tab8:
                 cov_txt = fmt_int(ss_cov)
                 fc_txt = fmt_int(local_fc)
                 pill_cov_cls = 'mat-pill-red' if ss_cov < alarm_threshold else 'mat-pill-green'
+                
                 card_html = (
-                    '<div class="mat-card">'
+                    f'<div class="mat-card" style="grid-template-columns: {grid_cols};">'
                     '<div style="display:flex;align-items:center;">'
                     '<div class="mat-product-badge">'
                     '<span class="mat-product-chevron">▶</span>'
@@ -4316,8 +4331,27 @@ with tab8:
                     f'<span class="mat-pill-grey">{fc_txt}</span>'
                     "</div>"
                     "</div>"
-                    "</div>"
                 )
+                
+                # Add stock columns if available
+                if has_stock:
+                    curr_stock = r.get("Current_Stock", 0)
+                    future_stock = r.get("Future_Stock_Position", 0)
+                    curr_stock_txt = fmt_int(curr_stock)
+                    future_stock_txt = fmt_int(future_stock)
+                    
+                    card_html += (
+                        '<div>'
+                        '<div class="mat-card-col-header">Current Stock</div>'
+                        f'<div class="mat-card-col-value">{curr_stock_txt}</div>'
+                        "</div>"
+                        '<div>'
+                        '<div class="mat-card-col-header">Future Stock</div>'
+                        f'<div class="mat-card-col-value">{future_stock_txt}</div>'
+                        "</div>"
+                    )
+                
+                card_html += "</div>"
                 cards_html_parts.append(card_html)
             cards_html_parts.append("</div></div>")
             final_html = "".join(cards_html_parts)
