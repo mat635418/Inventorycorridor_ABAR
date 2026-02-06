@@ -1659,44 +1659,69 @@ if s_file and d_file and lt_file:
         # For months where stock data doesn't exist, calculate: Next_Stock = Prev_Stock - Forecast + (Transit + PO)
         results = results.sort_values(["Product", "Location", "Period"])
         
-        # Find the last period with actual stock data (non-zero stock or transit or PO)
-        stock_exists = (results["Current_Stock"] > 0) | (results["In_Transit"] > 0) | (results["Open_PO"] > 0)
-        
         # Process each Product-Location combination
         for (product, location), group in results.groupby(["Product", "Location"]):
             group_idx = group.index
+            first_period_in_results = group["Period"].min()
             
-            # Find the last month with actual stock data
-            has_stock = stock_exists.loc[group_idx]
-            if has_stock.any():
-                last_stock_idx = has_stock[has_stock].index[-1]
-                last_stock_period = results.loc[last_stock_idx, "Period"]
-                
-                # Get all periods after the last stock data period
-                future_periods = group[group["Period"] > last_stock_period].index
-                
-                if len(future_periods) > 0:
-                    # Calculate rolling stock position for future months
+            # Look for the last historical stock data in df_stock for this Product-Location
+            # This may include periods before the first period in results
+            stock_for_prod_loc = df_stock[
+                (df_stock["Product"] == product) & 
+                (df_stock["Location"] == location) &
+                (df_stock["Period"] < first_period_in_results)
+            ].sort_values("Period")
+            
+            # Check if there's historical stock data with non-zero values
+            has_historical_stock = False
+            starting_stock = 0
+            
+            if not stock_for_prod_loc.empty:
+                # Find the last period with actual stock before results start
+                stock_mask = (stock_for_prod_loc["Current_Stock"] > 0) | \
+                            (stock_for_prod_loc["In_Transit"] > 0) | \
+                            (stock_for_prod_loc["Open_PO"] > 0)
+                if stock_mask.any():
+                    last_hist_row = stock_for_prod_loc[stock_mask].iloc[-1]
+                    starting_stock = last_hist_row["Current_Stock"] + last_hist_row["In_Transit"] + last_hist_row["Open_PO"]
+                    has_historical_stock = True
+            
+            # Also check if there's stock data within the results period
+            stock_exists_in_results = (results.loc[group_idx, "Current_Stock"] > 0) | \
+                                     (results.loc[group_idx, "In_Transit"] > 0) | \
+                                     (results.loc[group_idx, "Open_PO"] > 0)
+            
+            if has_historical_stock or stock_exists_in_results.any():
+                # Determine starting point for calculation
+                if stock_exists_in_results.any():
+                    # Use the last period with stock in results
+                    last_stock_idx = stock_exists_in_results[stock_exists_in_results].index[-1]
+                    last_stock_period = results.loc[last_stock_idx, "Period"]
                     prev_stock = results.loc[last_stock_idx, "Future_Stock_Position"]
+                    future_periods = group[group["Period"] > last_stock_period].index
+                else:
+                    # Start from beginning of results using historical stock
+                    prev_stock = starting_stock
+                    future_periods = group_idx
+                
+                # Calculate forward stock positions
+                for idx in future_periods:
+                    forecast = results.loc[idx, "Forecast"]
+                    transit = results.loc[idx, "In_Transit"]
+                    po = results.loc[idx, "Open_PO"]
                     
-                    for idx in future_periods:
-                        # Get forecast for this period
-                        forecast = results.loc[idx, "Forecast"]
-                        transit = results.loc[idx, "In_Transit"]
-                        po = results.loc[idx, "Open_PO"]
-                        
-                        # Calculate: Next Stock = Previous Stock - Forecast + Transit + PO
-                        next_stock = prev_stock - forecast + transit + po
-                        
-                        # Ensure stock doesn't go negative
-                        next_stock = max(0, next_stock)
-                        
-                        # Update the Future_Stock_Position for this period
-                        results.loc[idx, "Future_Stock_Position"] = next_stock
-                        results.loc[idx, "Current_Stock"] = next_stock
-                        
-                        # Update prev_stock for next iteration
-                        prev_stock = next_stock
+                    # Calculate: Next Stock = Previous Stock - Forecast + Transit + PO
+                    next_stock = prev_stock - forecast + transit + po
+                    
+                    # Ensure stock doesn't go negative
+                    next_stock = max(0, next_stock)
+                    
+                    # Update the Future_Stock_Position for this period
+                    results.loc[idx, "Future_Stock_Position"] = next_stock
+                    results.loc[idx, "Current_Stock"] = next_stock
+                    
+                    # Update prev_stock for next iteration
+                    prev_stock = next_stock
     else:
         # Add empty columns if no stock data
         results["Current_Stock"] = 0
@@ -1736,7 +1761,12 @@ if s_file and d_file and lt_file:
             else (locs[0] if locs else "")
         )
 
+    # Include both historical stock periods and future forecast periods
     all_periods = sorted(results["Period"].unique().tolist())
+    if df_stock is not None and not df_stock.empty:
+        stock_periods = df_stock["Period"].unique().tolist()
+        all_periods = sorted(set(all_periods + stock_periods))
+    
     default_period = (
         CURRENT_MONTH_TS
         if CURRENT_MONTH_TS in all_periods
@@ -1868,6 +1898,29 @@ if s_file and d_file and lt_file:
             st.subheader("📈 Inventory Corridor")
 
             plot_df = results[(results["Product"] == sku) & (results["Location"] == loc)].sort_values("Period")
+            
+            # Add historical stock data to the plot if available
+            if df_stock is not None and not df_stock.empty:
+                hist_stock = df_stock[
+                    (df_stock["Product"] == sku) & (df_stock["Location"] == loc)
+                ].copy()
+                if not hist_stock.empty:
+                    # Calculate Future_Stock_Position for historical data
+                    hist_stock["Future_Stock_Position"] = hist_stock["Current_Stock"] + hist_stock["In_Transit"] + hist_stock["Open_PO"]
+                    
+                    # Get periods that are not already in plot_df
+                    hist_periods = set(hist_stock["Period"].values) - set(plot_df["Period"].values)
+                    hist_stock_to_add = hist_stock[hist_stock["Period"].isin(hist_periods)]
+                    
+                    if not hist_stock_to_add.empty:
+                        # Add missing columns with 0 values for historical data
+                        for col in ["Max_Corridor", "Safety_Stock", "Forecast", "Agg_Future_Internal", "Agg_Future_External"]:
+                            if col in plot_df.columns and col not in hist_stock_to_add.columns:
+                                hist_stock_to_add[col] = 0
+                        
+                        # Combine historical and future data
+                        plot_df = pd.concat([hist_stock_to_add, plot_df], ignore_index=True).sort_values("Period")
+            
             df_all_periods = pd.DataFrame({"Period": all_periods})
             
             # Include stock columns in the merge
