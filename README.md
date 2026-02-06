@@ -1,13 +1,55 @@
-# MEIO for Raw Materials — Inventory Corridor (v1.05 — Jan 2026)
+# Repository Multi-Purpose Applications — v2.0 — Feb 2026
 
-This application implements a Multi‑Echelon Inventory Optimization (MEIO) workflow for raw materials, presented as a Streamlit app. It ingests historical sales and consumption, future demand forecasts, and network lead‑time data to compute safety stock, inventory corridors, service level tiering across network hops, and diagnostic views. It also provides visualizations of the network topology and exportable tables for analysis.
+This repository contains two main applications developed by mat635418:
 
-Core technologies: Python, Streamlit, Plotly, NumPy/Pandas, SciPy (normal distribution), PyVis (network graph).
+## 1. MEIO for Raw Materials — Inventory Corridor (v1.05)
+
+Multi‑Echelon Inventory Optimization (MEIO) workflow for raw materials. Computes safety stock, inventory corridors, service level tiering across network hops, and diagnostic views.
 
 - Main app file: [MEIO.py](https://github.com/mat635418/Inventorycorridor_ABAR/blob/main/MEIO.py)
-- Logo: `GY_logo.jpg`
 - CSV inputs: `sales.csv`, `demand.csv`, `leadtime.csv`
-- Requirements: [requirements.txt](https://github.com/mat635418/Inventorycorridor_ABAR/blob/main/requirements.txt)
+
+## 2. Calcolo Incentivo all'Esodo — Italian Labor Law Exit Incentive Calculator (v1.0)
+
+Complete calculator for exit incentives according to Italian labor law. Considers all variables including NASPI, regional cost of living, early retirement workers, strenuous work, complementary pension, and R.I.T.A.
+
+- Main app file: [incentivo_esodo.py](https://github.com/mat635418/Inventorycorridor_ABAR/blob/main/incentivo_esodo.py)
+- Documentation: [INCENTIVO_ESODO_DOCS.md](https://github.com/mat635418/Inventorycorridor_ABAR/blob/main/INCENTIVO_ESODO_DOCS.md)
+- CSV inputs: `lavoratori_esempio.csv`, `costo_vita_regionale.csv`
+
+**Core technologies**: Python, Streamlit, Plotly, NumPy/Pandas, SciPy
+
+**Requirements**: [requirements.txt](https://github.com/mat635418/Inventorycorridor_ABAR/blob/main/requirements.txt)
+
+---
+
+## Quick Start
+
+### Installing Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### Running MEIO Application
+
+```bash
+streamlit run MEIO.py
+```
+
+### Running Incentivo Esodo Calculator
+
+```bash
+streamlit run incentivo_esodo.py
+```
+
+---
+
+# MEIO for Raw Materials — Inventory Corridor
+
+## Overview
+
+This application implements a Multi‑Echelon Inventory Optimization (MEIO) workflow for raw materials, presented as a Streamlit app. It ingests historical sales and consumption, future demand forecasts, and network lead‑time data to compute safety stock, inventory corridors, service level tiering across network hops, and diagnostic views. It also provides visualizations of the network topology and exportable tables for analysis.
 
 ---
 
