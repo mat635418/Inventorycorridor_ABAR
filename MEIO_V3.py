@@ -455,7 +455,7 @@ def render_data_dictionary():
             **4. `Stock_Transit.csv` — Current Stock & Transit Position**
 
             Required columns:
-            - `Month/Year`: period in format MM/DD/YYYY
+            - `Month/Year`: period in format MM/DD/YY
             - `Plant ID`: location / node (string)
             - `Material ID`: product / material code (string)
             - `Stock`: current stock on hand (numeric)
@@ -1535,7 +1535,7 @@ if s_file and d_file and lt_file:
             df_stock = df_stock.rename(columns=stock_col_map)
             
             # Parse period and convert to timestamp
-            df_stock["Period"] = pd.to_datetime(df_stock["Period"], format="%m/%d/%Y", errors="coerce").dt.to_period("M").dt.to_timestamp()
+            df_stock["Period"] = pd.to_datetime(df_stock["Period"], format="%m/%d/%y", errors="coerce").dt.to_period("M").dt.to_timestamp()
             
             # Clean numeric columns
             for col in ["Current_Stock", "In_Transit", "Open_PO"]:
