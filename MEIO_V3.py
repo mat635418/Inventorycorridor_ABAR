@@ -1704,7 +1704,7 @@ if s_file and d_file and lt_file:
                     prev_stock = starting_stock
                     future_periods = group_idx
                 
-                # Calculate forward stock positions
+                # Calculate forward stock positions for future periods
                 for idx in future_periods:
                     forecast = results.loc[idx, "Forecast"]
                     transit = results.loc[idx, "In_Transit"]
@@ -1713,12 +1713,13 @@ if s_file and d_file and lt_file:
                     # Calculate: Next Stock = Previous Stock - Forecast + Transit + PO
                     next_stock = prev_stock - forecast + transit + po
                     
-                    # Ensure stock doesn't go negative
+                    # Apply floor of 0 to prevent negative stock values
+                    # (Stockouts are represented as zero inventory rather than negative values)
                     next_stock = max(0, next_stock)
                     
-                    # Update the Future_Stock_Position for this period
+                    # Update Future_Stock_Position with calculated projection
+                    # Note: Current_Stock remains 0 for future periods as it represents actual stock on hand
                     results.loc[idx, "Future_Stock_Position"] = next_stock
-                    results.loc[idx, "Current_Stock"] = next_stock
                     
                     # Update prev_stock for next iteration
                     prev_stock = next_stock
