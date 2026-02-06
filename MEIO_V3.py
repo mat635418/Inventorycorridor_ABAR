@@ -1654,6 +1654,49 @@ if s_file and d_file and lt_file:
         
         # Calculate future stock position: Current Stock + In Transit + Open PO
         results["Future_Stock_Position"] = results["Current_Stock"] + results["In_Transit"] + results["Open_PO"]
+        
+        # Calculate forward-looking stock positions for future months
+        # For months where stock data doesn't exist, calculate: Next_Stock = Prev_Stock - Forecast + (Transit + PO)
+        results = results.sort_values(["Product", "Location", "Period"])
+        
+        # Find the last period with actual stock data (non-zero stock or transit or PO)
+        stock_exists = (results["Current_Stock"] > 0) | (results["In_Transit"] > 0) | (results["Open_PO"] > 0)
+        
+        # Process each Product-Location combination
+        for (product, location), group in results.groupby(["Product", "Location"]):
+            group_idx = group.index
+            
+            # Find the last month with actual stock data
+            has_stock = stock_exists.loc[group_idx]
+            if has_stock.any():
+                last_stock_idx = has_stock[has_stock].index[-1]
+                last_stock_period = results.loc[last_stock_idx, "Period"]
+                
+                # Get all periods after the last stock data period
+                future_periods = group[group["Period"] > last_stock_period].index
+                
+                if len(future_periods) > 0:
+                    # Calculate rolling stock position for future months
+                    prev_stock = results.loc[last_stock_idx, "Future_Stock_Position"]
+                    
+                    for idx in future_periods:
+                        # Get forecast for this period
+                        forecast = results.loc[idx, "Forecast"]
+                        transit = results.loc[idx, "In_Transit"]
+                        po = results.loc[idx, "Open_PO"]
+                        
+                        # Calculate: Next Stock = Previous Stock - Forecast + Transit + PO
+                        next_stock = prev_stock - forecast + transit + po
+                        
+                        # Ensure stock doesn't go negative
+                        next_stock = max(0, next_stock)
+                        
+                        # Update the Future_Stock_Position for this period
+                        results.loc[idx, "Future_Stock_Position"] = next_stock
+                        results.loc[idx, "Current_Stock"] = next_stock
+                        
+                        # Update prev_stock for next iteration
+                        prev_stock = next_stock
     else:
         # Add empty columns if no stock data
         results["Current_Stock"] = 0
