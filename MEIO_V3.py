@@ -452,6 +452,16 @@ def render_data_dictionary():
             - `Lead_Time_Days`: average lead time (days)
             - `Lead_Time_Std_Dev`: standard deviation of lead time (days)
 
+            **4. `Stock_Transit.csv` — Current Stock & Transit Position**
+
+            Required columns:
+            - `Month/Year`: period in format MM/DD/YYYY
+            - `Plant ID`: location / node (string)
+            - `Material ID`: product / material code (string)
+            - `Stock`: current stock on hand (numeric)
+            - `in/transit`: units in transit (numeric)
+            - `Open PO`: open purchase orders (numeric)
+
             _Tip: use the sample templates from the project as a starting point._
             """,
             unsafe_allow_html=True,
@@ -1471,14 +1481,17 @@ DEFAULT_FILES = {
     "sales": "sales.csv",
     "demand": "demand.csv",
     "lt": "leadtime.csv",
+    "stock": "Stock_Transit.csv",
 }
 s_upload = st.sidebar.file_uploader("1. Sales Data (Historical: sales.csv)", type="csv")
 d_upload = st.sidebar.file_uploader("2. Demand Data (Future Forecast: demand.csv)", type="csv")
 lt_upload = st.sidebar.file_uploader("3. Lead Time Data (Network Routes: leadtime.csv)", type="csv")
+stock_upload = st.sidebar.file_uploader("4. Stock & Transit Data (Stock_Transit.csv)", type="csv")
 
 s_file = s_upload if s_upload is not None else (DEFAULT_FILES["sales"] if os.path.exists(DEFAULT_FILES["sales"]) else None)
 d_file = d_upload if d_upload is not None else (DEFAULT_FILES["demand"] if os.path.exists(DEFAULT_FILES["demand"]) else None)
 lt_file = lt_upload if lt_upload is not None else (DEFAULT_FILES["lt"] if os.path.exists(DEFAULT_FILES["lt"]) else None)
+stock_file = stock_upload if stock_upload is not None else (DEFAULT_FILES["stock"] if os.path.exists(DEFAULT_FILES["stock"]) else None)
 
 if s_file:
     st.sidebar.success(f"✅ Sales Loaded: {getattr(s_file, 'name', s_file)}")
@@ -1486,6 +1499,8 @@ if d_file:
     st.sidebar.success(f"✅ Demand Loaded: {getattr(d_file, 'name', d_file)}")
 if lt_file:
     st.sidebar.success(f"✅ Lead Time Loaded: {getattr(lt_file, 'name', lt_file)}")
+if stock_file:
+    st.sidebar.success(f"✅ Stock & Transit Loaded: {getattr(stock_file, 'name', stock_file)}")
 
 DEFAULT_PRODUCT_CHOICE = "NOKANDO2"
 DEFAULT_LOCATION_CHOICE = "DEW1"
@@ -1499,6 +1514,46 @@ if s_file and d_file and lt_file:
     except Exception as e:
         st.error(f"Error reading uploaded files: {e}")
         st.stop()
+
+    # Load stock & transit data if available
+    df_stock = None
+    if stock_file:
+        try:
+            # Read with flexible parsing to handle inconsistent column counts
+            df_stock = pd.read_csv(stock_file, on_bad_lines='skip')
+            df_stock.columns = [c.strip() for c in df_stock.columns]
+            
+            # Rename columns to match internal naming
+            stock_col_map = {
+                "Month/Year": "Period",
+                "Plant ID": "Location",
+                "Material ID": "Product",
+                "Stock": "Current_Stock",
+                "in/transit": "In_Transit",
+                "Open PO": "Open_PO"
+            }
+            df_stock = df_stock.rename(columns=stock_col_map)
+            
+            # Parse period and convert to timestamp
+            df_stock["Period"] = pd.to_datetime(df_stock["Period"], format="%m/%d/%Y", errors="coerce").dt.to_period("M").dt.to_timestamp()
+            
+            # Clean numeric columns
+            for col in ["Current_Stock", "In_Transit", "Open_PO"]:
+                if col in df_stock.columns:
+                    df_stock[col] = clean_numeric(df_stock[col])
+            
+            # Drop rows with invalid periods
+            bad_stock = df_stock["Period"].isna().sum()
+            if bad_stock > 0:
+                st.sidebar.warning(f"Stock_Transit.csv: {bad_stock} row(s) with invalid dates were dropped.")
+                df_stock = df_stock.dropna(subset=["Period"])
+            
+            # Keep only necessary columns
+            df_stock = df_stock[["Product", "Location", "Period", "Current_Stock", "In_Transit", "Open_PO"]].copy()
+            
+        except Exception as e:
+            st.sidebar.warning(f"Could not load Stock_Transit.csv: {e}. Continuing without stock data.")
+            df_stock = None
 
     for df in [df_s, df_d, df_lt]:
         df.columns = [c.strip() for c in df.columns]
@@ -1583,6 +1638,28 @@ if s_file and d_file and lt_file:
         hop2_sl=hop2_sl_global,
         hop3_sl=hop3_sl_global,
     )
+
+    # Merge stock data into results if available
+    if df_stock is not None and not df_stock.empty:
+        results = pd.merge(
+            results,
+            df_stock,
+            on=["Product", "Location", "Period"],
+            how="left"
+        )
+        # Fill NaN values with 0 for stock columns
+        for col in ["Current_Stock", "In_Transit", "Open_PO"]:
+            if col in results.columns:
+                results[col] = results[col].fillna(0)
+        
+        # Calculate future stock position: Current Stock + In Transit + Open PO
+        results["Future_Stock_Position"] = results["Current_Stock"] + results["In_Transit"] + results["Open_PO"]
+    else:
+        # Add empty columns if no stock data
+        results["Current_Stock"] = 0
+        results["In_Transit"] = 0
+        results["Open_PO"] = 0
+        results["Future_Stock_Position"] = 0
 
     hist = df_s[["Product", "Location", "Period", "Consumption", "Forecast"]].copy()
     hist.rename(columns={"Forecast": "Forecast_Hist"}, inplace=True)
@@ -1711,8 +1788,13 @@ if s_file and d_file and lt_file:
                     srow = summary_row.iloc[0]
                     avg_daily = srow.get("D_day", np.nan)
                     days_cov = srow.get("Days_Covered_by_SS", np.nan)
+                    curr_stock = srow.get("Current_Stock", 0)
+                    future_stock = srow.get("Future_Stock_Position", 0)
+                    
                     avg_daily_val = f"{avg_daily:.2f}" if pd.notna(avg_daily) else ""
                     days_cov_val = f"{days_cov:.1f}" if pd.notna(days_cov) else ""
+                    curr_stock_val = f"{int(curr_stock):,}".replace(",", ".") if pd.notna(curr_stock) else "0"
+                    future_stock_val = f"{int(future_stock):,}".replace(",", ".") if pd.notna(future_stock) else "0"
 
                     kpi_html = f"""
                     <table class="kpi-2x2-table">
@@ -1723,6 +1805,14 @@ if s_file and d_file and lt_file:
                       <tr>
                         <td class="kpi-value">{avg_daily_val}</td>
                         <td class="kpi-value">{days_cov_val}</td>
+                      </tr>
+                      <tr>
+                        <td class="kpi-label">Current Stock<br/>[units]</td>
+                        <td class="kpi-label">Future Stock Position<br/>[units]</td>
+                      </tr>
+                      <tr>
+                        <td class="kpi-value">{curr_stock_val}</td>
+                        <td class="kpi-value">{future_stock_val}</td>
                       </tr>
                     </table>
                     """
@@ -1736,18 +1826,23 @@ if s_file and d_file and lt_file:
 
             plot_df = results[(results["Product"] == sku) & (results["Location"] == loc)].sort_values("Period")
             df_all_periods = pd.DataFrame({"Period": all_periods})
+            
+            # Include stock columns in the merge
+            stock_cols = ["Current_Stock", "In_Transit", "Open_PO", "Future_Stock_Position"]
+            available_stock_cols = [col for col in stock_cols if col in plot_df.columns]
+            
+            merge_cols = [
+                "Period",
+                "Max_Corridor",
+                "Safety_Stock",
+                "Forecast",
+                "Agg_Future_Internal",
+                "Agg_Future_External",
+            ] + available_stock_cols
+            
             plot_full = pd.merge(
                 df_all_periods,
-                plot_df[
-                    [
-                        "Period",
-                        "Max_Corridor",
-                        "Safety_Stock",
-                        "Forecast",
-                        "Agg_Future_Internal",
-                        "Agg_Future_External",
-                    ]
-                ],
+                plot_df[merge_cols],
                 on="Period",
                 how="left",
             )
@@ -1757,7 +1852,7 @@ if s_file and d_file and lt_file:
                 "Forecast",
                 "Agg_Future_Internal",
                 "Agg_Future_External",
-            ]
+            ] + available_stock_cols
             plot_full[num_cols] = plot_full[num_cols].fillna(0)
 
             def int_dot(v):
@@ -1828,6 +1923,41 @@ if s_file and d_file and lt_file:
                     customdata=plot_full["Agg_Future_External"].apply(int_dot),
                 )
             )
+            
+            # Add stock position traces if data is available
+            if "Current_Stock" in plot_full.columns and plot_full["Current_Stock"].sum() > 0:
+                fig.add_trace(
+                    go.Scatter(
+                        x=plot_full["Period"],
+                        y=plot_full["Current_Stock"],
+                        name="Current Stock",
+                        mode="lines+markers",
+                        line=dict(color="#ff6f00", width=2.5),
+                        marker=dict(size=7, symbol="diamond"),
+                        hovertemplate=(
+                            "Period: %{x|%b %Y}<br>"
+                            "Current Stock: %{customdata} units<extra></extra>"
+                        ),
+                        customdata=plot_full["Current_Stock"].apply(int_dot),
+                    )
+                )
+            
+            if "Future_Stock_Position" in plot_full.columns and plot_full["Future_Stock_Position"].sum() > 0:
+                fig.add_trace(
+                    go.Scatter(
+                        x=plot_full["Period"],
+                        y=plot_full["Future_Stock_Position"],
+                        name="Future Stock Position (Stock + Transit + PO)",
+                        mode="lines+markers",
+                        line=dict(color="#c62828", width=2.5, dash="dashdot"),
+                        marker=dict(size=7, symbol="square"),
+                        hovertemplate=(
+                            "Period: %{x|%b %Y}<br>"
+                            "Future Stock: %{customdata} units<extra></extra>"
+                        ),
+                        customdata=plot_full["Future_Stock_Position"].apply(int_dot),
+                    )
+                )
 
             if CURRENT_MONTH_TS in plot_full["Period"].values:
                 cm = CURRENT_MONTH_TS
@@ -2560,10 +2690,15 @@ with tab3:
             "Agg_Future_Demand": "Net Dem [unit]",
             "Agg_Future_Internal": "Local Dem [unit]",
             "Agg_Future_External": "NW Dem [unit]",
+            "Current_Stock": "Stock [unit]",
+            "In_Transit": "Transit [unit]",
+            "Open_PO": "Open PO [unit]",
+            "Future_Stock_Position": "Future Stock [unit]",
         }
         display_cols = [c for c in [
             "Product", "Location", "Period_Label", "Forecast", "D_day", "Safety_Stock",
-            "Days_Covered_by_SS", "Adjustment_Status", "Agg_Future_Demand", "Agg_Future_Internal", "Agg_Future_External"
+            "Days_Covered_by_SS", "Adjustment_Status", "Agg_Future_Demand", "Agg_Future_Internal", "Agg_Future_External",
+            "Current_Stock", "In_Transit", "Open_PO", "Future_Stock_Position"
         ] if c in display_df.columns]
         nice = display_df[display_cols].copy()
         nice = nice.rename(columns=col_map)
@@ -2602,6 +2737,10 @@ with tab3:
             "Net Dem [unit]": _fmt_int,
             "Local Dem [unit]": _fmt_int,
             "NW Dem [unit]": _fmt_int,
+            "Stock [unit]": _fmt_int,
+            "Transit [unit]": _fmt_int,
+            "Open PO [unit]": _fmt_int,
+            "Future Stock [unit]": _fmt_int,
         }
         # Add light red highlighting to SS column (PR #4)
         ss_highlight = {'background-color': '#ffcccc'}
@@ -4009,7 +4148,14 @@ with tab8:
             Max_Corridor=("Max_Corridor", "sum"),
             Avg_Day_Demand=("Forecast", lambda x: x.sum() / days_per_month if days_per_month > 0 else 0),
             Nodes=("Location", "nunique"),
+            Current_Stock=("Current_Stock", "sum") if "Current_Stock" in snapshot_all.columns else None,
+            In_Transit=("In_Transit", "sum") if "In_Transit" in snapshot_all.columns else None,
+            Open_PO=("Open_PO", "sum") if "Open_PO" in snapshot_all.columns else None,
+            Future_Stock_Position=("Future_Stock_Position", "sum") if "Future_Stock_Position" in snapshot_all.columns else None,
         )
+        
+        # Remove None columns if stock data wasn't available
+        agg_all = agg_all.dropna(axis=1, how='all')
         if "Tier_Hops" in snapshot_all.columns:
             end_nodes = (
                 snapshot_all[snapshot_all["Tier_Hops"] == 0]
@@ -4138,6 +4284,13 @@ with tab8:
             cards_html_parts = [
                 '<div class="mat-strip-container"><div class="mat-cards-row">'
             ]
+            
+            # Determine if we have stock columns
+            has_stock = "Current_Stock" in agg_view.columns
+            
+            # Adjust grid columns based on whether we have stock data
+            grid_cols = "150px repeat(4, minmax(110px, 1fr))" if not has_stock else "150px repeat(6, minmax(90px, 1fr))"
+            
             for _, r in agg_view.iterrows():
                 prod = str(r["Product"])
                 avg_daily = r["Avg_Day_Demand"]
@@ -4149,8 +4302,9 @@ with tab8:
                 cov_txt = fmt_int(ss_cov)
                 fc_txt = fmt_int(local_fc)
                 pill_cov_cls = 'mat-pill-red' if ss_cov < alarm_threshold else 'mat-pill-green'
+                
                 card_html = (
-                    '<div class="mat-card">'
+                    f'<div class="mat-card" style="grid-template-columns: {grid_cols};">'
                     '<div style="display:flex;align-items:center;">'
                     '<div class="mat-product-badge">'
                     '<span class="mat-product-chevron">▶</span>'
@@ -4177,8 +4331,27 @@ with tab8:
                     f'<span class="mat-pill-grey">{fc_txt}</span>'
                     "</div>"
                     "</div>"
-                    "</div>"
                 )
+                
+                # Add stock columns if available
+                if has_stock:
+                    curr_stock = r.get("Current_Stock", 0)
+                    future_stock = r.get("Future_Stock_Position", 0)
+                    curr_stock_txt = fmt_int(curr_stock)
+                    future_stock_txt = fmt_int(future_stock)
+                    
+                    card_html += (
+                        '<div>'
+                        '<div class="mat-card-col-header">Current Stock</div>'
+                        f'<div class="mat-card-col-value">{curr_stock_txt}</div>'
+                        "</div>"
+                        '<div>'
+                        '<div class="mat-card-col-header">Future Stock</div>'
+                        f'<div class="mat-card-col-value">{future_stock_txt}</div>'
+                        "</div>"
+                    )
+                
+                card_html += "</div>"
                 cards_html_parts.append(card_html)
             cards_html_parts.append("</div></div>")
             final_html = "".join(cards_html_parts)
